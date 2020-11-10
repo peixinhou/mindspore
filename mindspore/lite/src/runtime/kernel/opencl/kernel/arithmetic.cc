@@ -106,7 +106,7 @@ int ArithmeticOpenCLKernel::InitBuffer() {
           // scalar
           weight[3] = weight[2] = weight[1] = weight[0];
         }
-        auto weight_ptr_ = allocator->CreateImageFromHost(weight, pack_weight_size, img_size);
+        auto weight_ptr_ = allocator->Malloc(pack_weight_size, img_size, weight);
         inputs_weight_ptrs_.push_back(weight_ptr_);
         delete[] weight;
       } else {
@@ -127,7 +127,7 @@ int ArithmeticOpenCLKernel::InitBuffer() {
           // scalar
           weight[3] = weight[2] = weight[1] = weight[0];
         }
-        auto weight_ptr_ = allocator->CreateImageFromHost(weight, pack_weight_size, img_size);
+        auto weight_ptr_ = allocator->Malloc(pack_weight_size, img_size, weight);
         inputs_weight_ptrs_.push_back(weight_ptr_);
         delete[] weight;
       }
