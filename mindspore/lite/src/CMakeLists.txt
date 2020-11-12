@@ -58,9 +58,6 @@ if (SUPPORT_TRAIN)
     set(LITE_SRC
             ${LITE_SRC}
             ${ANF_SRC}
-            ${CMAKE_CURRENT_SOURCE_DIR}/train/train_populate_parameter.cc
-            ${CMAKE_CURRENT_SOURCE_DIR}/train/train_session.cc
-            ${CMAKE_CURRENT_SOURCE_DIR}/train/train_model.cc
             ${CMAKE_CURRENT_SOURCE_DIR}/lite_session.cc
             )
 endif ()

@@ -214,10 +214,6 @@ endif()
 if (SUPPORT_TRAIN)
     set(TEST_LITE_SRC
             ${TEST_LITE_SRC}
-           # ${LITE_DIR}/src/train/ops/train_ops.cc
-            ${LITE_DIR}/src/train/train_populate_parameter.cc
-            ${LITE_DIR}/src/train/train_session.cc
-            ${LITE_DIR}/src/train/train_model.cc
             ${LITE_DIR}/src/lite_session.cc
             )
 else()
