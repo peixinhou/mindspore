@@ -41,10 +41,10 @@ class QuantizedAddCPUKernel : public LiteKernel {
  private:
   const lite::InnerContext *ctx_;
   AddQuantParameter para_;
-  ArithmeticParameter *arith_para_;
-  int thread_count_;
-  int64_t elements_num_;
-  int64_t count_unit_;
+  ArithmeticParameter *arith_para_ = nullptr;
+  int thread_count_ = 1;
+  int64_t elements_num_ = 0;
+  int64_t count_unit_ = 0;
   int8_t *input0_data_ = nullptr;
   int8_t *input1_data_ = nullptr;
   int8_t *output_data_ = nullptr;
