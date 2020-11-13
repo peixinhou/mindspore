@@ -21,6 +21,7 @@
 
 namespace mindspore::lite {
 bool ConvertNodes(const schema::MetaGraph *meta_graph, Model *model) {
+  MS_ASSERT(meta_graph->nodes() != nullptr);
   for (size_t i = 0; i < meta_graph->nodes()->size(); ++i) {
     auto *node = new (std::nothrow) Model::Node();
     if (node == nullptr) {
@@ -29,6 +30,7 @@ bool ConvertNodes(const schema::MetaGraph *meta_graph, Model *model) {
     }
     auto c_node = meta_graph->nodes()->GetAs<schema::CNode>(i);
     auto src_prim = c_node->primitive();
+    MS_ASSERT(src_prim != nullptr);
 #ifdef PRIMITIVE_WRITEABLE
     node->primitive_ = PrimitiveC::Create(const_cast<schema::Primitive *>(src_prim));
 #else
@@ -41,16 +43,18 @@ bool ConvertNodes(const schema::MetaGraph *meta_graph, Model *model) {
       return false;
     }
     node->primitive_->SetQuantType(c_node->quantType());
+    MS_ASSERT(c_node->name() != nullptr);
     node->name_ = c_node->name()->c_str();
     node->node_type_ = c_node->nodeType();
+    MS_ASSERT(c_node->inputIndex() != nullptr);
     auto count = c_node->inputIndex()->size();
     for (uint32_t j = 0; j < count; ++j) {
-      node->input_indices_.push_back(size_t(c_node->inputIndex()->GetAs<uint32_t>(j)));
+      node->input_indices_.push_back(c_node->inputIndex()->Get(j));
     }
     if (c_node->outputIndex() != nullptr) {
       count = c_node->outputIndex()->size();
       for (uint32_t j = 0; j < count; ++j) {
-        node->output_indices_.push_back(size_t(c_node->outputIndex()->GetAs<uint32_t>(j)));
+        node->output_indices_.push_back(c_node->outputIndex()->Get(j));
       }
     }
     model->all_nodes_.push_back(node);
@@ -59,6 +63,7 @@ bool ConvertNodes(const schema::MetaGraph *meta_graph, Model *model) {
 }
 
 bool ConvertTensors(const schema::MetaGraph *meta_graph, Model *model) {
+  MS_ASSERT(meta_graph->allTensors() != nullptr);
   auto tensor_count = meta_graph->allTensors()->size();
   for (uint32_t i = 0; i < tensor_count; ++i) {
     auto *tensor = meta_graph->allTensors()->GetAs<schema::Tensor>(i);
@@ -79,22 +84,27 @@ int ConvertSubGraph(const schema::SubGraph *sub_graph, Model *model) {
     MS_LOG(ERROR) << "new subGraph fail!";
     return RET_ERROR;
   }
+  MS_ASSERT(sub_graph->name() != nullptr);
   sub_graph_temp->name_ = sub_graph->name()->c_str();
+  MS_ASSERT(sub_graph->inputIndices() != nullptr);
   auto in_count = sub_graph->inputIndices()->size();
   for (uint32_t i = 0; i < in_count; ++i) {
-    sub_graph_temp->input_indices_.push_back(size_t(sub_graph->inputIndices()->GetAs<uint32_t>(i)));
+    sub_graph_temp->input_indices_.push_back(sub_graph->inputIndices()->Get(i));
   }
+  MS_ASSERT(sub_graph->outputIndices() != nullptr);
   auto out_count = sub_graph->outputIndices()->size();
   for (uint32_t i = 0; i < out_count; ++i) {
-    sub_graph_temp->output_indices_.push_back(size_t(sub_graph->outputIndices()->GetAs<uint32_t>(i)));
+    sub_graph_temp->output_indices_.push_back(sub_graph->outputIndices()->Get(i));
   }
+  MS_ASSERT(sub_graph->nodeIndices() != nullptr);
   auto node_count = sub_graph->nodeIndices()->size();
   for (uint32_t i = 0; i < node_count; ++i) {
-    sub_graph_temp->node_indices_.push_back(size_t(sub_graph->nodeIndices()->GetAs<uint32_t>(i)));
+    sub_graph_temp->node_indices_.push_back(sub_graph->nodeIndices()->Get(i));
   }
-  auto tensor_count = sub_graph->nodeIndices()->size();
+  MS_ASSERT(sub_graph->tensorIndices() != nullptr);
+  auto tensor_count = sub_graph->tensorIndices()->size();
   for (uint32_t i = 0; i < tensor_count; ++i) {
-    sub_graph_temp->tensor_indices_.push_back(size_t(sub_graph->tensorIndices()->GetAs<uint32_t>(i)));
+    sub_graph_temp->tensor_indices_.push_back(sub_graph->tensorIndices()->Get(i));
   }
   model->sub_graphs_.push_back(sub_graph_temp);
   return RET_OK;
@@ -111,19 +121,23 @@ int MetaGraphMappingSubGraph(const mindspore::schema::MetaGraph *meta_graph, Mod
   if (meta_graph->name() != nullptr) {
     sub_graph_temp->name_ = meta_graph->name()->c_str();
   }
+  MS_ASSERT(meta_graph->inputIndex() != nullptr);
   auto in_count = meta_graph->inputIndex()->size();
   for (uint32_t i = 0; i < in_count; ++i) {
-    sub_graph_temp->input_indices_.push_back(size_t(meta_graph->inputIndex()->GetAs<uint32_t>(i)));
+    sub_graph_temp->input_indices_.push_back(meta_graph->inputIndex()->Get(i));
   }
+  MS_ASSERT(meta_graph->outputIndex() != nullptr);
   auto out_count = meta_graph->outputIndex()->size();
   for (uint32_t i = 0; i < out_count; ++i) {
-    sub_graph_temp->output_indices_.push_back(size_t(meta_graph->outputIndex()->GetAs<uint32_t>(i)));
+    sub_graph_temp->output_indices_.push_back(meta_graph->outputIndex()->Get(i));
   }
+  MS_ASSERT(meta_graph->nodes() != nullptr);
   auto node_count = meta_graph->nodes()->size();
   for (uint32_t i = 0; i < node_count; ++i) {
     sub_graph_temp->node_indices_.push_back(i);
   }
-  auto tensor_count = meta_graph->nodes()->size();
+  MS_ASSERT(meta_graph->allTensors() != nullptr);
+  auto tensor_count = meta_graph->allTensors()->size();
   for (uint32_t i = 0; i < tensor_count; ++i) {
     sub_graph_temp->tensor_indices_.push_back(i);
   }
