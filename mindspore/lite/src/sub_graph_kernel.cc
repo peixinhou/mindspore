@@ -17,7 +17,8 @@
 #include "src/sub_graph_kernel.h"
 #include "src/tensor.h"
 #ifdef ENABLE_ARM64
-#include "nnacl/optimized_kernel.h"
+#include "src/common/utils.h"
+#include "src/runtime/kernel/arm/fp16/fp16_op_handler.h"
 #endif
 
 namespace mindspore::kernel {
@@ -182,9 +183,9 @@ int CpuFp16SubGraph::PreProcess() {
 }
 
 int CpuFp16SubGraph::PostProcess() {
-  auto fp16_to_fp32_cast_func = Float16CastUtil::GetInstance()->float16_to_float32_func_;
-  if (fp16_to_fp32_cast_func == nullptr) {
-    MS_LOG(ERROR) << "Can not find cast fp16 to fp32 func";
+#ifdef ENABLE_ARM64
+  if (!mindspore::lite::IsSupportFloat16()) {
+    MS_LOG(ERROR) << "Unsupport fp16 in this devices";
     return RET_ERROR;
   }
   for (auto tensor : this->out_tensors_) {
@@ -204,7 +205,7 @@ int CpuFp16SubGraph::PostProcess() {
         return RET_ERROR;
       }
       MS_ASSERT(tensor->data_c() != nullptr);
-      fp16_to_fp32_cast_func(float16_data, tensor->data_c(), tensor->ElementsNum());
+      Float16ToFloat32_fp16_handler(float16_data, tensor->data_c(), tensor->ElementsNum());
       if (tensor->allocator() != nullptr) {
         tensor->allocator()->Free(float16_data);
       } else {
@@ -213,5 +214,8 @@ int CpuFp16SubGraph::PostProcess() {
     }
   }
   return RET_OK;
+#else
+  return RET_OK;
+#endif
 }
 }  // namespace mindspore::kernel
