@@ -18,9 +18,6 @@
 
 void TransposeDim2Fp32(const float *in_data, float *out_data, const int *strides, int *out_strides, const int *perm,
                        const int *output_shape, int h_start, int h_end) {
-  if (perm[0] < 0 || perm[1] < 0) {
-    return;
-  }
   const int stride0 = strides[perm[0]];
   const int stride1 = strides[perm[1]];
   const int output0 = output_shape[0];
@@ -36,11 +33,6 @@ void TransposeDim2Fp32(const float *in_data, float *out_data, const int *strides
 
 void TransposeDim3Fp32(const float *in_data, float *out_data, const int *strides, const int *out_strides,
                        const int *perm, const int *output_shape, int h_start, int h_end) {
-  for (int i = 0; i < 3; ++i) {
-    if (perm[i] < 0) {
-      return;
-    }
-  }
   const int stride0 = strides[perm[0]];
   const int stride1 = strides[perm[1]];
   const int stride2 = strides[perm[2]];
@@ -64,11 +56,6 @@ void TransposeDim3Fp32(const float *in_data, float *out_data, const int *strides
 
 void TransposeDim4Fp32(const float *in_data, float *out_data, const int *strides, const int *out_strides,
                        const int *perm, const int *output_shape, int h_start, int h_end) {
-  for (int i = 0; i < 4; ++i) {
-    if (perm[i] < 0) {
-      return;
-    }
-  }
   const int stride0 = strides[perm[0]];
   const int stride1 = strides[perm[1]];
   const int stride2 = strides[perm[2]];
@@ -101,11 +88,6 @@ void TransposeDim4Fp32(const float *in_data, float *out_data, const int *strides
 
 void TransposeDim5Fp32(const float *in_data, float *out_data, const int *strides, const int *out_strides,
                        const int *perm, const int *output_shape, int h_start, int h_end) {
-  for (int i = 0; i < 5; ++i) {
-    if (perm[i] < 0) {
-      return;
-    }
-  }
   const int stride0 = strides[perm[0]];
   const int stride1 = strides[perm[1]];
   const int stride2 = strides[perm[2]];
@@ -193,6 +175,11 @@ int DoTransposeFp32(const float *in_data, float *out_data, int *input_shape, con
   if (!needTranspose) {
     (void)memcpy(out_data, in_data, data_size);
     return NNACL_OK;
+  }
+  for (int i = 0; i < num_axes; ++i) {
+    if (perm[i] < 0) {
+      return NNACL_PARAM_INVALID;
+    }
   }
   if (num_axes == 2) {
     TransposeDim2Fp32(in_data, out_data, strides, out_strides, perm, output_shape, h_start, h_end);
