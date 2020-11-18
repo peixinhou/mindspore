@@ -102,7 +102,7 @@ int QuantDTypeCastFp16CPUKernel::QuantDTypeCast(int task_id) {
   return RET_OK;
 }
 
-int QuantDTypeCastRun(void *cdata, int task_id) {
+int QuantDTypeCastFP16Run(void *cdata, int task_id) {
   auto g_kernel = reinterpret_cast<QuantDTypeCastFp16CPUKernel *>(cdata);
   auto ret = g_kernel->QuantDTypeCast(task_id);
   if (ret != RET_OK) {
@@ -122,11 +122,11 @@ int QuantDTypeCastFp16CPUKernel::Run() {
     float16_ptr_ = reinterpret_cast<float16_t *>(in_tensors_[0]->data_c());
     int8_ptr_ = reinterpret_cast<int8_t *>(out_tensors_[0]->data_c());
   } else {
-    MS_LOG(ERROR) << "QuantDTypeCastFp16 not support input or output type";
+    MS_LOG(ERROR) << "QuantDTypeCastFP16Run not support input or output type";
     return RET_ERROR;
   }
 
-  auto ret = ParallelLaunch(this->context_->thread_pool_, QuantDTypeCastRun, this, thread_n_num_);
+  auto ret = ParallelLaunch(this->context_->thread_pool_, QuantDTypeCastFP16Run, this, thread_n_num_);
   if (ret != RET_OK) {
     MS_LOG(ERROR) << "Scale error error_code[" << ret << "]";
     return RET_ERROR;
