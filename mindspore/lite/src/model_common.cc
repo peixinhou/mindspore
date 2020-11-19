@@ -29,6 +29,7 @@ bool ConvertNodes(const schema::MetaGraph *meta_graph, Model *model) {
       return false;
     }
     auto c_node = meta_graph->nodes()->GetAs<schema::CNode>(i);
+    MS_ASSERT(c_node != nullptr);
     auto src_prim = c_node->primitive();
     MS_ASSERT(src_prim != nullptr);
 #ifdef PRIMITIVE_WRITEABLE
@@ -63,6 +64,8 @@ bool ConvertNodes(const schema::MetaGraph *meta_graph, Model *model) {
 }
 
 bool ConvertTensors(const schema::MetaGraph *meta_graph, Model *model) {
+  MS_ASSERT(model != nullptr);
+  MS_ASSERT(meta_graph != nullptr);
   MS_ASSERT(meta_graph->allTensors() != nullptr);
   auto tensor_count = meta_graph->allTensors()->size();
   for (uint32_t i = 0; i < tensor_count; ++i) {
@@ -165,13 +168,13 @@ Model *ImportFromBuffer(const char *model_buf, size_t size, bool take_buf) {
   } else {
     if (size == 0) {
       MS_LOG(ERROR) << "malloc size is equal to 0";
-      delete (model);
+      delete model;
       return nullptr;
     }
     model->buf = reinterpret_cast<char *>(malloc(size));
     if (model->buf == nullptr) {
       MS_LOG(ERROR) << "new inner model buf fail!";
-      delete (model);
+      delete model;
       return nullptr;
     }
     memcpy(model->buf, model_buf, size);
@@ -180,7 +183,7 @@ Model *ImportFromBuffer(const char *model_buf, size_t size, bool take_buf) {
   auto meta_graph = schema::GetMetaGraph(model->buf);
   if (meta_graph == nullptr) {
     MS_LOG(ERROR) << "meta_graph is nullptr!";
-    delete (model);
+    delete model;
     return nullptr;
   }
 
@@ -209,6 +212,7 @@ Model *ImportFromBuffer(const char *model_buf, size_t size, bool take_buf) {
     int ret = MetaGraphMappingSubGraph(meta_graph, model);
     if (ret != RET_OK) {
       MS_LOG(ERROR) << "converter old version model wrong.";
+      delete model;
       return nullptr;
     }
   } else {
@@ -219,11 +223,13 @@ Model *ImportFromBuffer(const char *model_buf, size_t size, bool take_buf) {
       int ret = ConvertSubGraph(sub_graph, model);
       if (ret != RET_OK) {
         MS_LOG(ERROR) << "converter subgraph wrong.";
+        delete model;
         return nullptr;
       }
     }
   }
   if (model->sub_graphs_.empty()) {
+    delete model;
     return nullptr;
   }
   return model;
