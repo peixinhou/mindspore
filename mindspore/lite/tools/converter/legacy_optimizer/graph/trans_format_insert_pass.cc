@@ -14,17 +14,14 @@
  * limitations under the License.
  */
 
-#include <string>
 #include <memory>
 #include <vector>
-#include <utility>
 #include "tools/converter/legacy_optimizer/graph/trans_format_insert_pass.h"
 #include "tools/common/node_util.h"
 #include "src/common/log_adapter.h"
 #include "src/common/utils.h"
 
-namespace mindspore {
-namespace lite {
+namespace mindspore::lite {
 bool TransOpInsertPass::CanFusion(schema::MetaGraphT *graph, const std::unique_ptr<CNodeT> &node) {
   auto input_node_indexes = GetInputNodeIdx(*graph, *node);
   pre_type_ = schema::PrimitiveType_NONE;
@@ -90,7 +87,6 @@ bool TransOpInsertPass::CanFusion(schema::MetaGraphT *graph, const std::unique_p
   if (GetCNodeTType(*node) == schema::PrimitiveType_Activation) {
     MS_ASSERT(node != nullptr);
     MS_ASSERT(node->primitive != nullptr);
-    MS_ASSERT(node->primitive->value != nullptr);
     MS_ASSERT(node->primitive->value.AsActivation() != nullptr);
     if (node->primitive->value.AsActivation() != nullptr &&
         node->primitive->value.AsActivation()->type == schema::ActivationType_LEAKY_RELU) {
@@ -131,7 +127,6 @@ STATUS TransOpInsertPass::ChangeOpAxis(schema::MetaGraphT *graph, const std::uni
     MS_LOG(ERROR) << "node or primitive null";
     return RET_NULL_PTR;
   }
-  MS_ASSERT(node->primitive->value != nullptr);
   auto type = node->primitive->value.type;
   auto input1_ndim = graph->allTensors.at(node->inputIndex[0])->dims.size();
   if (input1_ndim != 4) {
@@ -147,14 +142,14 @@ STATUS TransOpInsertPass::ChangeOpAxis(schema::MetaGraphT *graph, const std::uni
     }
   }
   if (type == PrimitiveType_Concat) {
-    MS_ASSERT(node->primitive->value.AsConcat() != nullptr);
-    auto origin_axis = node->primitive->value.AsConcat()->axis;
-    auto axis_map = GetNc2NhAxisMap();
-    if (node->primitive->value.AsConcat() == nullptr) {
+    auto attr = node->primitive->value.AsConcat();
+    if (attr == nullptr) {
       MS_LOG(ERROR) << "node->primitive->value.AsConcat() is nullptr";
       return RET_NULL_PTR;
     }
-    node->primitive->value.AsConcat()->axis = axis_map[origin_axis];
+    auto origin_axis = attr->axis;
+    auto axis_map = GetNc2NhAxisMap();
+    attr->axis = axis_map[origin_axis];
   }
   if (type == PrimitiveType_StridedSlice) {
     auto attr = node->primitive->value.AsStridedSlice();
@@ -170,25 +165,25 @@ STATUS TransOpInsertPass::ChangeOpAxis(schema::MetaGraphT *graph, const std::uni
     attr->stride = {origin_stride[NCHW_N], origin_stride[NCHW_H], origin_stride[NCHW_W], origin_stride[NCHW_C]};
   }
   if (type == PrimitiveType_Split) {
-    MS_ASSERT(node->primitive->value.AsSplit() != nullptr);
-    auto origin_axis = node->primitive->value.AsSplit()->splitDim;
-    auto axis_map = GetNc2NhAxisMap();
-    if (node->primitive->value.AsSplit() == nullptr) {
+    auto attr = node->primitive->value.AsSplit();
+    if (attr == nullptr) {
       MS_LOG(ERROR) << "node->primitive->value.AsSplit() is nullptr";
       return RET_NULL_PTR;
     }
-    node->primitive->value.AsSplit()->splitDim = axis_map[origin_axis];
+    auto origin_axis = attr->splitDim;
+    auto axis_map = GetNc2NhAxisMap();
+    attr->splitDim = axis_map[origin_axis];
   }
   if (type == PrimitiveType_Crop) {
-    MS_ASSERT(node->primitive->value.AsCrop() != nullptr);
-    auto origin_axis = node->primitive->value.AsCrop()->axis;
-    auto offsets = node->primitive->value.AsCrop()->offsets;
-    auto axis_map = GetNc2NhAxisMap();
-    if (node->primitive->value.AsCrop() == nullptr) {
+    auto attr = node->primitive->value.AsCrop();
+    if (attr == nullptr) {
       MS_LOG(ERROR) << "node->primitive->value.AsCrop() is nullptr";
       return RET_NULL_PTR;
     }
-    node->primitive->value.AsCrop()->axis = axis_map[origin_axis];
+    auto origin_axis = attr->axis;
+    auto offsets = attr->offsets;
+    auto axis_map = GetNc2NhAxisMap();
+    attr->axis = axis_map[origin_axis];
     // nchw->nhwc,offsets need pad 0;
     if (axis_map[origin_axis] == 0) {
       offsets = {offsets[0], offsets[2], offsets[3], offsets[1]};
@@ -203,7 +198,7 @@ STATUS TransOpInsertPass::ChangeOpAxis(schema::MetaGraphT *graph, const std::uni
       MS_LOG(ERROR) << "Crop error";
       return RET_ERROR;
     }
-    node->primitive->value.AsCrop()->offsets = offsets;
+    attr->offsets = offsets;
   }
   if (type == PrimitiveType_Slice) {
     auto attr = node->primitive->value.AsSlice();
@@ -278,5 +273,4 @@ STATUS TransOpInsertPass::Run(schema::MetaGraphT *graph) {
   }
   return RET_OK;
 }
-}  // namespace lite
-}  // namespace mindspore
+}  // namespace mindspore::lite

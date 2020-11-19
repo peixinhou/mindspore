@@ -37,7 +37,7 @@ class TransOpInsertPass : public FormatTransPass {
 
   STATUS FindOutTransType();
 
-  STATUS ChangeOpAxis(schema::MetaGraphT *graph, const std::unique_ptr<CNodeT> &node);
+  static STATUS ChangeOpAxis(schema::MetaGraphT *graph, const std::unique_ptr<CNodeT> &node);
 
  private:
   FormatTransNodeType pre_insert_trans_type_ = kNHWC2NCHW;
