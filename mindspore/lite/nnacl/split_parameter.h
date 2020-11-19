@@ -19,13 +19,13 @@
 
 #include "nnacl/op_base.h"
 #include "nnacl/quantization/quantize.h"
-
+#define SPLIT_STRIDES_SIZE 32
 typedef struct SplitParameter {
   OpParameter op_parameter_;
   SplitQuantArg quant_arg_;
   int num_split_;
-  int split_sizes_[32];
-  int strides_[32];
+  int split_sizes_[SPLIT_STRIDES_SIZE];
+  int strides_[SPLIT_STRIDES_SIZE];
   int split_dim_;
   int n_dims_;
   int split_count_;
