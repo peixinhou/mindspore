@@ -75,6 +75,8 @@ std::vector<Tensor *> GetCNodeInputTensors(const CNodePtr &CNode) {
 }
 
 ParameterPtr CreateNewParamter(const FuncGraphPtr &func_graph, Tensor *tensor) {
+  MS_ASSERT(func_graph != nullptr);
+  MS_ASSERT(tensor != nullptr);
   auto parameter = func_graph->add_parameter();
   std::vector<int> shape(tensor->shape());
   auto type_id = static_cast<TypeId>(tensor->data_type());
