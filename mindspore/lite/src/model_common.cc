@@ -21,7 +21,12 @@
 
 namespace mindspore::lite {
 bool ConvertNodes(const schema::MetaGraph *meta_graph, Model *model) {
-  MS_ASSERT(meta_graph->nodes() != nullptr);
+  MS_ASSERT(model != nullptr);
+  MS_ASSERT(meta_graph != nullptr);
+  if (meta_graph->nodes() == nullptr) {
+    MS_LOG(ERROR) << "meta_graph is invalid, please check your model file.";
+    return false;
+  }
   for (size_t i = 0; i < meta_graph->nodes()->size(); ++i) {
     auto *node = new (std::nothrow) Model::Node();
     if (node == nullptr) {
@@ -66,7 +71,10 @@ bool ConvertNodes(const schema::MetaGraph *meta_graph, Model *model) {
 bool ConvertTensors(const schema::MetaGraph *meta_graph, Model *model) {
   MS_ASSERT(model != nullptr);
   MS_ASSERT(meta_graph != nullptr);
-  MS_ASSERT(meta_graph->allTensors() != nullptr);
+  if (meta_graph->allTensors() == nullptr) {
+    MS_LOG(ERROR) << "meta_graph is invalid, please check your model file.";
+    return false;
+  }
   auto tensor_count = meta_graph->allTensors()->size();
   for (uint32_t i = 0; i < tensor_count; ++i) {
     auto *tensor = meta_graph->allTensors()->GetAs<schema::Tensor>(i);
@@ -116,6 +124,11 @@ int ConvertSubGraph(const schema::SubGraph *sub_graph, Model *model) {
 int MetaGraphMappingSubGraph(const mindspore::schema::MetaGraph *meta_graph, Model *model) {
   MS_ASSERT(model != nullptr);
   MS_ASSERT(meta_graph != nullptr);
+  if (meta_graph->inputIndex() == nullptr || meta_graph->outputIndex() == nullptr || meta_graph->nodes() == nullptr ||
+      meta_graph->allTensors() == nullptr) {
+    MS_LOG(ERROR) << "meta_graph is invalid, please check your model file.";
+    return RET_ERROR;
+  }
   auto *sub_graph_temp = new (std::nothrow) Model::SubGraph();
   if (sub_graph_temp == nullptr) {
     MS_LOG(ERROR) << "new subGraph fail!";
