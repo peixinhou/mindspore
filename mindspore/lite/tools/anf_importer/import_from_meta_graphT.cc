@@ -22,7 +22,6 @@
 #include "src/param_value_lite.h"
 #include "src/common/log_adapter.h"
 #include "include/errorcode.h"
-#include "tools/common/tensor_util.h"
 
 namespace mindspore::lite {
 int AnfImporterFromMetaGraphT::ConverterConstTensor() {
@@ -57,7 +56,11 @@ int AnfImporterFromMetaGraphT::ConverterConstTensor() {
         MS_LOG(ERROR) << "new char[] failed";
         return RET_MEMORY_FAILED;
       }
-      std::memcpy(tensor_data, tensor->data.data(), size);
+      auto ret = memcpy_s(tensor_data, size, tensor->data.data(), size);
+      if (EOK != ret) {
+        MS_LOG(ERROR) << "memcpy_s error";
+        return RET_MEMORY_FAILED;
+      }
       param_value->set_tensor_addr(tensor_data);
       param_value->set_tensor_size(size);
       parameter->set_default_param(param_value);
@@ -145,8 +148,16 @@ int AnfImporterFromMetaGraphT::ConvertAbstract(const std::unique_ptr<schema::CNo
       }
       auto tuple_get_item_prim = NewValueNode(tuple_get_item_prim_ptr);
       auto get_item_value = NewValueNode(MakeValue<int>(i));
+      if (tuple_get_item_prim == nullptr || get_item_value == nullptr) {
+        MS_LOG(ERROR) << "NewValueNode is nullptr";
+        return RET_NULL_PTR;
+      }
       std::vector<AnfNodePtr> inputs{tuple_get_item_prim, dst_cnode, get_item_value};
       CNodePtr get_item_cnode = func_graph_->NewCNode(inputs);
+      if (get_item_cnode == nullptr) {
+        MS_LOG(ERROR) << "NewCNode is nullptr";
+        return RET_NULL_PTR;
+      }
       get_item_cnode->set_fullname_with_scope(src_cnode->name + "_getitem_" + std::to_string(i));
       AddNode(out_tensor_id, get_item_cnode);
     }
@@ -175,6 +186,10 @@ int AnfImporterFromMetaGraphT::ConverterCNode() {
       op_inputs.push_back(node);
     }
     auto new_cnode = func_graph_->NewCNode(op_inputs);
+    if (new_cnode == nullptr) {
+      MS_LOG(ERROR) << "NewCNode is nullptr";
+      return RET_NULL_PTR;
+    }
     new_cnode->set_fullname_with_scope(cNode->name);
     auto status = ConvertAbstract(cNode, new_cnode);
     if (status != RET_OK) {
@@ -208,6 +223,10 @@ int AnfImporterFromMetaGraphT::AddReturnCNode() {
       make_tuple_inputs.emplace_back(cNode);
     }
     auto make_tuple_cnode = func_graph_->NewCNode(make_tuple_inputs);
+    if (make_tuple_cnode == nullptr) {
+      MS_LOG(ERROR) << "NewCNode is nullptr";
+      return RET_NULL_PTR;
+    }
     make_tuple_cnode->set_fullname_with_scope("return tuple");
 
     std::vector<AnfNodePtr> op_inputs;
@@ -220,6 +239,10 @@ int AnfImporterFromMetaGraphT::AddReturnCNode() {
     op_inputs.emplace_back(value_node);
     op_inputs.emplace_back(make_tuple_cnode);
     auto cnode = func_graph_->NewCNode(op_inputs);
+    if (cnode == nullptr) {
+      MS_LOG(ERROR) << "NewCNode is nullptr";
+      return RET_NULL_PTR;
+    }
     cnode->set_fullname_with_scope("return");
     func_graph_->set_return(cnode);
   } else {
@@ -237,6 +260,10 @@ int AnfImporterFromMetaGraphT::AddReturnCNode() {
     }
     op_inputs.emplace_back(cnode);
     auto return_cnode = func_graph_->NewCNode(op_inputs);
+    if (return_cnode == nullptr) {
+      MS_LOG(ERROR) << "NewCNode is nullptr";
+      return RET_NULL_PTR;
+    }
     return_cnode->set_fullname_with_scope("return");
     func_graph_->set_return(return_cnode);
   }
