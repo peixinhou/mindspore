@@ -340,7 +340,6 @@ ValuePtr AnfImporterFromProtobuf::ObtainCNodeAttrInScalarForm(const onnx::Tensor
       MS_LOG(ERROR) << "Obtain attr in scalar-form has not support input type: " << attr_tensor_type;
       return {};
   }
-  return {};
 }
 
 bool AnfImporterFromProtobuf::ObtainCNodeAttrInTensorForm(const PrimitivePtr &prim, const std::string &attr_name,
@@ -438,7 +437,7 @@ bool AnfImporterFromProtobuf::GetAttrValueForCNode(const PrimitivePtr &prim, con
   }
   if (kParseTypeSwitchMap[type] == FORM_PARSE_SCALAR) {
     if (kv.size() == 1) {
-      std::unordered_map<std::string, ValuePtr>::iterator iter = kv.begin();
+      auto iter = kv.begin();
       prim->AddAttr(attr_name, iter->second);
     } else {
       auto res = ParserScalarAttrValue(ref_attr_name, kv);
@@ -636,14 +635,14 @@ CNodePtr AnfImporterFromProtobuf::BuildCNodeForFuncGraph(const FuncGraphPtr &out
     MS_LOG(ERROR) << "funcgraph new cnode failed";
     return nullptr;
   }
-  if (0 == kv.size()) {
+  if (kv.empty()) {
     AbstractBasePtrList elem;
     for (size_t index = 1; index < cnode_ptr->inputs().size(); ++index) {
       elem.push_back(cnode_ptr->input(index)->abstract());
     }
     cnode_ptr->set_abstract(std::make_shared<abstract::AbstractTuple>(elem));
   } else if (1 == kv.size()) {
-    std::unordered_map<std::string, abstract::AbstractTensorPtr>::iterator iter = kv.begin();
+    auto iter = kv.begin();
     cnode_ptr->set_abstract(iter->second);
   } else {
     auto abstract = ParserAttrShape(shape_ref_attr_name, kv);

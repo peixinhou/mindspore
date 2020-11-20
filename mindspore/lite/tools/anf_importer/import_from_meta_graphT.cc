@@ -30,22 +30,21 @@ int AnfImporterFromMetaGraphT::ConverterConstTensor() {
   for (size_t i = 0; i < meta_graph_->allTensors.size(); i++) {
     auto &tensor = meta_graph_->allTensors.at(i);
     MS_ASSERT(tensor != nullptr);
-    // converter weight and graph input into parameter node
     if (tensor->nodeType != schema::NodeType::NodeType_ValueNode) {
       continue;
     }
-    MS_ASSERT(tensor->dims() != nullptr);
     auto parameter = func_graph_->add_parameter();
     std::vector<int> shape(tensor->dims.size());
     std::copy(tensor->dims.begin(), tensor->dims.end(), shape.begin());
     auto type_id = static_cast<TypeId>(tensor->dataType);
     auto type_ptr = TypeIdToType(type_id);
     auto abstract_tensor = std::make_shared<abstract::AbstractTensor>(type_ptr, shape);
+    MS_ASSERT(nullptr != abstract_tensor);
     parameter->set_abstract(abstract_tensor);
     parameter->set_name("const_" + std::to_string(i) + "_parameter");
 
     ParamValueLitePtr param_value = std::make_shared<ParamValueLite>();
-    MS_ASSERT(param_value != nullptr);
+    MS_ASSERT(nullptr != param_value);
     param_value->set_tensor_shape(shape);
     param_value->set_tensor_type(type_id);
     param_value->set_format(tensor->format);
@@ -117,7 +116,9 @@ abstract::AbstractTensorPtr AnfImporterFromMetaGraphT::ConvertTensorToAbstractTe
   std::copy(tensor->dims.begin(), tensor->dims.end(), shape.begin());
   auto type_id = static_cast<TypeId>(tensor->dataType);
   auto type_ptr = TypeIdToType(type_id);
-  return std::make_shared<abstract::AbstractTensor>(type_ptr, shape);
+  auto ptr = std::make_shared<abstract::AbstractTensor>(type_ptr, shape);
+  MS_ASSERT(nullptr != ptr);
+  return ptr;
 }
 
 int AnfImporterFromMetaGraphT::ConvertAbstract(const std::unique_ptr<schema::CNodeT> &src_cnode,
@@ -177,11 +178,11 @@ int AnfImporterFromMetaGraphT::ConverterCNode() {
       return RET_NULL_PTR;
     }
     std::vector<AnfNodePtr> op_inputs = {anf_primitive};
-    for (unsigned int j : cNode->inputIndex) {
+    for (int j : cNode->inputIndex) {
       auto node = GetNode(j);
       if (nullptr == node) {
         MS_LOG(ERROR) << "Can't find input node.";
-        return RET_ERROR;
+        return RET_NULL_PTR;
       }
       op_inputs.push_back(node);
     }
@@ -201,10 +202,8 @@ int AnfImporterFromMetaGraphT::ConverterCNode() {
 }
 
 int AnfImporterFromMetaGraphT::AddReturnCNode() {
-  if (meta_graph_ == nullptr || func_graph_ == nullptr) {
-    MS_LOG(ERROR) << "meta_graph or func_graph is nullptr";
-    return RET_NULL_PTR;
-  }
+  MS_ASSERT(nullptr != meta_graph_);
+  MS_ASSERT(nullptr != func_graph_);
   if (meta_graph_->outputIndex.size() > 1) {
     std::vector<AnfNodePtr> make_tuple_inputs;
     auto make_tuple_prim_ptr = GetMakeTuplePrim();

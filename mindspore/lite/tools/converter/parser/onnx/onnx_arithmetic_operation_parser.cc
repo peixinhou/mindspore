@@ -264,7 +264,6 @@ STATUS OnnxEltwiseParser::Parse(const onnx::GraphProto &onnx_graph, const onnx::
     return RET_NULL_PTR;
   }
 
-  // there is no Prod in onnx
   if (onnx_node.op_type() == "Sum") {
     attr->mode = schema::EltwiseMode_SUM;
   } else if (onnx_node.op_type() == "Max") {
