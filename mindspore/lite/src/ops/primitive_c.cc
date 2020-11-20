@@ -184,40 +184,49 @@ void PrimitiveC::CalFloatScopeByMeanAndStddev(const double &mean, const double &
   *mMax = static_cast<float>((qmax - mean) / stdDev);
 }
 
-void PrimitiveC::PopulaterQuantParam(const Primitive &prim, const std::vector<AnfNodePtr> &inputs) {
-  auto narrow_range = prim.GetAttr("narrow_range");
-  bool narrowRangeQuantParam = narrow_range != nullptr ? GetValue<bool>(narrow_range) : false;
-  auto num_bits = prim.GetAttr("num_bits");
-  int32_t numbitsRangeQuantParam = num_bits != nullptr ? GetValue<int32_t>(num_bits) : 8;
-
+void PrimitiveC::FillDefaultInputQuantParamIfNeed(const size_t &inputSize) {
   std::vector<schema::QuantParamT> quants;
   schema::QuantParamT quantParam;
-  auto mean = prim.GetAttr("mean");
-  auto std_dev = prim.GetAttr("std_dev");
-  if (mean != nullptr && std_dev != nullptr) {
-    auto meanValue = GetValue<double>(mean);
-    auto stddevValue = GetValue<double>(std_dev);
-    float mMin = 0.0;
-    float mMax = 0.0;
-    CalFloatScopeByMeanAndStddev(meanValue, stddevValue, &mMin, &mMax);
-    quantParam.min = mMin;
-    quantParam.max = mMax;
-  } else {
-    auto inputMin = prim.GetAttr("input_minq");
-    auto inputMax = prim.GetAttr("input_maxq");
-    if (inputMin != nullptr && inputMax != nullptr) {
-      auto inputMinPtr = inputMin->cast<TensorPtr>();
-      auto inputMaxPtr = inputMax->cast<TensorPtr>();
-      auto *minBuf = static_cast<float *>(inputMinPtr->data_c());
-      auto *maxBuf = static_cast<float *>(inputMaxPtr->data_c());
-      quantParam.min = *minBuf;
-      quantParam.max = *maxBuf;
-    }
+  // fill input_quant_param_ by not inited quant_parm
+  if (input_quant_param_.size() < inputSize) {
+    schema::QuantParamT tmpQuantParam;
+    quants.emplace_back(tmpQuantParam);
+    input_quant_param_.insert(input_quant_param_.end(), inputSize - input_quant_param_.size(), quants);
   }
-  quant::CalQuantizationParams(&quantParam, quantParam.min, quantParam.max, narrowRangeQuantParam,
-                               numbitsRangeQuantParam);
-  quants.emplace_back(quantParam);
-  input_quant_param_.emplace_back(quants);
+
+  if (input_quant_param_.size() == kDoubleNum) {
+    quants.clear();
+    quantParam.min = 0.0;
+    quantParam.max = 0.0;
+    quantParam.zeroPoint = 0;
+    quantParam.scale = input_quant_param_.at(0).at(0).scale * input_quant_param_.at(1).at(0).scale;
+    quants.emplace_back(quantParam);
+    input_quant_param_.emplace_back(quants);
+  }
+}
+
+void PrimitiveC::PopulaterInputQuantParam(const Primitive &prim, const std::vector<AnfNodePtr> &inputs,
+                                          bool narrowRangeQuantParam, int32_t numbitsRangeQuantParam) {
+  std::vector<schema::QuantParamT> quants;
+  schema::QuantParamT quantParam;
+  auto inputMin = prim.GetAttr("input_minq");
+  auto inputMax = prim.GetAttr("input_maxq");
+  if (inputMin != nullptr && inputMax != nullptr) {
+    auto inputMinPtr = inputMin->cast<TensorPtr>();
+    auto inputMaxPtr = inputMax->cast<TensorPtr>();
+    auto *minBuf = static_cast<float *>(inputMinPtr->data_c());
+    auto *maxBuf = static_cast<float *>(inputMaxPtr->data_c());
+    quantParam.min = *minBuf;
+    quantParam.max = *maxBuf;
+    auto ret = quant::CalQuantizationParams(&quantParam, quantParam.min, quantParam.max, narrowRangeQuantParam,
+                                            numbitsRangeQuantParam);
+    if (ret != RET_OK) {
+      MS_LOG(ERROR) << "Can't calculate quant parameters";
+      return;
+    }
+    quants.emplace_back(quantParam);
+    input_quant_param_.emplace_back(quants);
+  }
 
   quants.clear();
   auto filterMin = prim.GetAttr("filter_minq");
@@ -235,30 +244,21 @@ void PrimitiveC::PopulaterQuantParam(const Primitive &prim, const std::vector<An
       minBuf++;
       maxBuf++;
     }
-    quant::CalQuantizationParams(&quantParam, quantParam.min, quantParam.max, true, numbitsRangeQuantParam);
+    auto ret = quant::CalQuantizationParams(&quantParam, quantParam.min, quantParam.max, true, numbitsRangeQuantParam);
+    if (ret != RET_OK) {
+      MS_LOG(ERROR) << "Can't calculate quant parameters";
+      return;
+    }
     quants.emplace_back(quantParam);
     input_quant_param_.emplace_back(quants);
   }
+  FillDefaultInputQuantParamIfNeed(inputs.size());
+}
 
-  // fill input_quant_param_ by not inited quant_parm
-  if (input_quant_param_.size() < inputs.size()) {
-    quants.clear();
-    schema::QuantParamT tmpQuantParam;
-    quants.emplace_back(tmpQuantParam);
-    input_quant_param_.insert(input_quant_param_.end(), inputs.size() - input_quant_param_.size(), quants);
-  }
-
-  if (input_quant_param_.size() == kDoubleNum) {
-    quants.clear();
-    quantParam.min = 0.0;
-    quantParam.max = 0.0;
-    quantParam.zeroPoint = 0;
-    quantParam.scale = input_quant_param_.at(0).at(0).scale * input_quant_param_.at(1).at(0).scale;
-    quants.emplace_back(quantParam);
-    input_quant_param_.emplace_back(quants);
-  }
-
-  quants.clear();
+void PrimitiveC::PopulaterOutputQuantParam(const Primitive &prim, bool narrowRangeQuantParam,
+                                           int32_t numbitsRangeQuantParam) {
+  std::vector<schema::QuantParamT> quants;
+  schema::QuantParamT quantParam;
   auto outputMin = prim.GetAttr("output_minq");
   auto outputMax = prim.GetAttr("output_maxq");
   if (outputMin != nullptr && outputMax != nullptr) {
@@ -268,8 +268,12 @@ void PrimitiveC::PopulaterQuantParam(const Primitive &prim, const std::vector<An
     float *maxBuf = static_cast<float *>(outputMaxPtr->data_c());
     quantParam.min = *minBuf;
     quantParam.max = *maxBuf;
-    quant::CalQuantizationParams(&quantParam, quantParam.min, quantParam.max, narrowRangeQuantParam,
-                                 numbitsRangeQuantParam);
+    auto ret = quant::CalQuantizationParams(&quantParam, quantParam.min, quantParam.max, narrowRangeQuantParam,
+                                            numbitsRangeQuantParam);
+    if (ret != RET_OK) {
+      MS_LOG(ERROR) << "Can't calculate quant parameters";
+      return;
+    }
     quants.emplace_back(quantParam);
     output_quant_param_.emplace_back(quants);
   } else {
@@ -277,6 +281,15 @@ void PrimitiveC::PopulaterQuantParam(const Primitive &prim, const std::vector<An
     quants.emplace_back(tmpQuantParam);
     output_quant_param_.emplace_back(quants);
   }
+}
+
+void PrimitiveC::PopulaterQuantParam(const Primitive &prim, const std::vector<AnfNodePtr> &inputs) {
+  auto narrow_range = prim.GetAttr("narrow_range");
+  bool narrowRangeQuantParam = narrow_range != nullptr ? GetValue<bool>(narrow_range) : false;
+  auto num_bits = prim.GetAttr("num_bits");
+  int32_t numbitsRangeQuantParam = num_bits != nullptr ? GetValue<int64_t>(num_bits) : 8;
+  PopulaterInputQuantParam(prim, inputs, narrowRangeQuantParam, numbitsRangeQuantParam);
+  PopulaterOutputQuantParam(prim, narrowRangeQuantParam, numbitsRangeQuantParam);
 }
 
 void PrimitiveC::GetAttrDataFromInput(const AnfNodePtr inputNode, std::vector<int> *data) {

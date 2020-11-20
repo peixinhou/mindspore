@@ -18,6 +18,7 @@
 #define MINDSPORE_LITE_SRC_SCHEDULER_H_
 
 #include <vector>
+#include <map>
 #include "src/sub_graph_kernel.h"
 #include "src/inner_context.h"
 #include "include/model.h"
@@ -41,6 +42,9 @@ class Scheduler {
                    std::vector<kernel::LiteKernel *> *kernels);
 
   static int InferShape(const lite::Model *model, std::vector<Tensor *> *tensors);
+
+  std::vector<kernel::LiteKernel *> FindAllSubGraphKernels(
+    kernel::LiteKernel *head_kernel, std::map<const kernel::LiteKernel *, bool> *sinked_kernel_map);
 
   int ConstructSubGraphs(std::vector<kernel::LiteKernel *> *kernels);
 
