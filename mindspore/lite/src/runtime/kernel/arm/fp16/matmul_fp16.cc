@@ -124,6 +124,7 @@ int MatmulFP16CPUKernel::ReSize() {
       ctx_->allocator->Malloc(params_->batch * params_->row_ * params_->col_ * sizeof(float16_t)));
     if (output_ptr_ == nullptr) {
       MS_LOG(ERROR) << "malloc output_ptr_ failed.";
+      FreeTmpBuffer();
       return RET_MEMORY_FAILED;
     }
   }
@@ -217,6 +218,7 @@ int MatmulFP16CPUKernel::Run() {
   } else {
     c_ptr = reinterpret_cast<float16_t *>(out_tensor->data_c());
   }
+  MS_ASSERT(c_ptr);
   if (params_->a_const_ == false) {
     if (in_tensors_[0]->data_type() == kNumberTypeFloat32) {
       InitMatrixA(reinterpret_cast<float *>(in_tensors_[0]->data_c()), a_pack_ptr_);
@@ -258,6 +260,7 @@ kernel::LiteKernel *CpuMatmulFp16KernelCreator(const std::vector<lite::Tensor *>
     auto *dequant_weight = kernel::DequantUtil::DequantWeight(weight_tensor);
     if (dequant_weight == nullptr) {
       MS_LOG(ERROR) << "dequant data is nullptr.";
+      free(opParameter);
       return nullptr;
     }
     weight_tensor->set_data_type(kNumberTypeFloat32);
