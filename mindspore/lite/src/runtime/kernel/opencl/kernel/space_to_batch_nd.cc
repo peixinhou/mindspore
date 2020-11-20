@@ -48,6 +48,8 @@ int SpaceToBatchNDOpenCLKernel::Init() {
     MS_LOG(ERROR) << "block_sizes_ must > 1, actual " << param->block_sizes_[0] << ", " << param->block_sizes_[1];
     return RET_ERROR;
   }
+  MS_ASSERT(param->block_sizes_[0]);
+  MS_ASSERT(param->block_sizes_[1]);
   if (param->padded_in_shape_[kNHWC_H] % param->block_sizes_[0] ||
       param->padded_in_shape_[kNHWC_W] % param->block_sizes_[1]) {
     MS_LOG(ERROR) << "padded shape must be multiple of block!";

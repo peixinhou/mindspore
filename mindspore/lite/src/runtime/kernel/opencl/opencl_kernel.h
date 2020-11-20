@@ -57,8 +57,8 @@ struct Image2DInfo {
       H = shape[1];
       W = shape[2];
       C = shape[3];
-    } else if (shape.size() >= 5) {
-      MS_LOG(ERROR) << "GPU dont't support Tensor with dim=" << shape.size();
+    } else if (shape.size() > 4) {
+      MS_LOG(ERROR) << "GPU doesn't support ndim>=" << shape.size();
     }
     FLT_size = tensor->data_type() == kNumberTypeFloat16 ? sizeof(cl_half) : sizeof(cl_float);
     FLT4_size = FLT_size * 4;
@@ -80,6 +80,7 @@ struct Image2DInfo {
   size_t RowPitch() const {
     auto runtime_wrapper = lite::opencl::OpenCLRuntimeWrapper();
     int alignment = runtime_wrapper.GetInstance()->GetImagePitchAlignment();
+    MS_ASSERT(alignment);
     size_t row_pitch = (width + alignment - 1) / alignment * alignment * FLT4_size;
     return row_pitch;
   }
@@ -119,6 +120,7 @@ class OpenCLKernel : public LiteKernel {
     return RET_ERROR;
   }
   int GetImageSize(size_t idx, std::vector<size_t> *img_size) {
+    MS_ASSERT(img_size);
     if (idx >= out_tensors_.size()) {
       return RET_ERROR;
     }
