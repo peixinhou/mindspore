@@ -383,6 +383,10 @@ int AnfExporter::ConvertInputValueNode(const std::shared_ptr<AnfNode> &input_ano
   if (value->isa<tensor::Tensor>()) {
     auto valueAbstract = valueNode->abstract();
     auto abstractTensor = utils::cast<abstract::AbstractTensorPtr>(valueAbstract);
+    if (abstractTensor == nullptr || abstractTensor->element() == nullptr) {
+      MS_LOG(ERROR) << "abstractTensor or abstractTensor->element() is nullptr";
+      return RET_ERROR;
+    }
     auto typePtr = abstractTensor->element()->GetTypeTrack();
     paramTensor->dataType = typePtr->type_id();
     paramTensor->dims = utils::cast<abstract::ShapePtr>(abstractTensor->BuildShape())->shape();
@@ -392,7 +396,11 @@ int AnfExporter::ConvertInputValueNode(const std::shared_ptr<AnfNode> &input_ano
     paramTensor->nodeType = schema::NodeType::NodeType_ValueNode;
     auto data = value->cast<tensor::TensorPtr>();
     paramTensor->data.resize(data->Size());
-    memcpy(paramTensor->data.data(), data->data_c(), data->Size());
+    auto ret = memcpy_s(paramTensor->data.data(), data->Size(), data->data_c(), data->Size());
+    if (ret != EOK) {
+      MS_LOG(ERROR) << "memcpy_s error.";
+      return RET_ERROR;
+    }
     node_id_map_[valueNode->fullname_with_scope()] = meta_graphT->allTensors.size();
     output_cnode->inputIndex.emplace_back(meta_graphT->allTensors.size());
     meta_graphT->allTensors.emplace_back(std::move(paramTensor));
@@ -406,7 +414,11 @@ int AnfExporter::ConvertInputValueNode(const std::shared_ptr<AnfNode> &input_ano
     auto data = value->cast<mindspore::Int32ImmPtr>();
     int real_data = GetValue<int32_t>(data);
     paramTensor->data.resize(sizeof(int32_t));
-    memcpy(paramTensor->data.data(), &real_data, sizeof(int32_t));
+    auto ret = memcpy_s(paramTensor->data.data(), sizeof(int32_t), &real_data, sizeof(int32_t));
+    if (ret != EOK) {
+      MS_LOG(ERROR) << "memcpy_s error.";
+      return RET_ERROR;
+    }
     node_id_map_[valueNode->fullname_with_scope()] = meta_graphT->allTensors.size();
     output_cnode->inputIndex.emplace_back(meta_graphT->allTensors.size());
     meta_graphT->allTensors.emplace_back(std::move(paramTensor));
@@ -540,6 +552,10 @@ void AnfExporter::SetOpOutputNode(const CNodePtr &cnode, const std::unique_ptr<s
     auto tuple = std::reinterpret_pointer_cast<abstract::AbstractTuple>(cnode->abstract());
     for (size_t i = 0; i < tuple->size(); i++) {
       auto msTensor = new (std::nothrow) schema::TensorT();
+      if (msTensor == nullptr) {
+        MS_LOG(ERROR) << "new msTensor failed";
+        return;
+      }
       msTensor->nodeType = schema::NodeType_CNode;
       fb_node->outputIndex.emplace_back(meta_graphT->allTensors.size());
 #ifdef SUPPORT_TRAIN
@@ -567,6 +583,10 @@ void AnfExporter::SetOpOutputNode(const CNodePtr &cnode, const std::unique_ptr<s
     }
   } else {
     auto ms_tensor = new (std::nothrow) schema::TensorT();
+    if (ms_tensor == nullptr) {
+      MS_LOG(ERROR) << "new ms_tensor failed";
+      return;
+    }
     ms_tensor->nodeType = schema::NodeType_CNode;
     ms_tensor->dataType = TypeId::kNumberTypeFloat32;
     fb_node->outputIndex.emplace_back(meta_graphT->allTensors.size());
