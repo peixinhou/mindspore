@@ -671,7 +671,7 @@ STATUS PostTrainingQuantizer::DoBiasQuant(const AnfNodePtr &bias, const std::sha
   auto bias_default_param = bias_parameter_ptr->default_param();
   auto bias_param = std::dynamic_pointer_cast<ParamValueLite>(bias_default_param);
   MS_ASSERT(bias_parameter_ptr != nullptr);
-  auto active_weight_quant_params = primitive_c->GetInputQuantParams();
+  auto active_weight_quant_params = primitive_c->input_quant_params();
   if (active_weight_quant_params.size() != 2) {
     MS_LOG(ERROR) << "unexpected active_weight_quant_params size: " << active_weight_quant_params.size();
     return RET_ERROR;
@@ -743,7 +743,7 @@ STATUS PostTrainingQuantizer::DoBiasQuant(const AnfNodePtr &bias, const std::sha
         double filter_scale = std::abs(raw_datas[i]) / (activate_scale * quanted_bias_abs_limit);
         active_weight_quant_params[1][i].scale = filter_scale;
         active_weight_quant_params[1][i].zeroPoint = 0;
-        primitive_c->SetInputQuantParams(active_weight_quant_params);
+        primitive_c->set_input_quant_params(active_weight_quant_params);
         bias_scale_tmp = std::abs(raw_datas[i]) / quanted_bias_abs_limit;
         quant_params[i].scale = bias_scale_tmp;
         MS_LOG(DEBUG) << "new filter scale: " << filter_scale;
@@ -796,7 +796,7 @@ STATUS PostTrainingQuantizer::QuantNode() {
     }
     if (inputs_diverg_info->find(op_name) == inputs_diverg_info->end()) {
       MS_LOG(INFO) << op_name << " can not do quant";
-      primitive_c->SetQuantType(schema::QuantType_QUANT_NONE);
+      primitive_c->set_quant_type(schema::QuantType_QUANT_NONE);
       continue;
     }
 
@@ -819,16 +819,16 @@ STATUS PostTrainingQuantizer::QuantNode() {
         MS_LOG(WARNING) << "input_cnode_primitive_c is null";
         continue;
       }
-      if (input_cnode_primitive_c->GetOutputQuantParams().size() > index) {
-        auto quant_param = input_cnode_primitive_c->GetOutputQuantParams()[index];
+      if (input_cnode_primitive_c->output_quant_params().size() > index) {
+        auto quant_param = input_cnode_primitive_c->output_quant_params()[index];
         primitive_c->AddInputQuantParam(quant_param);
         primitive_c->AddOutputQuantParam(quant_param);
       } else {
         MS_LOG(WARNING) << "this TupleGetItem node's input node: " << input_cnode->fullname_with_scope()
-                        << "'s output quant_params size: " << input_cnode_primitive_c->GetOutputQuantParams().size()
+                        << "'s output quant_params size: " << input_cnode_primitive_c->output_quant_params().size()
                         << ", but index: " << index;
       }
-      primitive_c->SetQuantType(schema::QuantType_PostTraining);
+      primitive_c->set_quant_type(schema::QuantType_PostTraining);
       continue;
     } else if (op_type != PrimitiveType_Conv2D && op_type != PrimitiveType_DepthwiseConv2D &&
                op_type != PrimitiveType_DeConv2D && op_type != PrimitiveType_DeDepthwiseConv2D &&
@@ -851,7 +851,7 @@ STATUS PostTrainingQuantizer::QuantNode() {
             continue;
           }
           if (input_cnode_primitive_c->IsOutputQuantParamsInited()) {
-            auto quant_param = input_cnode_primitive_c->GetOutputQuantParams().front();
+            auto quant_param = input_cnode_primitive_c->output_quant_params().front();
             primitive_c->AddInputQuantParam(quant_param);
           } else {
             // do input quant
@@ -929,7 +929,7 @@ STATUS PostTrainingQuantizer::QuantNode() {
       output_min_max.min = info->min;
 
       DoQuantOutput(output_scale, output_zp, &output_min_max, primitive_c);
-      primitive_c->SetQuantType(schema::QuantType_PostTraining);
+      primitive_c->set_quant_type(schema::QuantType_PostTraining);
     }
   }
   return RET_OK;
@@ -1132,7 +1132,7 @@ STATUS PostTrainingQuantizer::Int8Inference() {
         }
         // do quantization: activation is always per layer quantized
         std::vector<int8_t> quant_datas;
-        auto quant_params = lite_tensor->GetQuantParams();
+        auto quant_params = lite_tensor->quant_params();
         if (quant_params.size() != 1) {
           MS_LOG(ERROR) << "unexpected quant_params size: " << quant_params.size();
           return false;
@@ -1190,7 +1190,7 @@ STATUS PostTrainingQuantizer::Int8Inference() {
           MS_LOG(ERROR) << "unexpected channels: 0";
           return false;
         }
-        auto quant_params = lite_tensor->GetQuantParams();
+        auto quant_params = lite_tensor->quant_params();
         if (quant_params.size() != 1) {
           MS_LOG(ERROR) << "unexpected activatation quant_params size: " << quant_params.size();
           return false;
@@ -1361,7 +1361,7 @@ STATUS PostTrainingQuantizer::BiasCorrection(const FuncGraphPtr &func_graph) {
         MS_LOG(ERROR) << "primitive_c is nullptr";
         continue;
       }
-      auto input_quant_params = primitive_c->GetInputQuantParams();
+      auto input_quant_params = primitive_c->input_quant_params();
 
       if (input_quant_params.size() == 3) {
         // compensate the existed
@@ -1445,7 +1445,7 @@ STATUS PostTrainingQuantizer::BiasCorrection(const FuncGraphPtr &func_graph) {
 
         auto op_type = (schema::PrimitiveType)primitive_c->Type();
         if (op_type == schema::PrimitiveType_Conv2D) {
-          auto conv2d = primitive_c->GetPrimitiveT()->value.AsConv2D();
+          auto conv2d = primitive_c->primitiveT()->value.AsConv2D();
           if (conv2d == nullptr) {
             MS_LOG(ERROR) << "conv2d is null";
             delete[] tensor_data;
@@ -1453,7 +1453,7 @@ STATUS PostTrainingQuantizer::BiasCorrection(const FuncGraphPtr &func_graph) {
           }
           conv2d->hasBias = true;
         } else if (op_type == schema::PrimitiveType_DepthwiseConv2D) {
-          auto depthwise_conv2d = primitive_c->GetPrimitiveT()->value.AsDepthwiseConv2D();
+          auto depthwise_conv2d = primitive_c->primitiveT()->value.AsDepthwiseConv2D();
           if (depthwise_conv2d == nullptr) {
             MS_LOG(ERROR) << "conv2d is null";
             delete[] tensor_data;

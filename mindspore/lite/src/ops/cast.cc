@@ -93,11 +93,11 @@ int Cast::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> output
     MS_LOG(ERROR) << "tensor number is error.";
     return RET_INPUT_TENSOR_ERROR;
   }
-  output->SetFormat(input->GetFormat());
+  output->set_format(input->format());
 
   MS_ASSERT(cast_prim != nullptr);
   output->set_data_type(static_cast<TypeId>(GetDstT()));
-  if (!GetInferFlag()) {
+  if (!infer_flag()) {
     return RET_OK;
   }
 

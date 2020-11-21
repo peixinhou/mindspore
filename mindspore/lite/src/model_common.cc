@@ -43,7 +43,7 @@ bool ConvertNodes(const schema::MetaGraph *meta_graph, Model *model) {
       delete node;
       return false;
     }
-    node->primitive_->SetQuantType(c_node->quantType());
+    node->primitive_->set_quant_type(c_node->quantType());
     MS_ASSERT(c_node->name() != nullptr);
     node->name_ = c_node->name()->c_str();
     node->node_type_ = c_node->nodeType();

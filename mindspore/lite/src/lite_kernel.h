@@ -136,9 +136,9 @@ class LiteKernel {
     }
   }
 
-  void SetInKernel(const std::vector<LiteKernel *> &kernel) { this->in_kernels_ = kernel; }
+  void set_in_kernels(const std::vector<LiteKernel *> &kernel) { this->in_kernels_ = kernel; }
 
-  void SetOutKernel(const std::vector<LiteKernel *> &kernel) { this->out_kernels_ = kernel; }
+  void set_out_kernels(const std::vector<LiteKernel *> &kernel) { this->out_kernels_ = kernel; }
 
   const std::vector<LiteKernel *> &in_kernels() const { return this->in_kernels_; }
 
@@ -154,19 +154,19 @@ class LiteKernel {
 
   void set_desc(const KernelKey kernel_key) { desc_ = kernel_key; }
 
-  const mindspore::lite::PrimitiveC *GetPrimitive() const { return primitive_; }
-  void SetWorkspaceSize(size_t value) { workspace_size_ = value; }
-  size_t GetWorkspaceSize() { return workspace_size_; }
+  const mindspore::lite::PrimitiveC *primitive() const { return primitive_; }
+  void set_workspace_size(size_t value) { workspace_size_ = value; }
+  size_t workspace_size() { return workspace_size_; }
   static void AllocWorkspace(size_t size);
   static void FreeWorkspace();
-  void *GetWorkspace() { return workspace_; }
+  void *workspace() { return workspace_; }
 
   SubGraphType subgraph_type() const { return this->subgraph_type_; }
 
   virtual std::string ToString() const;
 
  protected:
-  bool InferShapeDone() { return !(primitive_ != nullptr && !primitive_->GetInferFlag()); }
+  bool InferShapeDone() { return !(primitive_ != nullptr && !primitive_->infer_flag()); }
 
   KernelKey desc_{};
   std::string name_;

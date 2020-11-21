@@ -41,7 +41,7 @@ class KernelRegistry {
   int GetCreatorFuncIndex(kernel::KernelKey desc);
   void RegKernel(kernel::KernelKey desc, kernel::KernelCreator creator);
   void RegKernel(kernel::KERNEL_ARCH arch, TypeId data_type, schema::PrimitiveType type, kernel::KernelCreator creator);
-  bool Merge(const std::unordered_map<kernel::KernelKey, kernel::KernelCreator> &newCreators);
+  bool Merge(const std::unordered_map<kernel::KernelKey, kernel::KernelCreator> &new_creators);
   kernel::LiteKernel *GetKernel(const std::vector<Tensor *> &in_tensors, const std::vector<Tensor *> &out_tensors,
                                 const PrimitiveC *primitive, const InnerContext *ctx, const kernel::KernelKey &key);
 

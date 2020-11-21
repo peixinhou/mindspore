@@ -154,10 +154,10 @@ int GroupConv2DGradInput::InferShape(std::vector<Tensor *> inputs, std::vector<T
   std::vector<int> output_shape;
   int *out_shape = reinterpret_cast<int *>(in->MutableData());
   int new_size = in->ElementsNum();
-  if (in0->GetFormat() == in->GetFormat()) {
+  if (in0->format() == in->format()) {
     for (int i = 0; i < new_size; i++) output_shape.push_back(out_shape[i]);
   } else {
-    if ((in0->GetFormat() == schema::Format_NHWC) && (in->GetFormat() == schema::Format_NCHW)) {
+    if ((in0->format() == schema::Format_NHWC) && (in->format() == schema::Format_NCHW)) {
       output_shape.push_back(out_shape[0]);
       output_shape.push_back(out_shape[2]);
       output_shape.push_back(out_shape[3]);
@@ -172,7 +172,7 @@ int GroupConv2DGradInput::InferShape(std::vector<Tensor *> inputs, std::vector<T
   MS_ASSERT(out != nullptr);
   out->set_shape(output_shape);
   out->set_data_type(in0->data_type());
-  out->SetFormat(in0->GetFormat());
+  out->set_format(in0->format());
 
   return RET_OK;
 }

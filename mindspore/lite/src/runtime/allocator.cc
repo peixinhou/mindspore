@@ -28,19 +28,19 @@ DefaultAllocator::DefaultAllocator() {}
 DefaultAllocator::~DefaultAllocator() { Clear(); }
 
 void DefaultAllocator::SetContext(const AllocatorContext &ctx) {
-  lockFlag = ctx.lockFlag;
-  shiftFactor = ctx.shiftFactor;
+  lock_flag_ = ctx.lockFlag;
+  shift_factor_ = ctx.shiftFactor;
 }
 
 void DefaultAllocator::Lock() {
-  if (lockFlag) {
-    lock.lock();
+  if (lock_flag_) {
+    lock_.lock();
   }
 }
 
 void DefaultAllocator::UnLock() {
-  if (lockFlag) {
-    lock.unlock();
+  if (lock_flag_) {
+    lock_.unlock();
   }
 }
 
@@ -50,11 +50,11 @@ void *DefaultAllocator::Malloc(size_t size) {
     return nullptr;
   }
   Lock();
-  auto iter = freeList.lower_bound(size);
-  if (iter != freeList.end() && (iter->second->size >= size) && (iter->second->size < (size << shiftFactor))) {
+  auto iter = free_list_.lower_bound(size);
+  if (iter != free_list_.end() && (iter->second->size >= size) && (iter->second->size < (size << shift_factor_))) {
     auto membuf = iter->second;
-    freeList.erase(iter);
-    allocatedList[membuf->buf] = membuf;
+    free_list_.erase(iter);
+    allocated_list_[membuf->buf] = membuf;
     UnLock();
     return membuf->buf;
   }
@@ -68,7 +68,7 @@ void *DefaultAllocator::Malloc(size_t size) {
   membuf->size = size;
   membuf->buf = reinterpret_cast<char *>(membuf.get()) + sizeof(MemBuf);
   auto bufPtr = membuf->buf;
-  allocatedList[bufPtr] = membuf.release();
+  allocated_list_[bufPtr] = membuf.release();
   UnLock();
   return bufPtr;
 }
@@ -78,11 +78,11 @@ void DefaultAllocator::Free(void *buf) {
     return;
   }
   Lock();
-  auto iter = allocatedList.find(buf);
-  if (iter != allocatedList.end()) {
+  auto iter = allocated_list_.find(buf);
+  if (iter != allocated_list_.end()) {
     auto membuf = iter->second;
-    allocatedList.erase(iter);
-    freeList.insert(std::make_pair(membuf->size, membuf));
+    allocated_list_.erase(iter);
+    free_list_.insert(std::make_pair(membuf->size, membuf));
     UnLock();
     return;
   }
@@ -94,12 +94,12 @@ size_t DefaultAllocator::GetTotalSize() {
   Lock();
   size_t totalSize = 0;
 
-  for (auto it = allocatedList.begin(); it != allocatedList.end(); it++) {
+  for (auto it = allocated_list_.begin(); it != allocated_list_.end(); it++) {
     auto membuf = it->second;
     totalSize += membuf->size;
   }
 
-  for (auto it = freeList.begin(); it != freeList.end(); it++) {
+  for (auto it = free_list_.begin(); it != free_list_.end(); it++) {
     auto membuf = it->second;
     totalSize += membuf->size;
   }
@@ -110,15 +110,15 @@ size_t DefaultAllocator::GetTotalSize() {
 void DefaultAllocator::Clear() {
   Lock();
 
-  for (auto it = allocatedList.begin(); it != allocatedList.end(); it++) {
+  for (auto it = allocated_list_.begin(); it != allocated_list_.end(); it++) {
     free(it->second);
   }
-  allocatedList.clear();
+  allocated_list_.clear();
 
-  for (auto it = freeList.begin(); it != freeList.end(); it++) {
+  for (auto it = free_list_.begin(); it != free_list_.end(); it++) {
     free(it->second);
   }
-  freeList.clear();
+  free_list_.clear();
   UnLock();
 }
 }  // namespace mindspore::lite

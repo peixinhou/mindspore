@@ -26,18 +26,18 @@ void LayerNormInt8CPUKernel::SetQuantArgs() {
   lite::Tensor *input = in_tensors_.at(0);
   lite::Tensor *output = out_tensors_.at(0);
 
-  quant_param_.in_quant_arg_.zp_ = input->GetQuantParams().front().zeroPoint;
-  quant_param_.in_quant_arg_.scale_ = input->GetQuantParams().front().scale;
-  quant_param_.out_quant_arg_.zp_ = output->GetQuantParams().front().zeroPoint;
-  quant_param_.out_quant_arg_.scale_ = output->GetQuantParams().front().scale;
+  quant_param_.in_quant_arg_.zp_ = input->quant_params().front().zeroPoint;
+  quant_param_.in_quant_arg_.scale_ = input->quant_params().front().scale;
+  quant_param_.out_quant_arg_.zp_ = output->quant_params().front().zeroPoint;
+  quant_param_.out_quant_arg_.scale_ = output->quant_params().front().scale;
 
   quant_param_.output_activation_min_ = std::numeric_limits<int8_t>::min();
   quant_param_.output_activation_max_ = std::numeric_limits<int8_t>::max();
 
   if (param_->elementwise_affine_) {
     lite::Tensor *gamma_tensor = out_tensors_.at(1);
-    quant_param_.gamma_quant_arg_.zp_ = gamma_tensor->GetQuantParams().front().zeroPoint;
-    quant_param_.gamma_quant_arg_.scale_ = gamma_tensor->GetQuantParams().front().scale;
+    quant_param_.gamma_quant_arg_.zp_ = gamma_tensor->quant_params().front().zeroPoint;
+    quant_param_.gamma_quant_arg_.scale_ = gamma_tensor->quant_params().front().scale;
   }
 
   double in_scale;
