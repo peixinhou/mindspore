@@ -130,7 +130,7 @@ STATUS TransOpInsertPass::FindOutTransType() {
 
 STATUS TransOpInsertPass::ChangeOpAxis(schema::MetaGraphT *graph, const std::unique_ptr<CNodeT> &node) {
   MS_ASSERT(graph != nullptr);
-  if (node == nullptr && node->primitive == nullptr) {
+  if (node == nullptr || node->primitive == nullptr) {
     MS_LOG(ERROR) << "node or primitive null";
     return RET_NULL_PTR;
   }
@@ -234,7 +234,7 @@ STATUS TransOpInsertPass::Run(schema::MetaGraphT *graph) {
     changed = false;
     for (auto iter = graph->nodes.begin(); iter != graph->nodes.end(); iter++) {
       auto &node = *iter;
-      if (node == nullptr && node->primitive == nullptr) {
+      if (node == nullptr || node->primitive == nullptr) {
         MS_LOG(ERROR) << "node or primitive null";
         return RET_NULL_PTR;
       }
