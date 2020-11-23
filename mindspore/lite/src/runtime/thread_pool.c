@@ -846,24 +846,6 @@ ThreadPool *CreateThreadPool(int thread_num, int mode) {
   return thread_pool;
 }
 
-void ActivateThreadPool(struct ThreadPool *thread_pool) {
-  if (thread_pool == NULL) {
-    LOG_ERROR("get thread pool instane failed");
-    return;
-  }
-  ThreadList *thread_list = thread_pool->thread_list;
-  if (thread_list == NULL) {
-    LOG_ERROR("thread pool's list is null");
-    return;
-  }
-  Thread *thread = thread_list->head;
-  while (thread != NULL) {
-    sem_post(&thread->sem);
-    thread->activate = true;
-    thread = thread->next;
-  }
-}
-
 void DeactivateThreadPool(struct ThreadPool *thread_pool) {
   if (thread_pool == NULL) {
     LOG_ERROR("get thread pool instane failed");
@@ -902,12 +884,4 @@ void DestroyThreadPool(struct ThreadPool *thread_pool) {
   free(thread_pool->thread_list);
   thread_pool->thread_list = NULL;
   LOG_INFO("destroy thread pool success");
-}
-
-int GetCurrentThreadNum(struct ThreadPool *thread_pool) {
-  if (thread_pool == NULL) {
-    LOG_ERROR("get thread pool instane failed");
-    return 0;
-  }
-  return thread_pool->thread_num;
 }

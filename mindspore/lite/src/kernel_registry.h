@@ -35,9 +35,8 @@ class KernelRegistry {
   virtual ~KernelRegistry();
 
   static KernelRegistry *GetInstance();
-  int Init();
+  static int Init();
   virtual kernel::KernelCreator GetCreator(const kernel::KernelKey &desc);
-  const kernel::KernelCreator *GetCreatorArrays();
   int GetCreatorFuncIndex(kernel::KernelKey desc);
   void RegKernel(kernel::KernelKey desc, kernel::KernelCreator creator);
   void RegKernel(kernel::KERNEL_ARCH arch, TypeId data_type, schema::PrimitiveType type, kernel::KernelCreator creator);
@@ -51,12 +50,11 @@ class KernelRegistry {
   static const int op_type_length_{PrimitiveType_MAX - PrimitiveType_MIN + 1};
   static const int array_size_{device_type_length_ * data_type_length_ * op_type_length_};
   kernel::KernelCreator creator_arrays_[array_size_] = {nullptr};
-  std::vector<OpParameter *> op_parameters_;
 };
 
 class KernelRegistrar {
  public:
-  KernelRegistrar(const kernel::KernelKey &desc, kernel::KernelCreator creator) {
+  KernelRegistrar(const kernel::KernelKey &desc, const kernel::KernelCreator creator) {
     KernelRegistry::GetInstance()->RegKernel(desc, creator);
   }
   ~KernelRegistrar() = default;
