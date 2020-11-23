@@ -48,24 +48,24 @@ uint64_t GetTimeUs() {
     return 0;
   }
   // USECS_IN_SEC *NSECS_IN_USEC;
-  auto retval = static_cast<uint64_t>((ts.tv_sec * USEC) + (ts.tv_nsec / MSEC));
-  return retval;
+  auto ret_val = static_cast<uint64_t>((ts.tv_sec * USEC) + (ts.tv_nsec / MSEC));
+  return ret_val;
 }
 
-std::string Remove(const std::string &from, const std::string &subStr, Mode mode) {
+std::string RemoveSubStr(const std::string &from, const std::string &sub_str, RemoveSubStrMode mode) {
   std::string result = from;
   if (mode == PREFIX) {
-    if (from.substr(0, subStr.length()) == subStr) {
-      result = from.substr(subStr.size());
+    if (from.substr(0, sub_str.length()) == sub_str) {
+      result = from.substr(sub_str.size());
     }
   } else if (mode == SUFFIX) {
-    if (from.rfind(subStr) == from.size() - subStr.size()) {
-      result = from.substr(0, from.size() - subStr.size());
+    if (from.rfind(sub_str) == from.size() - sub_str.size()) {
+      result = from.substr(0, from.size() - sub_str.size());
     }
   } else {
     size_t index;
-    while ((index = result.find(subStr)) != std::string::npos) {
-      result = result.erase(index, subStr.size());
+    while ((index = result.find(sub_str)) != std::string::npos) {
+      result = result.erase(index, sub_str.size());
     }
   }
 
@@ -75,13 +75,13 @@ std::string Remove(const std::string &from, const std::string &subStr, Mode mode
 std::vector<std::string> StrSplit(const std::string &str, const std::string &pattern) {
   std::string::size_type pos;
   std::vector<std::string> result;
-  std::string tmpStr(str + pattern);
-  std::string::size_type size = tmpStr.size();
+  std::string tmp_str(str + pattern);
+  std::string::size_type size = tmp_str.size();
 
   for (std::string::size_type i = 0; i < size; i++) {
-    pos = tmpStr.find(pattern, i);
+    pos = tmp_str.find(pattern, i);
     if (pos < size) {
-      std::string s = tmpStr.substr(i, pos - i);
+      std::string s = tmp_str.substr(i, pos - i);
       result.push_back(s);
       i = pos + pattern.size() - 1;
     }
@@ -90,8 +90,8 @@ std::vector<std::string> StrSplit(const std::string &str, const std::string &pat
 }
 
 std::vector<std::string> Tokenize(const std::string &src, const std::string &delimiters,
-                                  const Option<size_t> &maxTokenNum) {
-  if (maxTokenNum.IsSome() && maxTokenNum.Get() == 0) {
+                                  const Option<size_t> &max_token_num) {
+  if (max_token_num.IsSome() && max_token_num.Get() == 0) {
     return {};
   }
 
@@ -99,17 +99,17 @@ std::vector<std::string> Tokenize(const std::string &src, const std::string &del
   size_t offset = 0;
 
   while (true) {
-    size_t nonDelimiter = src.find_first_not_of(delimiters, offset);
-    if (nonDelimiter == std::string::npos) {
+    size_t non_delimiter = src.find_first_not_of(delimiters, offset);
+    if (non_delimiter == std::string::npos) {
       break;
     }
-    size_t delimiter = src.find_first_of(delimiters, nonDelimiter);
-    if (delimiter == std::string::npos || (maxTokenNum.IsSome() && tokens.size() == maxTokenNum.Get() - 1)) {
-      tokens.push_back(src.substr(nonDelimiter));
+    size_t delimiter = src.find_first_of(delimiters, non_delimiter);
+    if (delimiter == std::string::npos || (max_token_num.IsSome() && tokens.size() == max_token_num.Get() - 1)) {
+      tokens.push_back(src.substr(non_delimiter));
       break;
     }
 
-    tokens.push_back(src.substr(nonDelimiter, delimiter - nonDelimiter));
+    tokens.push_back(src.substr(non_delimiter, delimiter - non_delimiter));
     offset = delimiter;
   }
   return tokens;

@@ -37,12 +37,12 @@ int QuantizedAddCPUKernel::Init() {
   MS_ASSERT(input1);
   MS_ASSERT(output);
 
-  para_.input0_scale_ = input0->GetQuantParams().front().scale;
-  para_.input0_offset_ = input0->GetQuantParams().front().zeroPoint * -1;
-  para_.input1_scale_ = input1->GetQuantParams().front().scale;
-  para_.input1_offset_ = input1->GetQuantParams().front().zeroPoint * -1;
-  para_.output_scale_ = output->GetQuantParams().front().scale;
-  para_.output_offset_ = output->GetQuantParams().front().zeroPoint;
+  para_.input0_scale_ = input0->quant_params().front().scale;
+  para_.input0_offset_ = input0->quant_params().front().zeroPoint * -1;
+  para_.input1_scale_ = input1->quant_params().front().scale;
+  para_.input1_offset_ = input1->quant_params().front().zeroPoint * -1;
+  para_.output_scale_ = output->quant_params().front().scale;
+  para_.output_offset_ = output->quant_params().front().zeroPoint;
 
   const int left_shift = 20;  // 1 << 20, 2/20
   const double twice_max_input_scale = 2 * std::max(para_.input0_scale_, para_.input1_scale_);

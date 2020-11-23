@@ -58,8 +58,8 @@ int Tile::UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &input
     } else {
       attr->dims = GetValue<std::vector<int>>(prim.GetAttr("dims"));
     }
-    if (inputs.size() == kAnfPopulaterTwo) {
-      auto inputNode = inputs[kAnfPopulaterOne];
+    if (inputs.size() == kAnfPopulaterInputNumTwo) {
+      auto inputNode = inputs[kAnfPopulaterInputNumOne];
       MS_ASSERT(inputNode != nullptr);
       if (inputNode->isa<ValueNode>()) {
         auto valueNode = inputNode->cast<ValueNodePtr>();
@@ -133,8 +133,8 @@ int Tile::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> output
   auto output = outputs_.front();
   MS_ASSERT(output != nullptr);
   output->set_data_type(input->data_type());
-  output->SetFormat(input->GetFormat());
-  if (!GetInferFlag()) {
+  output->set_format(input->format());
+  if (!infer_flag()) {
     return RET_OK;
   }
 
