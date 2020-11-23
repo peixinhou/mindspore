@@ -93,7 +93,12 @@ int LiteKernel::PreProcess() {
   auto outputs = this->out_tensors();
   for (auto *output : outputs) {
     MS_ASSERT(output != nullptr);
-    output->MallocData();
+
+    auto ret = output->MallocData();
+    if (ret != RET_OK) {
+      MS_LOG(ERROR) << "MallocData failed";
+      return ret;
+    }
   }
   return RET_OK;
 }
@@ -242,42 +247,6 @@ std::vector<lite::Tensor *> LiteKernelUtil::SubgraphOutputTensors(const std::vec
   return output_tensors;
 }
 
-int LiteKernelUtil::TopologicalSortKernels(std::vector<kernel::LiteKernel *> *kernels) {
-  auto old_kernels = *kernels;
-  kernels->clear();
-  std::queue<kernel::LiteKernel *> kernel_queue;
-  for (auto kernel : old_kernels) {
-    if (kernel->in_kernels().empty()) {
-      kernel_queue.push(kernel);
-      kernels->emplace_back(kernel);
-    }
-  }
-  while (!kernel_queue.empty()) {
-    auto cur_kernel = kernel_queue.front();
-    kernel_queue.pop();
-    MS_ASSERT(cur_kernel != nullptr);
-    auto next_kernels = cur_kernel->out_kernels();
-    for (auto next_kernel : next_kernels) {
-      auto in_kernels = next_kernel->in_kernels();
-      if (lite::IsContain(*kernels, const_cast<kernel::LiteKernel *>(next_kernel))) {
-        MS_LOG(ERROR) << "TopologicalSortKernels failed, loop exist";
-        return RET_ERROR;
-      }
-      if (std::all_of(in_kernels.begin(), in_kernels.end(), [&](const kernel::LiteKernel *in_kernel) {
-            return lite::IsContain(*kernels, const_cast<kernel::LiteKernel *>(in_kernel));
-          })) {
-        kernel_queue.push(next_kernel);
-      }
-    }
-  }
-  if (kernels->size() != old_kernels.size()) {
-    MS_LOG(ERROR) << "TopologicalSortKernels failed, kernels size before sort: " << old_kernels.size()
-                  << ", kernels size after sort: " << kernels->size();
-    return RET_ERROR;
-  }
-  return RET_OK;
-}
-
 void LiteKernelUtil::InitIOKernels(std::vector<kernel::LiteKernel *> &kernels) {
   for (auto *kernel : kernels) {
     // clean io kernels
@@ -308,5 +277,5 @@ void LiteKernelUtil::InitTensorRefCount(std::vector<kernel::LiteKernel *> &kerne
   }
 }
 
-int LiteKernelUtil::SetInput(LiteKernel &kernelMod, std::vector<lite::Tensor *> inputs) { return -1; }
+int LiteKernelUtil::SetInput(LiteKernel &kernelMod, const std::vector<lite::Tensor *> &inputs) { return -1; }
 }  // namespace mindspore::kernel
