@@ -54,10 +54,6 @@ int BiasAdd::UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &in
       attr->axis = GetValue<std::vector<int>>(prim.GetAttr("axis"));
     }
     this->primitive_->value.value = attr;
-    if (this->primitive_->value.value == nullptr) {
-      MS_LOG(ERROR) << "primitive value is nullptr";
-      return RET_ERROR;
-    }
   }
   return RET_OK;
 }
