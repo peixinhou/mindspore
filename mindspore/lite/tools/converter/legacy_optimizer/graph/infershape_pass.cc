@@ -32,15 +32,18 @@ namespace {
 void FreeTensors(std::vector<Tensor *> input_tensors, std::vector<Tensor *> output_tensors) {
   for (auto &tensor : input_tensors) {
     delete tensor;
+    tensor = nullptr;
   }
   for (auto &tensor : output_tensors) {
     delete tensor;
+    tensor = nullptr;
   }
   input_tensors.clear();
   input_tensors.shrink_to_fit();
   output_tensors.clear();
   output_tensors.shrink_to_fit();
 }
+
 std::vector<Tensor *> ConvertTensorToLiteTensor(MetaGraphT *graph, const std::vector<uint32_t> &tensor_indexs,
                                                 const schema::PrimitiveType node_type) {
   MS_ASSERT(graph != nullptr);
