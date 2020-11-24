@@ -36,6 +36,7 @@ int RangeCPUKernel::Run() {
   size_t limit = (reinterpret_cast<RangeParameter *>(op_parameter_))->limit_;
   size_t delta = (reinterpret_cast<RangeParameter *>(op_parameter_))->delta_;
   auto output_ptr = reinterpret_cast<float *>(out_tensors_.at(0)->MutableData());
+  MS_ASSERT(output_ptr);
   Range(output_ptr, start, limit, delta);
   return RET_OK;
 }

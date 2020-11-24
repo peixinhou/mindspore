@@ -103,8 +103,11 @@ int MulInt8CPUKernel::ReSize() {
 
 int MulInt8CPUKernel::Run() {
   input0_data_ = static_cast<int8_t *>(in_tensors_.at(0)->MutableData());
+  MS_ASSERT(input0_data_);
   input1_data_ = static_cast<int8_t *>(in_tensors_.at(1)->MutableData());
+  MS_ASSERT(input1_data_);
   output_data_ = static_cast<int8_t *>(out_tensors_.at(0)->MutableData());
+  MS_ASSERT(output_data_);
 
   elements_num_ = out_tensors_.at(0)->ElementsNum();
   count_unit_ = thread_count_ > 1 ? UP_DIV(elements_num_, thread_count_) : elements_num_;
