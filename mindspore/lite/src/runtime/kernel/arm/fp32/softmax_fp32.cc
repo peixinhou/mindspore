@@ -71,9 +71,13 @@ int SoftmaxCPUKernel::ReSize() {
 }
 
 int SoftmaxCPUKernel::Run() {
+  MS_ASSERT(sum_data_);
   memset(sum_data_, 0, in_plane_size_ * out_plane_size_ * sizeof(float));
   auto input_ptr = reinterpret_cast<float *>(in_tensors_.at(kInputIndex)->MutableData());
   auto output_ptr = reinterpret_cast<float *>(out_tensors_.at(kOutputIndex)->MutableData());
+  MS_ASSERT(input_ptr);
+  MS_ASSERT(output_ptr);
+  MS_ASSERT(softmax_param_);
   Softmax(input_ptr, output_ptr, sum_data_, softmax_param_);
   return RET_OK;
 }

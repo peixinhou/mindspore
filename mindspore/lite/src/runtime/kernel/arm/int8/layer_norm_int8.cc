@@ -93,7 +93,9 @@ int LayerNormInt8CPUKernel::DoExecute(int task_id) {
   }
 
   const int8_t *thread_src = src_ptr_ + task_id * param_->thread_outsize_ * inner_size_;
+  MS_ASSERT(thread_src);
   int8_t *thread_dst = dst_ptr_ + task_id * param_->thread_outsize_ * inner_size_;
+  MS_ASSERT(thread_dst);
 
   LayerNormInt8(thread_src, gamma_ptr_, beta_ptr_, thread_dst, param_->elementwise_affine_, current_out_size,
                 inner_size_, &quant_param_);
@@ -105,7 +107,9 @@ int LayerNormInt8CPUKernel::Run() {
   dst_ptr_ = reinterpret_cast<int8_t *>(out_tensors_.at(0)->MutableData());
   if (param_->elementwise_affine_) {
     gamma_ptr_ = reinterpret_cast<int8_t *>(in_tensors_.at(1)->MutableData());
+    MS_ASSERT(gamma_ptr_);
     beta_ptr_ = reinterpret_cast<int32_t *>(in_tensors_.at(2)->MutableData());
+    MS_ASSERT(beta_ptr_);
   }
 
   auto ret = ParallelLaunch(this->context_->thread_pool_, LayerNormInt8Run, this, op_parameter_->thread_num_);

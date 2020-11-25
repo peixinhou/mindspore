@@ -42,7 +42,7 @@ int SpaceToBatchCPUKernel::ReSize() {
     return RET_FORMAT_ERR;
   }
   SpaceToBatchParameter *param = reinterpret_cast<SpaceToBatchParameter *>(this->op_parameter_);
-
+  MS_ASSERT(param);
   for (size_t i = 0; i < DIMENSION_4D; i++) {
     param->input_shape_[i] = input_tensor->shape().at(i);
     param->output_shape_[i] = output_tensor->shape().at(i);
@@ -68,7 +68,9 @@ int SpaceToBatchCPUKernel::Run() {
   auto input_tensor = in_tensors_.at(0);
   auto output_tensor = out_tensors_.at(0);
   auto input_ptr = reinterpret_cast<const float *>(input_tensor->MutableData());
+  MS_ASSERT(input_ptr);
   auto output_ptr = reinterpret_cast<float *>(output_tensor->MutableData());
+  MS_ASSERT(output_ptr);
   SpaceToBatchParameter *param = reinterpret_cast<SpaceToBatchParameter *>(this->op_parameter_);
 
   if (param->need_paddings_) {
