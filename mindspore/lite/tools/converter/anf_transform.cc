@@ -53,9 +53,8 @@ FuncGraphPtr AnfTransform::Transform(const FuncGraphPtr &old_graph, const conver
   }
   // fusion const_fold
   auto optimizer = std::make_shared<opt::GraphOptimizer>();
-  auto pm = std::make_shared<opt::PassManager>("anf fusion pass manager", false);
+  auto fusion_pm = std::make_shared<opt::PassManager>("anf fusion pass manager", false);
   auto graph_pm = std::make_shared<opt::PassManager>("anf graph pass manager", true);
-  auto convert_pm = std::make_shared<opt::PassManager>("anf graph convert pass manager", true);
 
   // for now - trainning is not supporting fuse operations
   if (config != nullptr && !config->trainModel) {
@@ -63,22 +62,16 @@ FuncGraphPtr AnfTransform::Transform(const FuncGraphPtr &old_graph, const conver
     if (config->fmk == lite::converter::FmkType_ONNX) {
       auto remove_identity_pass = std::make_shared<opt::RemoveIdentityOpPass>();
       remove_identity_pass->SetFmkType(config->fmk);
-      pm->AddPass(remove_identity_pass);
+      fusion_pm->AddPass(remove_identity_pass);
     }
-    pm->AddPass(std::make_shared<opt::ConvBiasaddFusion>());
-    pm->AddPass(std::make_shared<opt::ConvBatchNormFusion>());
-    pm->AddPass(std::make_shared<opt::ConvScaleFusion>());
-    pm->AddPass(std::make_shared<opt::LayerNormFusion>());
-    pm->AddPass(std::make_shared<opt::BatchMatMulFusion>());
-    pm->AddPass(std::make_shared<opt::SigmoidMulFusion>());
-    pm->AddPass(std::make_shared<opt::ConvActivationFusion>(true, "conv_relu", schema::PrimitiveType_Activation,
-                                                            schema::ActivationType_RELU));
-    pm->AddPass(std::make_shared<opt::ConvActivationFusion>(true, "conv_relu6", schema::PrimitiveType_Activation,
-                                                            schema::ActivationType_RELU6));
-    pm->AddPass(std::make_shared<opt::ConvTupleActivationFusion>(
-      true, "conv_tuple_relu", schema::PrimitiveType_Activation, schema::ActivationType_RELU));
-    pm->AddPass(std::make_shared<opt::ConvTupleActivationFusion>(
-      true, "conv_tuple_relu6", schema::PrimitiveType_Activation, schema::ActivationType_RELU6));
+    fusion_pm->AddPass(std::make_shared<opt::ConvBiasaddFusion>());
+    fusion_pm->AddPass(std::make_shared<opt::ConvBatchNormFusion>());
+    fusion_pm->AddPass(std::make_shared<opt::ConvScaleFusion>());
+    fusion_pm->AddPass(std::make_shared<opt::LayerNormFusion>());
+    fusion_pm->AddPass(std::make_shared<opt::BatchMatMulFusion>());
+    fusion_pm->AddPass(std::make_shared<opt::SigmoidMulFusion>());
+    fusion_pm->AddPass(std::make_shared<opt::ConvActivationFusion>());
+    fusion_pm->AddPass(std::make_shared<opt::ConvTupleActivationFusion>());
   }
   auto weight_format_hardcode_pass = std::make_shared<opt::WeightFormatHardCodePass>();
   weight_format_hardcode_pass->SetFmkType(config->fmk);
@@ -96,7 +89,7 @@ FuncGraphPtr AnfTransform::Transform(const FuncGraphPtr &old_graph, const conver
       return nullptr;
     }
     remove_unused_cast_pass->SetFmkType(config->fmk);
-    pm->AddPass(remove_unused_cast_pass);
+    fusion_pm->AddPass(remove_unused_cast_pass);
   }
   if (config->fmk == lite::converter::FmkType_ONNX) {
     auto remove_unused_transpose_pass = std::make_shared<opt::RemoveUnusedTransposeOpPass>();
@@ -105,12 +98,17 @@ FuncGraphPtr AnfTransform::Transform(const FuncGraphPtr &old_graph, const conver
       return nullptr;
     }
     remove_unused_transpose_pass->SetFmkType(config->fmk);
-    pm->AddPass(remove_unused_transpose_pass);
+    fusion_pm->AddPass(remove_unused_transpose_pass);
   }
-  pm->AddPass(std::make_shared<opt::ConstFoldPass>());
+  auto const_fold_pm = std::make_shared<opt::PassManager>("const fold fusion pass manager", false);
+  auto inne_context_ptr = std::make_shared<lite::InnerContext>();
+  inne_context_ptr->Init();
+  const_fold_pm->AddPass(std::make_shared<opt::ConstFoldPass>(inne_context_ptr));
+  auto convert_pm = std::make_shared<opt::PassManager>("anf graph convert pass manager", true);
   convert_pm->AddPass(std::make_shared<opt::ClipConvertActivationPass>());
+  optimizer->AddPassManager(const_fold_pm);
   optimizer->AddPassManager(convert_pm);
-  optimizer->AddPassManager(pm);
+  optimizer->AddPassManager(fusion_pm);
   optimizer->AddPassManager(graph_pm);
   auto new_graph = optimizer->Optimize(old_graph);
   if (new_graph == nullptr) {
