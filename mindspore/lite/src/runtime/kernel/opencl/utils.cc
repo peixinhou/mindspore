@@ -291,7 +291,7 @@ void PrintTensor(const lite::Tensor *tensor, OpenCLMemType mem_type, int n, cons
   printf("\n");
 
   if (!out_file.empty()) {
-    WriteToBin(out_file, data.data(), data.size());
+    (void)WriteToBin(out_file, data.data(), data.size());
   }
 }
 

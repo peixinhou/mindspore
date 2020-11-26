@@ -168,14 +168,14 @@ int MatmulCPUKernel::ReSize() {
   return RET_OK;
 }
 
-void MatmulCPUKernel::InitMatrixA(float *src_ptr, float *dst_ptr) {
+void MatmulCPUKernel::InitMatrixA(const float *src_ptr, float *dst_ptr) {
   if (is_vector_a_) {
     memcpy(dst_ptr, src_ptr, params_->batch * params_->deep_ * sizeof(float));
     return;
   }
 
   for (int i = 0; i < params_->batch; i++) {
-    float *src = src_ptr + i * params_->deep_ * params_->row_;
+    const float *src = src_ptr + i * params_->deep_ * params_->row_;
 #ifdef ENABLE_ARM32
     float *dst = dst_ptr + i * params_->deep_ * params_->row_4_;
     if (params_->a_transpose_) {
@@ -195,13 +195,13 @@ void MatmulCPUKernel::InitMatrixA(float *src_ptr, float *dst_ptr) {
   return;
 }
 
-void MatmulCPUKernel::InitMatrixB(float *src_ptr, float *dst_ptr) {
+void MatmulCPUKernel::InitMatrixB(const float *src_ptr, float *dst_ptr) {
   if (is_vector_a_) {
     if (params_->b_transpose_) {
       memcpy(dst_ptr, src_ptr, params_->batch * params_->col_ * params_->deep_ * sizeof(float));
     } else {
       for (int i = 0; i < params_->batch; i++) {
-        float *src = src_ptr + i * params_->deep_ * params_->col_;
+        const float *src = src_ptr + i * params_->deep_ * params_->col_;
         float *dst = dst_ptr + i * params_->deep_ * params_->col_;
         RowMajor2ColMajor(src, dst, params_->deep_, params_->col_);
       }
@@ -210,7 +210,7 @@ void MatmulCPUKernel::InitMatrixB(float *src_ptr, float *dst_ptr) {
   }
 
   for (int i = 0; i < params_->batch; i++) {
-    float *src = src_ptr + i * params_->deep_ * params_->col_;
+    const float *src = src_ptr + i * params_->deep_ * params_->col_;
     float *dst = dst_ptr + i * params_->deep_ * params_->col_8_;
     if (params_->b_transpose_) {
       RowMajor2Col8Major(src, dst, params_->col_, params_->deep_);
