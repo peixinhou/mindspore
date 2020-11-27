@@ -18,10 +18,10 @@
 #include <math.h>
 
 // output = exp(input) / reduce_sum(exp(input), axis)
-void Softmax(const float *input_ptr, float *output_ptr, float *sum_data, SoftmaxParameter *parameter) {
+void Softmax(const float *input_ptr, float *output_ptr, float *sum_data, const SoftmaxParameter *parameter) {
   int axis = parameter->axis_;
   int n_dim = parameter->n_dim_;
-  int *input_shape = parameter->input_shape_;
+  const int *input_shape = parameter->input_shape_;
   int inner_size = 1;
   int outter_size = 1;
 
