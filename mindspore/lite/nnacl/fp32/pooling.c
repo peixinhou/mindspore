@@ -18,8 +18,8 @@
 #include <float.h>
 #include "nnacl/errorcode.h"
 
-int AvgPooling(const float *input_ptr, float *output_ptr, PoolingParameter *pooling_param, int task_id, float minf,
-               float maxf) {
+int AvgPooling(const float *input_ptr, float *output_ptr, const PoolingParameter *pooling_param, int task_id,
+               float minf, float maxf) {
   int stride_w = pooling_param->stride_w_;
   int stride_h = pooling_param->stride_h_;
   int pad_w = pooling_param->pad_l_;
@@ -150,8 +150,8 @@ int AvgPooling(const float *input_ptr, float *output_ptr, PoolingParameter *pool
   return NNACL_OK;
 }
 
-void MaxPooling(const float *input_ptr, float *output_ptr, PoolingParameter *pooling_param, int task_id, float minf,
-                float maxf) {
+void MaxPooling(const float *input_ptr, float *output_ptr, const PoolingParameter *pooling_param, int task_id,
+                float minf, float maxf) {
   int stride_w = pooling_param->stride_w_;
   int stride_h = pooling_param->stride_h_;
   int pad_w = pooling_param->pad_l_;
