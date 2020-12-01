@@ -263,7 +263,7 @@ int StridedSlice::InferShape(std::vector<lite::Tensor *> inputs, std::vector<lit
   }
   auto input = inputs.at(0);
   outputs.front()->set_data_type(input->data_type());
-  outputs[0]->set_format(input->format());
+  outputs.at(0)->set_format(input->format());
   MS_ASSERT(input != nullptr);
   auto input_shape = input->shape();
   auto inferflag = infer_flag();
@@ -275,9 +275,9 @@ int StridedSlice::InferShape(std::vector<lite::Tensor *> inputs, std::vector<lit
       if (inferflag) {
         in_shape_.emplace_back(input_shape.at(i));
       }
-      begins_.emplace_back((GetBegin())[i]);
-      ends_.emplace_back((GetEnd())[i]);
-      strides_.emplace_back((GetStride())[i]);
+      begins_.emplace_back((GetBegin()).at(i));
+      ends_.emplace_back((GetEnd()).at(i));
+      strides_.emplace_back((GetStride()).at(i));
     }
   } else {
     auto begin_tensor = inputs.at(1);
