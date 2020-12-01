@@ -117,7 +117,7 @@ int MatMul::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> outp
     return RET_INPUT_TENSOR_ERROR;
   }
   for (size_t i = 0; i < a_shape.size() - 2; ++i) {
-    if (a_shape[i] != b_shape[i]) {
+    if (a_shape.at(i) != b_shape.at(i)) {
       MS_LOG(ERROR) << "Op MatMul's dimensions must be equal";
       return RET_INPUT_TENSOR_ERROR;
     }

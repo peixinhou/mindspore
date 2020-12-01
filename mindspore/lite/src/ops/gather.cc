@@ -57,8 +57,8 @@ int Gather::UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &inp
       gather_attr = nullptr;
       return RET_ERROR;
     }
-    if (inputs[2]->isa<ValueNode>()) {
-      ValueNodePtr axis_tensor = inputs[2]->cast<ValueNodePtr>();
+    if (inputs.at(2)->isa<ValueNode>()) {
+      ValueNodePtr axis_tensor = inputs.at(2)->cast<ValueNodePtr>();
       int axis = GetValue<int>(axis_tensor->value());
       gather_attr->axis = axis;
     } else {
