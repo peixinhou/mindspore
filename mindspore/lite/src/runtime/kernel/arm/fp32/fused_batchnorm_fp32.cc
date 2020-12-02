@@ -50,10 +50,10 @@ void FusedBatchnormCPUKernel::FreeScaleAndOffset() {
 }
 
 int FusedBatchnormCPUKernel::InitConstTensor() {
-  auto scale = in_tensors_[1];
-  auto offset = in_tensors_[2];
-  auto mean = in_tensors_[3];
-  auto variance = in_tensors_[4];
+  auto scale = in_tensors_.at(1);
+  auto offset = in_tensors_.at(2);
+  auto mean = in_tensors_.at(3);
+  auto variance = in_tensors_.at(4);
 
   scale_ = malloc(scale->Size());
   offset_ = malloc(offset->Size());
@@ -77,8 +77,8 @@ int FusedBatchnormCPUKernel::InitConstTensor() {
   memset(save_variance_, 0, variance->Size());
   if (out_tensors_.size() > 4) {
     for (size_t i = 1; i < out_tensors_.size(); i++) {
-      auto *data = static_cast<float *>(out_tensors_[i]->MutableData());
-      std::fill(data, data + out_tensors_[i]->ElementsNum(), 0.f);
+      auto *data = static_cast<float *>(out_tensors_.at(i)->MutableData());
+      std::fill(data, data + out_tensors_.at(i)->ElementsNum(), 0.f);
     }
   }
 
@@ -97,8 +97,8 @@ int FusedBatchnormCPUKernel::Run() {
     std::fill(var, var + in_tensors_[4]->ElementsNum(), 0.f);
     FusedBatchNormFp32MeanVar(in, mean, var, param, static_cast<float *>(save_mean_),
                               static_cast<float *>(save_variance_));
-    memcpy(out_tensors_[3]->MutableData(), save_mean_, out_tensors_[3]->Size());
-    memcpy(out_tensors_[4]->MutableData(), save_variance_, out_tensors_[3]->Size());
+    memcpy(out_tensors_.at(3)->MutableData(), save_mean_, out_tensors_.at(3)->Size());
+    memcpy(out_tensors_.at(3)->MutableData(), save_variance_, out_tensors_.at(3)->Size());
     memcpy(mean_, mean, in_tensors_[3]->Size());
     memcpy(variance_, var, in_tensors_[4]->Size());
     memcpy(scale_, scale, in_tensors_[1]->Size());
@@ -115,18 +115,18 @@ int FusedBatchnormCPUKernel::Run() {
 void FusedBatchnormCPUKernel::eval() {
   LiteKernel::eval();
   if (trained_) {
-    float *run_mean = static_cast<float *>(in_tensors_[3]->MutableData());
-    float *run_var = static_cast<float *>(in_tensors_[4]->MutableData());
-    float *scale = static_cast<float *>(in_tensors_[1]->MutableData());
-    float *bias = static_cast<float *>(in_tensors_[2]->MutableData());
+    float *run_mean = static_cast<float *>(in_tensors_.at(3)->MutableData());
+    float *run_var = static_cast<float *>(in_tensors_.at(4)->MutableData());
+    float *scale = static_cast<float *>(in_tensors_.at(1)->MutableData());
+    float *bias = static_cast<float *>(in_tensors_.at(2)->MutableData());
     // Copy to input tensors for Model export
-    memcpy(run_mean, save_mean_, in_tensors_[3]->Size());
-    memcpy(run_var, save_variance_, in_tensors_[4]->Size());
+    memcpy(run_mean, save_mean_, in_tensors_.at(3)->Size());
+    memcpy(run_var, save_variance_, in_tensors_.at(4)->Size());
     // Copy to local variables
-    memcpy(mean_, run_mean, in_tensors_[3]->Size());
-    memcpy(variance_, run_var, in_tensors_[4]->Size());
-    memcpy(scale_, scale, in_tensors_[1]->Size());
-    memcpy(offset_, bias, in_tensors_[2]->Size());
+    memcpy(mean_, run_mean, in_tensors_.at(3)->Size());
+    memcpy(variance_, run_var, in_tensors_.at(4)->Size());
+    memcpy(scale_, scale, in_tensors_.at(1)->Size());
+    memcpy(offset_, bias, in_tensors_.at(2)->Size());
   }
 }
 

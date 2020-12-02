@@ -49,8 +49,9 @@ void MatmulCPUKernel::FreeTmpBuffer() {
 }
 
 int MatmulCPUKernel::MallocMatrixABuffer() {
-  auto a_shape = in_tensors_[0]->shape();
+  auto a_shape = in_tensors_.at(0)->shape();
   int batch = 1;
+  MS_ASSERT(a_shape.size() >= 2);
   for (size_t i = 0; i < a_shape.size() - 2; ++i) {
     batch *= a_shape[i];
   }
@@ -85,11 +86,12 @@ int MatmulCPUKernel::MallocMatrixABuffer() {
 }
 
 int MatmulCPUKernel::MallocMatrixBBuffer() {
-  auto b_shape = in_tensors_[1]->shape();
+  auto b_shape = in_tensors_.at(1)->shape();
   if (b_shape.empty()) {
     return RET_OK;
   }
   int batch = 1;
+  MS_ASSERT(b_shape.size() >= 2);
   for (size_t i = 0; i < b_shape.size() - 2; ++i) {
     batch *= b_shape[i];
   }
@@ -113,8 +115,10 @@ int MatmulCPUKernel::MallocMatrixBBuffer() {
 
 int MatmulCPUKernel::InitBias() {
   if (in_tensors_.size() == 3) {
-    auto c_shape = out_tensors_[0]->shape();
+    auto c_shape = out_tensors_.at(0)->shape();
     auto bias_shape = in_tensors_[1]->shape();
+    MS_ASSERT(bias_shape.size() >= 1);
+    MS_ASSERT(c_shape.size() >= 1);
     if (bias_shape[bias_shape.size() - 1] != c_shape[c_shape.size() - 1]) {
       MS_LOG(ERROR) << "The bias'dimension is not equal with colum";
       FreeTmpBuffer();
@@ -222,8 +226,8 @@ void MatmulCPUKernel::InitMatrixB(const float *src_ptr, float *dst_ptr) {
 }
 
 int MatmulCPUKernel::Init() {
-  params_->a_init_shape_ = (in_tensors_[0]->shape().size() != 0);
-  params_->b_init_shape_ = (in_tensors_[1]->shape().size() != 0);
+  params_->a_init_shape_ = (in_tensors_.at(0)->shape().size() != 0);
+  params_->b_init_shape_ = (in_tensors_.at(1)->shape().size() != 0);
   if (params_->a_init_shape_ == true) {
     auto ret = MallocMatrixABuffer();
     if (ret != RET_OK) {
@@ -239,14 +243,14 @@ int MatmulCPUKernel::Init() {
     }
   }
 
-  params_->a_const_ = (in_tensors_[0]->data_c() != nullptr);
-  params_->b_const_ = (in_tensors_[1]->data_c() != nullptr);
+  params_->a_const_ = (in_tensors_.at(0)->data_c() != nullptr);
+  params_->b_const_ = (in_tensors_.at(1)->data_c() != nullptr);
   if (params_->a_const_ == true) {
-    InitMatrixA(reinterpret_cast<float *>(in_tensors_[0]->data_c()), a_pack_ptr_);
+    InitMatrixA(reinterpret_cast<float *>(in_tensors_.at(0)->data_c()), a_pack_ptr_);
     a_ptr_ = a_pack_ptr_;
   }
   if (params_->b_const_ == true) {
-    InitMatrixB(reinterpret_cast<float *>(in_tensors_[1]->data_c()), b_pack_ptr_);
+    InitMatrixB(reinterpret_cast<float *>(in_tensors_.at(1)->data_c()), b_pack_ptr_);
     b_ptr_ = b_pack_ptr_;
   }
   if (!InferShapeDone()) {
@@ -291,9 +295,9 @@ int MatmulFloatRun(void *cdata, int task_id) {
 }
 
 int MatmulCPUKernel::Run() {
-  auto a_src = reinterpret_cast<float *>(in_tensors_[0]->data_c());
-  auto b_src = reinterpret_cast<float *>(in_tensors_[1]->data_c());
-  auto c_src = reinterpret_cast<float *>(out_tensors_[0]->data_c());
+  auto a_src = reinterpret_cast<float *>(in_tensors_.at(0)->data_c());
+  auto b_src = reinterpret_cast<float *>(in_tensors_.at(1)->data_c());
+  auto c_src = reinterpret_cast<float *>(out_tensors_.at(0)->data_c());
 
   if (params_->a_const_ == false || is_train()) {
     if (is_vector_a_) {
@@ -331,10 +335,10 @@ void MatmulCPUKernel::eval() {
   // Copy weights after training
   LiteKernel::eval();
   if (params_->a_const_ == true) {
-    InitMatrixA(reinterpret_cast<float *>(in_tensors_[0]->MutableData()), a_pack_ptr_);
+    InitMatrixA(reinterpret_cast<float *>(in_tensors_.at(0)->MutableData()), a_pack_ptr_);
   }
   if (params_->b_const_ == true) {
-    InitMatrixB(reinterpret_cast<float *>(in_tensors_[1]->MutableData()), b_pack_ptr_);
+    InitMatrixB(reinterpret_cast<float *>(in_tensors_.at(1)->MutableData()), b_pack_ptr_);
   }
 }
 

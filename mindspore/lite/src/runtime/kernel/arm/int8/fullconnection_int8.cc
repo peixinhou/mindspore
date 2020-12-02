@@ -40,10 +40,10 @@ int FullconnectionInt8CPUKernel::Init() {
 int FullconnectionInt8CPUKernel::ReSize() {
   FreeTmpBuffer();
   int row = 1;
-  for (size_t i = 0; i < out_tensors_[0]->shape().size() - 1; ++i) row *= (out_tensors_[0]->shape())[i];
+  for (size_t i = 0; i < out_tensors_.at(0)->shape().size() - 1; ++i) row *= (out_tensors_.at(0)->shape()).at(i);
   fc_param_->row_ = row;
-  fc_param_->col_ = out_tensors_[0]->shape().back();
-  fc_param_->deep_ = (in_tensors_[1]->shape())[1];
+  fc_param_->col_ = out_tensors_.at(0)->shape().back();
+  fc_param_->deep_ = (in_tensors_.at(1)->shape()).at(1);
   fc_param_->row_8_ = UP_ROUND(fc_param_->row_, 8);
   fc_param_->col_8_ = UP_ROUND(fc_param_->col_, 8);
 
@@ -75,22 +75,22 @@ int FullconnectionInt8CPUKernel::ReSize() {
       FreeTmpBuffer();
       return RET_MEMORY_FAILED;
     }
-    memcpy(bias_ptr_, in_tensors_[2]->data_c(), bias_len);
+    memcpy(bias_ptr_, in_tensors_.at(2)->data_c(), bias_len);
   } else {
     bias_ptr_ = nullptr;
   }
 
-  auto input_tensor = in_tensors_[0];
+  auto input_tensor = in_tensors_.at(0);
   auto params = input_tensor->quant_params();
   MS_ASSERT(params.size() == 1);
   quant_params_.input.zp_ = params.front().zeroPoint;
   quant_params_.input.scale_ = params.front().scale;
-  auto weight_tensor = in_tensors_[1];
+  auto weight_tensor = in_tensors_.at(1);
   params = weight_tensor->quant_params();
   MS_ASSERT(params.size() == 1);
   quant_params_.weight.zp_ = params.front().zeroPoint;
   quant_params_.weight.scale_ = params.front().scale;
-  auto output_tensor = out_tensors_[0];
+  auto output_tensor = out_tensors_.at(0);
   params = output_tensor->quant_params();
   MS_ASSERT(params.size() == 1);
   quant_params_.output.zp_ = params.front().zeroPoint;
@@ -102,9 +102,9 @@ int FullconnectionInt8CPUKernel::ReSize() {
   CalculateActivationRangeQuantized(fc_param_->act_type_ == ActType_Relu, fc_param_->act_type_ == ActType_Relu6,
                                     quant_params_.output.zp_, quant_params_.output.scale_, &quant_params_.out_act_min,
                                     &quant_params_.out_act_max);
-  fc_param_->b_const_ = (in_tensors_[1]->data_c() != nullptr);
+  fc_param_->b_const_ = (in_tensors_.at(1)->data_c() != nullptr);
   if (fc_param_->b_const_) {
-    auto weight_data = reinterpret_cast<int8_t *>(in_tensors_[1]->data_c());
+    auto weight_data = reinterpret_cast<int8_t *>(in_tensors_.at(1)->data_c());
     RowMajor2Row16x4MajorInt8(weight_data, b_c16x4_ptr_, fc_param_->col_, fc_param_->deep_);
     CalcWeightBiasSums(weight_data, fc_param_->deep_, fc_param_->col_, quant_params_.input.zp_,
                        quant_params_.weight.zp_, bias_ptr_, weight_bias_sums_, ColMajor);
@@ -122,7 +122,7 @@ int FullconnectionInt8CPUKernel::RunImpl(int task_id) {
   auto &p = fc_param_;
   auto cur_b = b_c16x4_ptr_ + task_id * thread_stride_ * C4NUM * d16_;
   auto cur_bias = weight_bias_sums_ + task_id * thread_stride_ * C4NUM;
-  auto output_ptr = reinterpret_cast<int8_t *>(out_tensors_[0]->data_c());
+  auto output_ptr = reinterpret_cast<int8_t *>(out_tensors_.at(0)->data_c());
   auto cur_c = output_ptr + task_id * thread_stride_ * C4NUM;
 #ifdef ENABLE_ARM64
   MatmulInt8Neon64(a_r4x16_ptr_, cur_b, cur_c, r4_, cur_oc * C4NUM, d16_, input_sums_, cur_bias, q.out_act_min,
@@ -147,11 +147,11 @@ int FcInt8Run(void *cdata, int task_id) {
 }
 
 int FullconnectionInt8CPUKernel::Run() {
-  auto input_ptr = reinterpret_cast<int8_t *>(in_tensors_[0]->data_c());
+  auto input_ptr = reinterpret_cast<int8_t *>(in_tensors_.at(0)->data_c());
   RowMajor2Row16x4MajorInt8(input_ptr, a_r4x16_ptr_, fc_param_->row_, fc_param_->deep_);
   CalcInputSums(input_ptr, fc_param_->row_, fc_param_->deep_, quant_params_.weight.zp_, input_sums_, RowMajor);
   if (!fc_param_->b_const_) {
-    auto weight_data = reinterpret_cast<int8_t *>(in_tensors_[1]->data_c());
+    auto weight_data = reinterpret_cast<int8_t *>(in_tensors_.at(1)->data_c());
     RowMajor2Row16x4MajorInt8(weight_data, b_c16x4_ptr_, fc_param_->col_, fc_param_->deep_);
     CalcWeightBiasSums(weight_data, fc_param_->deep_, fc_param_->col_, quant_params_.input.zp_,
                        quant_params_.weight.zp_, bias_ptr_, weight_bias_sums_, ColMajor);

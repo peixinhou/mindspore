@@ -54,16 +54,18 @@ void MatmulFP16CPUKernel::FreeTmpBuffer() {
 int MatmulFP16CPUKernel::ReSize() {
   FreeTmpBuffer();
   int batch = 1;
-  auto a_shape = in_tensors_[0]->shape();
-  auto c_shape = out_tensors_[0]->shape();
+  auto a_shape = in_tensors_.at(0)->shape();
+  auto c_shape = out_tensors_.at(0)->shape();
   if (in_tensors_.size() == 3) {
-    auto bias_shape = in_tensors_[2]->shape();
+    auto bias_shape = in_tensors_.at(2)->shape();
+    MS_ASSERT(bias_shape.size() >= 1);
+    MS_ASSERT(c_shape.size() >= 1);
     if (bias_shape[bias_shape.size() - 1] != c_shape[c_shape.size() - 1]) {
       MS_LOG(ERROR) << "The bias' dimension is not equal with column";
       return RET_INPUT_TENSOR_ERROR;
     }
   }
-
+  MS_ASSERT(a_shape.size() >= 2);
   for (size_t i = 0; i < a_shape.size() - 2; ++i) {
     batch *= a_shape[i];
   }
@@ -92,20 +94,20 @@ int MatmulFP16CPUKernel::ReSize() {
   }
   memset(b_pack_ptr_, 0, params_->batch * params_->col_8_ * params_->deep_ * sizeof(float16_t));
 
-  params_->a_const_ = (in_tensors_[0]->data_c() != nullptr);
-  params_->b_const_ = (in_tensors_[1]->data_c() != nullptr);
+  params_->a_const_ = (in_tensors_.at(0)->data_c() != nullptr);
+  params_->b_const_ = (in_tensors_.at(1)->data_c() != nullptr);
   if (params_->a_const_ == true) {
-    if (in_tensors_[0]->data_type() == kNumberTypeFloat32) {
-      InitMatrixA(reinterpret_cast<float *>(in_tensors_[0]->data_c()), a_pack_ptr_);
+    if (in_tensors_.at(0)->data_type() == kNumberTypeFloat32) {
+      InitMatrixA(reinterpret_cast<float *>(in_tensors_.at(0)->data_c()), a_pack_ptr_);
     } else {
-      InitMatrixA(reinterpret_cast<float16_t *>(in_tensors_[0]->data_c()), a_pack_ptr_);
+      InitMatrixA(reinterpret_cast<float16_t *>(in_tensors_.at(0)->data_c()), a_pack_ptr_);
     }
   }
   if (params_->b_const_ == true) {
-    if (in_tensors_[1]->data_type() == kNumberTypeFloat32) {
-      InitMatrixB(reinterpret_cast<float *>(in_tensors_[1]->data_c()), b_pack_ptr_);
+    if (in_tensors_.at(1)->data_type() == kNumberTypeFloat32) {
+      InitMatrixB(reinterpret_cast<float *>(in_tensors_.at(1)->data_c()), b_pack_ptr_);
     } else {
-      InitMatrixB(reinterpret_cast<float16_t *>(in_tensors_[1]->data_c()), b_pack_ptr_);
+      InitMatrixB(reinterpret_cast<float16_t *>(in_tensors_.at(1)->data_c()), b_pack_ptr_);
     }
   }
 
@@ -119,7 +121,7 @@ int MatmulFP16CPUKernel::ReSize() {
     Float32ToFloat16(reinterpret_cast<float *>(in_tensors_[2]->data_c()), bias_ptr_, params_->col_);
   }
 
-  if (out_tensors_[0]->data_type() == kNumberTypeFloat32) {
+  if (out_tensors_.at(0)->data_type() == kNumberTypeFloat32) {
     output_ptr_ = reinterpret_cast<float16_t *>(
       ctx_->allocator->Malloc(params_->batch * params_->row_ * params_->col_ * sizeof(float16_t)));
     if (output_ptr_ == nullptr) {
@@ -211,7 +213,7 @@ int MatmulFP16Run(void *cdata, int task_id) {
 }
 
 int MatmulFP16CPUKernel::Run() {
-  auto out_tensor = out_tensors_[0];
+  auto out_tensor = out_tensors_.at(0);
   float16_t *c_ptr = nullptr;
   if (out_tensor->data_type() == kNumberTypeFloat32) {
     c_ptr = output_ptr_;
@@ -220,17 +222,17 @@ int MatmulFP16CPUKernel::Run() {
   }
   MS_ASSERT(c_ptr);
   if (params_->a_const_ == false) {
-    if (in_tensors_[0]->data_type() == kNumberTypeFloat32) {
-      InitMatrixA(reinterpret_cast<float *>(in_tensors_[0]->data_c()), a_pack_ptr_);
+    if (in_tensors_.at(0)->data_type() == kNumberTypeFloat32) {
+      InitMatrixA(reinterpret_cast<float *>(in_tensors_.at(0)->data_c()), a_pack_ptr_);
     } else {
-      InitMatrixA(reinterpret_cast<float16_t *>(in_tensors_[0]->data_c()), a_pack_ptr_);
+      InitMatrixA(reinterpret_cast<float16_t *>(in_tensors_.at(0)->data_c()), a_pack_ptr_);
     }
   }
   if (params_->b_const_ == false) {
-    if (in_tensors_[1]->data_type() == kNumberTypeFloat32) {
-      InitMatrixB(reinterpret_cast<float *>(in_tensors_[1]->data_c()), b_pack_ptr_);
+    if (in_tensors_.at(1)->data_type() == kNumberTypeFloat32) {
+      InitMatrixB(reinterpret_cast<float *>(in_tensors_.at(1)->data_c()), b_pack_ptr_);
     } else {
-      InitMatrixB(reinterpret_cast<float16_t *>(in_tensors_[1]->data_c()), b_pack_ptr_);
+      InitMatrixB(reinterpret_cast<float16_t *>(in_tensors_.at(1)->data_c()), b_pack_ptr_);
     }
   }
   for (int i = 0; i < params_->batch; ++i) {
