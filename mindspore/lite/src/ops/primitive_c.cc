@@ -147,32 +147,6 @@
 #include "src/ops/while.h"
 #include "src/ops/oneslike.h"
 #include "src/ops/unsorted_segment_sum.h"
-
-#ifdef SUPPORT_TRAIN
-#include "src/ops/neg_grad.h"
-#include "src/ops/activation_grad.h"
-#include "src/ops/apply_momentum.h"
-#include "src/ops/bias_grad.h"
-#include "src/ops/pooling_grad.h"
-#include "src/ops/conv2d_grad_filter.h"
-#include "src/ops/conv2d_grad_input.h"
-#include "src/ops/group_conv2d_grad_input.h"
-#include "src/ops/power_grad.h"
-#include "src/ops/softmax_cross_entropy.h"
-#include "src/ops/bn_grad.h"
-#include "src/ops/arithmetic_grad.h"
-#include "src/ops/depend.h"
-#include "src/ops/flatten_grad.h"
-#include "src/ops/log_grad.h"
-#include "src/ops/sgd.h"
-#include "src/ops/adam.h"
-#include "src/ops/assign.h"
-#include "src/ops/control_depend.h"
-#include "src/ops/assign_add.h"
-#include "src/ops/binary_cross_entropy.h"
-#include "src/ops/binary_cross_entropy_grad.h"
-#endif
-
 #endif
 namespace mindspore {
 namespace lite {
