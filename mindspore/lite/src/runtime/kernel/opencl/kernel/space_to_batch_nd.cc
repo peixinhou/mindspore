@@ -32,6 +32,10 @@ using mindspore::schema::PrimitiveType_SpaceToBatchND;
 namespace mindspore::kernel {
 
 int SpaceToBatchNDOpenCLKernel::Init() {
+  if (in_tensors_.size() != 1 || out_tensors_.size() != 1) {
+    MS_LOG(ERROR) << "Invalid input size: " << in_tensors_.size() << ", output size: " << out_tensors_.size();
+    return RET_ERROR;
+  }
   std::string kernel_name = "space_to_batch_nd_NHWC4";
   if (in_tensors_[0]->shape().size() != 4 && out_tensors_[0]->shape().size() != 4) {
     MS_LOG(ERROR) << "input/output shape size must be 4, actual: " << in_tensors_[0]->shape().size() << ", "

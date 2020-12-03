@@ -34,6 +34,10 @@ using mindspore::schema::PrimitiveType_Pad;
 namespace mindspore::kernel {
 
 int PadOpenCLKernel::Init() {
+  if (in_tensors_.size() != 1 || out_tensors_.size() != 1) {
+    MS_LOG(ERROR) << "Invalid input size: " << in_tensors_.size() << ", output size: " << out_tensors_.size();
+    return RET_ERROR;
+  }
   auto param = reinterpret_cast<PadParameter *>(op_parameter_);
   std::set<std::string> build_options;
 

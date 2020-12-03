@@ -53,6 +53,10 @@ int BiasAddOpenCLKernel::InitBuffer() {
 }
 
 int BiasAddOpenCLKernel::Init() {
+  if (in_tensors_.size() != 2 || out_tensors_.size() != 1) {
+    MS_LOG(ERROR) << "Invalid input size: " << in_tensors_.size() << ", output size: " << out_tensors_.size();
+    return RET_ERROR;
+  }
   in_size_ = in_tensors_[0]->shape().size();
   out_size_ = out_tensors_[0]->shape().size();
   for (int i = 0; i < in_size_; ++i) {

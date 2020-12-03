@@ -139,6 +139,10 @@ int ScaleOpenCLKernel::InitBuffer() {
 }
 
 int ScaleOpenCLKernel::Init() {
+  if (in_tensors_.size() != 3 || out_tensors_.size() != 1) {
+    MS_LOG(ERROR) << "Invalid input size: " << in_tensors_.size() << ", output size: " << out_tensors_.size();
+    return RET_ERROR;
+  }
   std::string kernel_name;
   auto *scale_param = reinterpret_cast<const ScaleParameter *>(op_parameter_);
   auto in_tensor = in_tensors_.at(0);
