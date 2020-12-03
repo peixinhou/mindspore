@@ -318,6 +318,7 @@ checkopts()
       T)
         check_on_off $OPTARG T
         SUPPORT_TRAIN=$OPTARG
+        SUPPORT_TRAIN=OFF
         COMPILE_MINDDATA_LITE="full"
         echo "support train on device "
         ;;
