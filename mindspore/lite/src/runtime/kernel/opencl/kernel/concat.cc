@@ -50,8 +50,12 @@ int ConcatOpenCLKernel::RunAxis0() {
 }
 
 int ConcatOpenCLKernel::Init() {
-  if (in_tensors_[0]->shape().size() != 4) {
-    MS_LOG(ERROR) << " only support dim = 4 ";
+  if (in_tensors_.size() < 2 || in_tensors_.size() > 6 || in_tensors_.size() == 5 || out_tensors_.size() != 1) {
+    MS_LOG(ERROR) << "Invalid input size: " << in_tensors_.size() << ", output size: " << out_tensors_.size();
+    return RET_ERROR;
+  }
+  if (in_tensors_.at(0)->shape().size() != 4) {
+    MS_LOG(ERROR) << " concat ops only support  dim = 4 ";
     return RET_ERROR;
   }
 

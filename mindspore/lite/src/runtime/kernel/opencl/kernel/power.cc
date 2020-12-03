@@ -39,16 +39,21 @@ int PowerOpenCLKernel::Init() {
   std::string source = power_source;
   std::string program_name = "power";
   broadcast_ = param->broadcast_;
-
+  if ((in_tensors_.size() != 1 && in_tensors_.size() != 2) || out_tensors_.size() != 1) {
+    MS_LOG(ERROR) << " The size of in_tensors must 1 or 2 and  out_tensors  must  be  1  ";
+    return RET_ERROR;
+  }
   if (in_tensors_.size() == 2 && in_tensors_[0]->shape().size() != in_tensors_[1]->shape().size()) {
     MS_LOG(ERROR) << "Unsupported input0->shape.size " << in_tensors_[0]->shape().size()
                   << "!=" << in_tensors_[1]->shape().size();
     return RET_ERROR;
-  } else if (in_tensors_.size() > 2 || in_tensors_[0]->shape().size() > 4) {
+  }
+  if (in_tensors_.at(0)->shape().size() > 4) {
     MS_LOG(ERROR) << "Unsupported in_tensors_->shape.size " << in_tensors_.size() << "  or "
                   << "in_tensors_[0]->shape().size(): " << in_tensors_[0]->shape().size();
     return RET_ERROR;
-  } else if (broadcast_ && in_tensors_.size() == 1) {
+  }
+  if (broadcast_ && in_tensors_.size() == 1) {
     power_ = param->power_;
     kernel_name += "_broadcast";
   }
@@ -100,7 +105,6 @@ int PowerOpenCLKernel::InferShapeTo4D() {
 
 int PowerOpenCLKernel::Run() {
   MS_LOG(DEBUG) << this->name() << " Running! ";
-  auto output_shape = out_tensors_[0]->shape();
   InferShapeTo4D();
   cl_int4 output_shape_ = {static_cast<cl_int>(N_), static_cast<cl_int>(H_), static_cast<cl_int>(W_),
                            static_cast<cl_int>(UP_DIV(C_, C4NUM))};
