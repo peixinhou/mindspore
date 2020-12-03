@@ -40,7 +40,7 @@ ConvolutionDepthwiseSWCPUKernel::~ConvolutionDepthwiseSWCPUKernel() {
 
 int ConvolutionDepthwiseSWCPUKernel::InitWeightBias() {
   // init weight: o, h, w, i; o == group, i == 1
-  auto weight_tensor = in_tensors_[kWeightIndex];
+  auto weight_tensor = in_tensors_.at(kWeightIndex);
   auto origin_weight = reinterpret_cast<float *>(weight_tensor->MutableData());
   int OC4 = UP_DIV(weight_tensor->Batch(), C4NUM);
   int pack_weight_size = C4NUM * OC4 * weight_tensor->Height() * weight_tensor->Width();
@@ -53,7 +53,6 @@ int ConvolutionDepthwiseSWCPUKernel::InitWeightBias() {
   PackNCHWToNC4HW4Fp32(origin_weight, packed_weight_, 1, weight_tensor->Height() * weight_tensor->Width(),
                        weight_tensor->Batch());
 
-  auto bias_tensor = in_tensors_[kBiasIndex];
   bias_data_ = reinterpret_cast<float *>(malloc(C4NUM * OC4 * sizeof(float)));
   if (bias_data_ == nullptr) {
     MS_LOG(ERROR) << "Malloc buffer failed.";
@@ -62,6 +61,7 @@ int ConvolutionDepthwiseSWCPUKernel::InitWeightBias() {
 
   memset(bias_data_, 0, C4NUM * OC4 * sizeof(float));
   if (in_tensors_.size() == kInputSize2) {
+    auto bias_tensor = in_tensors_.at(kBiasIndex);
     auto ori_bias = reinterpret_cast<float *>(bias_tensor->MutableData());
     memcpy(bias_data_, ori_bias, bias_tensor->ElementsNum() * sizeof(float));
   }
