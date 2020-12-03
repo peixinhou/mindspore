@@ -161,8 +161,8 @@ STATUS OnnxConvParser::Parse(const onnx::GraphProto &onnx_graph, const onnx::Nod
       }
       dims.insert(dims.begin(), iter->ints().begin(), iter->ints().end());
     }
-    attr->channelOut = dims[0];
-    attr->channelIn = dims[3] * attr->group;
+    attr->channelOut = dims.at(0);
+    attr->channelIn = dims.at(3) * attr->group;
   }
   attr->format = schema::Format::Format_NCHW;
   attr->hasBias = onnx_node.input().size() == 3;
