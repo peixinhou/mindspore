@@ -98,8 +98,8 @@ int SpaceToBatchND::InferShape(std::vector<lite::Tensor *> inputs, std::vector<l
     MS_LOG(ERROR) << "space_to_batch_nd only support NHWC now!";
     return RET_ERROR;
   }
-  outputs[0]->set_data_type(input->data_type());
-  outputs[0]->set_format(input->format());
+  outputs.at(0)->set_data_type(input->data_type());
+  outputs.at(0)->set_format(input->format());
   if (!infer_flag()) {
     return RET_OK;
   }
@@ -120,11 +120,11 @@ int SpaceToBatchND::InferShape(std::vector<lite::Tensor *> inputs, std::vector<l
   }
 
   std::vector<int32_t> output_shape(input_shape.size());
-  output_shape[NHWC_N] = input_shape[NHWC_N] * block_shape[0] * block_shape[1];
-  output_shape[NHWC_H] = (input_shape[NHWC_H] + pedding[0] + pedding[1]) / block_shape[0];
-  output_shape[NHWC_W] = (input_shape[NHWC_W] + pedding[2] + pedding[3]) / block_shape[1];
-  output_shape[NHWC_C] = input_shape[NHWC_C];
-  outputs[0]->set_shape(output_shape);
+  output_shape.at(NHWC_N) = input_shape.at(NHWC_N) * block_shape.at(0) * block_shape.at(1);
+  output_shape.at(NHWC_H) = (input_shape.at(NHWC_H) + pedding.at(0) + pedding.at(1)) / block_shape.at(0);
+  output_shape.at(NHWC_W) = (input_shape.at(NHWC_W) + pedding.at(2) + pedding.at(3)) / block_shape.at(1);
+  output_shape.at(NHWC_C) = input_shape.at(NHWC_C);
+  outputs.at(0)->set_shape(output_shape);
   return RET_OK;
 }
 }  // namespace lite

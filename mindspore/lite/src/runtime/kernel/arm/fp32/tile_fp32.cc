@@ -43,8 +43,8 @@ int TileCPUKernel::ReSize() {
   auto tile_parameter_ = reinterpret_cast<TileParameter *>(op_parameter_);
   MS_ASSERT(tile_parameter_);
   for (int i = 0; i < tile_parameter_->in_dim_; ++i) {
-    tile_parameter_->in_shape_[i] = in_tensors_[0]->shape()[i];
-    tile_parameter_->out_shape_[i] = out_tensors_[0]->shape()[i];
+    tile_parameter_->in_shape_[i] = in_tensors_.at(0)->shape().at(i);
+    tile_parameter_->out_shape_[i] = out_tensors_.at(0)->shape().at(i);
   }
   ComputeStrides(tile_parameter_->in_shape_, tile_parameter_->in_strides_, tile_parameter_->in_dim_);
   ComputeStrides(tile_parameter_->out_shape_, tile_parameter_->out_strides_, tile_parameter_->in_dim_);

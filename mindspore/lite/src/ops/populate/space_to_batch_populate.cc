@@ -33,8 +33,16 @@ OpParameter *PopulateSpaceToBatchParameter(const mindspore::lite::PrimitiveC *pr
   memset(space_batch_param, 0, sizeof(SpaceToBatchParameter));
   space_batch_param->op_parameter_.type_ = primitive->Type();
   auto block_sizes = ((mindspore::lite::SpaceToBatch *)primitive)->BlockSizes();
+  if (block_sizes.size() > std::numeric_limits<size_t>::max() / sizeof(int)) {
+    MS_LOG(ERROR) << "The value of block_sizes.size() is too big";
+    return nullptr;
+  }
   memcpy(space_batch_param->block_sizes_, (block_sizes.data()), block_sizes.size() * sizeof(int));
   auto paddings = ((mindspore::lite::SpaceToBatch *)primitive)->Paddings();
+  if (paddings.size() > std::numeric_limits<size_t>::max() / sizeof(int)) {
+    MS_LOG(ERROR) << "The value of paddings.size() is too big";
+    return nullptr;
+  }
   memcpy(space_batch_param->paddings_, (paddings.data()), paddings.size() * sizeof(int));
   return reinterpret_cast<OpParameter *>(space_batch_param);
 }
