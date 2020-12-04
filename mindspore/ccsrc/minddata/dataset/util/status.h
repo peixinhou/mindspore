@@ -51,6 +51,13 @@ namespace dataset {
     }                                                                      \
   } while (false)
 
+#define CHECK_FAIL_RETURN_SYNTAX_ERROR(_condition, _e)                 \
+  do {                                                                 \
+    if (!(_condition)) {                                               \
+      return Status(StatusCode::kSyntaxError, __LINE__, __FILE__, _e); \
+    }                                                                  \
+  } while (false)
+
 #define RETURN_UNEXPECTED_IF_NULL(_ptr)                                         \
   do {                                                                          \
     if ((_ptr) == nullptr) {                                                    \
@@ -69,6 +76,15 @@ namespace dataset {
 #define RETURN_STATUS_SYNTAX_ERROR(_e)                               \
   do {                                                               \
     return Status(StatusCode::kSyntaxError, __LINE__, __FILE__, _e); \
+  } while (false)
+
+#define RETURN_SECOND_IF_ERROR(_s, _r) \
+  do {                                 \
+    Status __rc = (_s);                \
+    if (__rc.IsError()) {              \
+      MS_LOG(ERROR) << __rc;           \
+      return _r;                       \
+    }                                  \
   } while (false)
 
 enum class StatusCode : char {

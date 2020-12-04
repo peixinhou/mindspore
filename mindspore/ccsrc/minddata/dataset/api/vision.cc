@@ -23,8 +23,8 @@
 #ifndef ENABLE_ANDROID
 #include "minddata/dataset/kernels/image/auto_contrast_op.h"
 #include "minddata/dataset/kernels/image/bounding_box_augment_op.h"
-#include "minddata/dataset/kernels/image/center_crop_op.h"
 #endif
+#include "minddata/dataset/kernels/image/center_crop_op.h"
 #include "minddata/dataset/kernels/image/crop_op.h"
 #ifndef ENABLE_ANDROID
 #include "minddata/dataset/kernels/image/cutmix_batch_op.h"
@@ -32,6 +32,7 @@
 #endif
 #include "minddata/dataset/kernels/image/decode_op.h"
 #ifndef ENABLE_ANDROID
+#include "minddata/dataset/kernels/image/equalize_op.h"
 #include "minddata/dataset/kernels/image/hwc_to_chw_op.h"
 #include "minddata/dataset/kernels/image/invert_op.h"
 #include "minddata/dataset/kernels/image/mixup_batch_op.h"
@@ -46,10 +47,14 @@
 #include "minddata/dataset/kernels/image/random_crop_op.h"
 #include "minddata/dataset/kernels/image/random_crop_decode_resize_op.h"
 #include "minddata/dataset/kernels/image/random_crop_with_bbox_op.h"
+#include "minddata/dataset/kernels/image/random_crop_and_resize_with_bbox_op.h"
 #include "minddata/dataset/kernels/image/random_horizontal_flip_op.h"
 #include "minddata/dataset/kernels/image/random_horizontal_flip_with_bbox_op.h"
 #include "minddata/dataset/kernels/image/random_posterize_op.h"
+#include "minddata/dataset/kernels/image/random_resize_op.h"
+#include "minddata/dataset/kernels/image/random_resize_with_bbox_op.h"
 #include "minddata/dataset/kernels/image/random_rotation_op.h"
+#include "minddata/dataset/kernels/image/random_select_subpolicy_op.h"
 #include "minddata/dataset/kernels/image/random_sharpness_op.h"
 #include "minddata/dataset/kernels/image/random_solarize_op.h"
 #include "minddata/dataset/kernels/image/random_vertical_flip_op.h"
@@ -61,6 +66,8 @@
 #include "minddata/dataset/kernels/image/resize_with_bbox_op.h"
 #include "minddata/dataset/kernels/image/rgba_to_bgr_op.h"
 #include "minddata/dataset/kernels/image/rgba_to_rgb_op.h"
+#include "minddata/dataset/kernels/image/soft_dvpp/soft_dvpp_decode_random_crop_resize_jpeg_op.h"
+#include "minddata/dataset/kernels/image/soft_dvpp/soft_dvpp_decode_resize_jpeg_op.h"
 #include "minddata/dataset/kernels/image/swap_red_blue_op.h"
 #include "minddata/dataset/kernels/image/uniform_aug_op.h"
 #endif
@@ -78,10 +85,7 @@ namespace vision {
 std::shared_ptr<AutoContrastOperation> AutoContrast(float cutoff, std::vector<uint32_t> ignore) {
   auto op = std::make_shared<AutoContrastOperation>(cutoff, ignore);
   // Input validation
-  if (!op->ValidateParams()) {
-    return nullptr;
-  }
-  return op;
+  return op->ValidateParams() ? op : nullptr;
 }
 
 // Function to create BoundingBoxAugmentOperation.
@@ -89,112 +93,88 @@ std::shared_ptr<BoundingBoxAugmentOperation> BoundingBoxAugment(std::shared_ptr<
                                                                 float ratio) {
   auto op = std::make_shared<BoundingBoxAugmentOperation>(transform, ratio);
   // Input validation
-  if (!op->ValidateParams()) {
-    return nullptr;
-  }
-  return op;
+  return op->ValidateParams() ? op : nullptr;
 }
+#endif
 
 // Function to create CenterCropOperation.
 std::shared_ptr<CenterCropOperation> CenterCrop(std::vector<int32_t> size) {
   auto op = std::make_shared<CenterCropOperation>(size);
   // Input validation
-  if (!op->ValidateParams()) {
-    return nullptr;
-  }
-  return op;
+  return op->ValidateParams() ? op : nullptr;
 }
-#endif
 
 // Function to create CropOperation.
 std::shared_ptr<CropOperation> Crop(std::vector<int32_t> coordinates, std::vector<int32_t> size) {
   auto op = std::make_shared<CropOperation>(coordinates, size);
   // Input validation
-  if (!op->ValidateParams()) {
-    return nullptr;
-  }
-  return op;
+  return op->ValidateParams() ? op : nullptr;
 }
 #ifndef ENABLE_ANDROID
 // Function to create CutMixBatchOperation.
 std::shared_ptr<CutMixBatchOperation> CutMixBatch(ImageBatchFormat image_batch_format, float alpha, float prob) {
   auto op = std::make_shared<CutMixBatchOperation>(image_batch_format, alpha, prob);
   // Input validation
-  if (!op->ValidateParams()) {
-    return nullptr;
-  }
-  return op;
+  return op->ValidateParams() ? op : nullptr;
 }
 
 // Function to create CutOutOp.
 std::shared_ptr<CutOutOperation> CutOut(int32_t length, int32_t num_patches) {
   auto op = std::make_shared<CutOutOperation>(length, num_patches);
   // Input validation
-  if (!op->ValidateParams()) {
-    return nullptr;
-  }
-  return op;
+  return op->ValidateParams() ? op : nullptr;
 }
 
 // Function to create DecodeOperation.
 std::shared_ptr<DecodeOperation> Decode(bool rgb) {
   auto op = std::make_shared<DecodeOperation>(rgb);
   // Input validation
-  if (!op->ValidateParams()) {
-    return nullptr;
-  }
-  return op;
+  return op->ValidateParams() ? op : nullptr;
+}
+
+// Function to create EqualizeOperation.
+std::shared_ptr<EqualizeOperation> Equalize() {
+  auto op = std::make_shared<EqualizeOperation>();
+  // Input validation
+  return op->ValidateParams() ? op : nullptr;
 }
 
 // Function to create HwcToChwOperation.
 std::shared_ptr<HwcToChwOperation> HWC2CHW() {
   auto op = std::make_shared<HwcToChwOperation>();
   // Input validation
-  if (!op->ValidateParams()) {
-    return nullptr;
-  }
-  return op;
+  return op->ValidateParams() ? op : nullptr;
 }
 
 // Function to create InvertOperation.
 std::shared_ptr<InvertOperation> Invert() {
   auto op = std::make_shared<InvertOperation>();
   // Input validation
-  if (!op->ValidateParams()) {
-    return nullptr;
-  }
-  return op;
+  return op->ValidateParams() ? op : nullptr;
 }
 
 // Function to create MixUpBatchOperation.
 std::shared_ptr<MixUpBatchOperation> MixUpBatch(float alpha) {
   auto op = std::make_shared<MixUpBatchOperation>(alpha);
   // Input validation
-  if (!op->ValidateParams()) {
-    return nullptr;
-  }
-  return op;
+  return op->ValidateParams() ? op : nullptr;
 }
+#endif
 
 // Function to create NormalizeOperation.
 std::shared_ptr<NormalizeOperation> Normalize(std::vector<float> mean, std::vector<float> std) {
   auto op = std::make_shared<NormalizeOperation>(mean, std);
   // Input validation
-  if (!op->ValidateParams()) {
-    return nullptr;
-  }
-  return op;
+  return op->ValidateParams() ? op : nullptr;
 }
 
+#ifndef ENABLE_ANDROID
 // Function to create PadOperation.
 std::shared_ptr<PadOperation> Pad(std::vector<int32_t> padding, std::vector<uint8_t> fill_value,
                                   BorderType padding_mode) {
   auto op = std::make_shared<PadOperation>(padding, fill_value, padding_mode);
   // Input validation
-  if (!op->ValidateParams()) {
-    return nullptr;
-  }
-  return op;
+  return op->ValidateParams() ? op : nullptr;
 }
 
 // Function to create RandomAffineOperation.
@@ -207,20 +187,14 @@ std::shared_ptr<RandomAffineOperation> RandomAffine(const std::vector<float_t> &
   auto op = std::make_shared<RandomAffineOperation>(degrees, translate_range, scale_range, shear_ranges, interpolation,
                                                     fill_value);
   // Input validation
-  if (!op->ValidateParams()) {
-    return nullptr;
-  }
-  return op;
+  return op->ValidateParams() ? op : nullptr;
 }
 
 // Function to create RandomColorOperation.
 std::shared_ptr<RandomColorOperation> RandomColor(float t_lb, float t_ub) {
   auto op = std::make_shared<RandomColorOperation>(t_lb, t_ub);
   // Input validation
-  if (!op->ValidateParams()) {
-    return nullptr;
-  }
-  return op;
+  return op->ValidateParams() ? op : nullptr;
 }
 
 std::shared_ptr<TensorOp> RandomColorOperation::Build() {
@@ -234,10 +208,7 @@ std::shared_ptr<RandomColorAdjustOperation> RandomColorAdjust(std::vector<float>
                                                               std::vector<float> saturation, std::vector<float> hue) {
   auto op = std::make_shared<RandomColorAdjustOperation>(brightness, contrast, saturation, hue);
   // Input validation
-  if (!op->ValidateParams()) {
-    return nullptr;
-  }
-  return op;
+  return op->ValidateParams() ? op : nullptr;
 }
 
 // Function to create RandomCropOperation.
@@ -246,10 +217,7 @@ std::shared_ptr<RandomCropOperation> RandomCrop(std::vector<int32_t> size, std::
                                                 BorderType padding_mode) {
   auto op = std::make_shared<RandomCropOperation>(size, padding, pad_if_needed, fill_value, padding_mode);
   // Input validation
-  if (!op->ValidateParams()) {
-    return nullptr;
-  }
-  return op;
+  return op->ValidateParams() ? op : nullptr;
 }
 
 // Function to create RandomCropDecodeResizeOperation.
@@ -260,10 +228,7 @@ std::shared_ptr<RandomCropDecodeResizeOperation> RandomCropDecodeResize(std::vec
                                                                         int32_t max_attempts) {
   auto op = std::make_shared<RandomCropDecodeResizeOperation>(size, scale, ratio, interpolation, max_attempts);
   // Input validation
-  if (!op->ValidateParams()) {
-    return nullptr;
-  }
-  return op;
+  return op->ValidateParams() ? op : nullptr;
 }
 
 // Function to create RandomCropWithBBoxOperation.
@@ -272,40 +237,42 @@ std::shared_ptr<RandomCropWithBBoxOperation> RandomCropWithBBox(std::vector<int3
                                                                 BorderType padding_mode) {
   auto op = std::make_shared<RandomCropWithBBoxOperation>(size, padding, pad_if_needed, fill_value, padding_mode);
   // Input validation
-  if (!op->ValidateParams()) {
-    return nullptr;
-  }
-  return op;
+  return op->ValidateParams() ? op : nullptr;
 }
 
 // Function to create RandomHorizontalFlipOperation.
 std::shared_ptr<RandomHorizontalFlipOperation> RandomHorizontalFlip(float prob) {
   auto op = std::make_shared<RandomHorizontalFlipOperation>(prob);
   // Input validation
-  if (!op->ValidateParams()) {
-    return nullptr;
-  }
-  return op;
+  return op->ValidateParams() ? op : nullptr;
 }
 
 // Function to create RandomHorizontalFlipOperation.
 std::shared_ptr<RandomHorizontalFlipWithBBoxOperation> RandomHorizontalFlipWithBBox(float prob) {
   auto op = std::make_shared<RandomHorizontalFlipWithBBoxOperation>(prob);
   // Input validation
-  if (!op->ValidateParams()) {
-    return nullptr;
-  }
-  return op;
+  return op->ValidateParams() ? op : nullptr;
 }
 
 // Function to create RandomPosterizeOperation.
 std::shared_ptr<RandomPosterizeOperation> RandomPosterize(const std::vector<uint8_t> &bit_range) {
   auto op = std::make_shared<RandomPosterizeOperation>(bit_range);
   // Input validation
-  if (!op->ValidateParams()) {
-    return nullptr;
-  }
-  return op;
+  return op->ValidateParams() ? op : nullptr;
+}
+
+// Function to create RandomResizeOperation.
+std::shared_ptr<RandomResizeOperation> RandomResize(std::vector<int32_t> size) {
+  auto op = std::make_shared<RandomResizeOperation>(size);
+  // Input validation
+  return op->ValidateParams() ? op : nullptr;
+}
+
+// Function to create RandomResizeWithBBoxOperation.
+std::shared_ptr<RandomResizeWithBBoxOperation> RandomResizeWithBBox(std::vector<int32_t> size) {
+  auto op = std::make_shared<RandomResizeWithBBoxOperation>(size);
+  // Input validation
+  return op->ValidateParams() ? op : nullptr;
 }
 
 // Function to create RandomResizedCropOperation.
@@ -314,10 +281,18 @@ std::shared_ptr<RandomResizedCropOperation> RandomResizedCrop(std::vector<int32_
                                                               int32_t max_attempts) {
   auto op = std::make_shared<RandomResizedCropOperation>(size, scale, ratio, interpolation, max_attempts);
   // Input validation
-  if (!op->ValidateParams()) {
-    return nullptr;
-  }
-  return op;
+  return op->ValidateParams() ? op : nullptr;
+}
+
+// Function to create RandomResizedCropOperation.
+std::shared_ptr<RandomResizedCropWithBBoxOperation> RandomResizedCropWithBBox(std::vector<int32_t> size,
+                                                                              std::vector<float> scale,
+                                                                              std::vector<float> ratio,
+                                                                              InterpolationMode interpolation,
+                                                                              int32_t max_attempts) {
+  auto op = std::make_shared<RandomResizedCropWithBBoxOperation>(size, scale, ratio, interpolation, max_attempts);
+  // Input validation
+  return op->ValidateParams() ? op : nullptr;
 }
 
 // Function to create RandomRotationOperation.
@@ -326,60 +301,50 @@ std::shared_ptr<RandomRotationOperation> RandomRotation(std::vector<float> degre
                                                         std::vector<uint8_t> fill_value) {
   auto op = std::make_shared<RandomRotationOperation>(degrees, resample, expand, center, fill_value);
   // Input validation
-  if (!op->ValidateParams()) {
-    return nullptr;
-  }
-  return op;
+  return op->ValidateParams() ? op : nullptr;
 }
 
 // Function to create RandomSharpnessOperation.
 std::shared_ptr<RandomSharpnessOperation> RandomSharpness(std::vector<float> degrees) {
   auto op = std::make_shared<RandomSharpnessOperation>(degrees);
   // Input validation
-  if (!op->ValidateParams()) {
-    return nullptr;
-  }
-  return op;
+  return op->ValidateParams() ? op : nullptr;
 }
 
 // Function to create RandomSolarizeOperation.
 std::shared_ptr<RandomSolarizeOperation> RandomSolarize(std::vector<uint8_t> threshold) {
   auto op = std::make_shared<RandomSolarizeOperation>(threshold);
   // Input validation
-  if (!op->ValidateParams()) {
-    return nullptr;
-  }
-  return op;
+  return op->ValidateParams() ? op : nullptr;
+}
+
+// Function to create RandomSelectSubpolicyOperation.
+std::shared_ptr<RandomSelectSubpolicyOperation> RandomSelectSubpolicy(
+  std::vector<std::vector<std::pair<std::shared_ptr<TensorOperation>, double>>> policy) {
+  auto op = std::make_shared<RandomSelectSubpolicyOperation>(policy);
+  // Input validation
+  return op->ValidateParams() ? op : nullptr;
 }
 
 // Function to create RandomVerticalFlipOperation.
 std::shared_ptr<RandomVerticalFlipOperation> RandomVerticalFlip(float prob) {
   auto op = std::make_shared<RandomVerticalFlipOperation>(prob);
   // Input validation
-  if (!op->ValidateParams()) {
-    return nullptr;
-  }
-  return op;
+  return op->ValidateParams() ? op : nullptr;
 }
 
 // Function to create RandomVerticalFlipWithBBoxOperation.
 std::shared_ptr<RandomVerticalFlipWithBBoxOperation> RandomVerticalFlipWithBBox(float prob) {
   auto op = std::make_shared<RandomVerticalFlipWithBBoxOperation>(prob);
   // Input validation
-  if (!op->ValidateParams()) {
-    return nullptr;
-  }
-  return op;
+  return op->ValidateParams() ? op : nullptr;
 }
 
 // Function to create RescaleOperation.
 std::shared_ptr<RescaleOperation> Rescale(float rescale, float shift) {
   auto op = std::make_shared<RescaleOperation>(rescale, shift);
   // Input validation
-  if (!op->ValidateParams()) {
-    return nullptr;
-  }
-  return op;
+  return op->ValidateParams() ? op : nullptr;
 }
 
 #endif
@@ -387,10 +352,7 @@ std::shared_ptr<RescaleOperation> Rescale(float rescale, float shift) {
 std::shared_ptr<ResizeOperation> Resize(std::vector<int32_t> size, InterpolationMode interpolation) {
   auto op = std::make_shared<ResizeOperation>(size, interpolation);
   // Input validation
-  if (!op->ValidateParams()) {
-    return nullptr;
-  }
-  return op;
+  return op->ValidateParams() ? op : nullptr;
 }
 
 #ifndef ENABLE_ANDROID
@@ -398,40 +360,43 @@ std::shared_ptr<ResizeOperation> Resize(std::vector<int32_t> size, Interpolation
 std::shared_ptr<ResizeWithBBoxOperation> ResizeWithBBox(std::vector<int32_t> size, InterpolationMode interpolation) {
   auto op = std::make_shared<ResizeWithBBoxOperation>(size, interpolation);
   // Input validation
-  if (!op->ValidateParams()) {
-    return nullptr;
-  }
-  return op;
+  return op->ValidateParams() ? op : nullptr;
 }
 
 // Function to create RgbaToBgrOperation.
 std::shared_ptr<RgbaToBgrOperation> RGBA2BGR() {
   auto op = std::make_shared<RgbaToBgrOperation>();
   // Input validation
-  if (!op->ValidateParams()) {
-    return nullptr;
-  }
-  return op;
+  return op->ValidateParams() ? op : nullptr;
 }
 
 // Function to create RgbaToRgbOperation.
 std::shared_ptr<RgbaToRgbOperation> RGBA2RGB() {
   auto op = std::make_shared<RgbaToRgbOperation>();
   // Input validation
-  if (!op->ValidateParams()) {
-    return nullptr;
-  }
-  return op;
+  return op->ValidateParams() ? op : nullptr;
+}
+
+// Function to create SoftDvppDecodeRandomCropResizeJpegOperation.
+std::shared_ptr<SoftDvppDecodeRandomCropResizeJpegOperation> SoftDvppDecodeRandomCropResizeJpeg(
+  std::vector<int32_t> size, std::vector<float> scale, std::vector<float> ratio, int32_t max_attempts) {
+  auto op = std::make_shared<SoftDvppDecodeRandomCropResizeJpegOperation>(size, scale, ratio, max_attempts);
+  // Input validation
+  return op->ValidateParams() ? op : nullptr;
+}
+
+// Function to create SoftDvppDecodeResizeJpegOperation.
+std::shared_ptr<SoftDvppDecodeResizeJpegOperation> SoftDvppDecodeResizeJpeg(std::vector<int32_t> size) {
+  auto op = std::make_shared<SoftDvppDecodeResizeJpegOperation>(size);
+  // Input validation
+  return op->ValidateParams() ? op : nullptr;
 }
 
 // Function to create SwapRedBlueOperation.
 std::shared_ptr<SwapRedBlueOperation> SwapRedBlue() {
   auto op = std::make_shared<SwapRedBlueOperation>();
   // Input validation
-  if (!op->ValidateParams()) {
-    return nullptr;
-  }
-  return op;
+  return op->ValidateParams() ? op : nullptr;
 }
 
 // Function to create UniformAugOperation.
@@ -439,82 +404,9 @@ std::shared_ptr<UniformAugOperation> UniformAugment(std::vector<std::shared_ptr<
                                                     int32_t num_ops) {
   auto op = std::make_shared<UniformAugOperation>(transforms, num_ops);
   // Input validation
-  if (!op->ValidateParams()) {
-    return nullptr;
-  }
-  return op;
+  return op->ValidateParams() ? op : nullptr;
 }
-
 #endif
-/* ####################################### Validator Functions ############################################ */
-Status ValidateVectorFillvalue(const std::string &dataset_name, const std::vector<uint8_t> &fill_value) {
-  if (fill_value.empty() || (fill_value.size() != 1 && fill_value.size() != 3)) {
-    std::string err_msg = dataset_name + ": fill_value vector has incorrect size: " + std::to_string(fill_value.size());
-    MS_LOG(ERROR) << err_msg;
-    RETURN_STATUS_SYNTAX_ERROR(err_msg);
-  }
-  for (uint8_t single_fill_value : fill_value) {
-    if (single_fill_value > 255) {
-      std::string err_msg =
-        dataset_name + ": fill_value has to be between 0 and 255, got:" + std::to_string(single_fill_value);
-      MS_LOG(ERROR) << err_msg;
-      RETURN_STATUS_SYNTAX_ERROR(err_msg);
-    }
-  }
-
-  return Status::OK();
-}
-
-Status ValidateVectorProbability(const std::string &dataset_name, const float &probability) {
-  if (probability < 0.0 || probability > 1.0) {
-    std::string err_msg =
-      dataset_name + ": probability must be between 0.0 and 1.0, got: " + std::to_string(probability);
-    MS_LOG(ERROR) << err_msg;
-    RETURN_STATUS_SYNTAX_ERROR(err_msg);
-  }
-
-  return Status::OK();
-}
-
-Status ValidateVectorPadding(const std::string &dataset_name, const std::vector<int32_t> &padding) {
-  if (padding.empty() || padding.size() == 3 || padding.size() > 4) {
-    std::string err_msg = dataset_name + ": padding vector has incorrect size: " + std::to_string(padding.size());
-    MS_LOG(ERROR) << err_msg;
-    RETURN_STATUS_SYNTAX_ERROR(err_msg);
-  }
-  for (int32_t i = 0; i < padding.size(); ++i) {
-    if (padding[i] < 0) {
-      std::string err_msg =
-        dataset_name +
-        ": invalid padding, padding value must be greater than or equal to 0, got: " + std::to_string(padding[i]);
-      MS_LOG(ERROR) << err_msg;
-      RETURN_STATUS_SYNTAX_ERROR(err_msg);
-    }
-    if (padding[i] == INT_MAX) {
-      std::string err_msg =
-        dataset_name + ": invalid padding, padding value too large, got: " + std::to_string(padding[i]);
-      MS_LOG(ERROR) << err_msg;
-      RETURN_STATUS_SYNTAX_ERROR(err_msg);
-    }
-  }
-
-  return Status::OK();
-}
-
-Status ValidateVectorPositive(const std::string &dataset_name, const std::vector<int32_t> &size) {
-  for (int32_t i = 0; i < size.size(); ++i) {
-    if (size[i] <= 0) {
-      std::string err_msg =
-        dataset_name + ": Non-positive size value: " + std::to_string(size[i]) + " at element: " + std::to_string(i);
-      MS_LOG(ERROR) << err_msg;
-      RETURN_STATUS_SYNTAX_ERROR(err_msg);
-    }
-  }
-
-  return Status::OK();
-}
-
-bool CmpFloat(const float &a, const float &b, float epsilon = 0.0000000001f) { return (std::fabs(a - b) < epsilon); }
 
 /* ####################################### Derived TensorOperation classes ################################# */
 
@@ -553,17 +445,8 @@ BoundingBoxAugmentOperation::BoundingBoxAugmentOperation(std::shared_ptr<TensorO
     : transform_(transform), ratio_(ratio) {}
 
 Status BoundingBoxAugmentOperation::ValidateParams() {
-  if (transform_ == nullptr) {
-    std::string err_msg = "BoundingBoxAugment: transform must not be null.";
-    MS_LOG(ERROR) << err_msg;
-    RETURN_STATUS_SYNTAX_ERROR(err_msg);
-  }
-
-  if (ratio_ < 0.0 || ratio_ > 1.0) {
-    std::string err_msg = "BoundingBoxAugment: ratio has to be between 0.0 and 1.0, got: " + std::to_string(ratio_);
-    MS_LOG(ERROR) << err_msg;
-    RETURN_STATUS_SYNTAX_ERROR(err_msg);
-  }
+  RETURN_IF_NOT_OK(ValidateVectorTransforms("BoundingBoxAugment", {transform_}));
+  RETURN_IF_NOT_OK(ValidateProbability("BoundingBoxAugment", ratio_));
   return Status::OK();
 }
 
@@ -571,6 +454,7 @@ std::shared_ptr<TensorOp> BoundingBoxAugmentOperation::Build() {
   std::shared_ptr<BoundingBoxAugmentOp> tensor_op = std::make_shared<BoundingBoxAugmentOp>(transform_->Build(), ratio_);
   return tensor_op;
 }
+#endif
 
 // CenterCropOperation
 CenterCropOperation::CenterCropOperation(std::vector<int32_t> size) : size_(size) {}
@@ -610,7 +494,6 @@ std::shared_ptr<TensorOp> CenterCropOperation::Build() {
   return tensor_op;
 }
 
-#endif
 // CropOperation.
 CropOperation::CropOperation(std::vector<int32_t> coordinates, std::vector<int32_t> size)
     : coordinates_(coordinates), size_(size) {}
@@ -660,6 +543,7 @@ std::shared_ptr<TensorOp> CropOperation::Build() {
 
   height = size_[0];
   width = size_[0];
+  // User has specified crop_width.
   if (size_.size() == 2) {
     width = size_[1];
   }
@@ -722,6 +606,11 @@ Status DecodeOperation::ValidateParams() { return Status::OK(); }
 
 std::shared_ptr<TensorOp> DecodeOperation::Build() { return std::make_shared<DecodeOp>(rgb_); }
 
+// EqualizeOperation
+Status EqualizeOperation::ValidateParams() { return Status::OK(); }
+
+std::shared_ptr<TensorOp> EqualizeOperation::Build() { return std::make_shared<EqualizeOp>(); }
+
 // HwcToChwOperation
 Status HwcToChwOperation::ValidateParams() { return Status::OK(); }
 
@@ -748,6 +637,7 @@ Status MixUpBatchOperation::ValidateParams() {
 
 std::shared_ptr<TensorOp> MixUpBatchOperation::Build() { return std::make_shared<MixUpBatchOp>(alpha_); }
 
+#endif
 // NormalizeOperation
 NormalizeOperation::NormalizeOperation(std::vector<float> mean, std::vector<float> std) : mean_(mean), std_(std) {}
 
@@ -782,6 +672,7 @@ std::shared_ptr<TensorOp> NormalizeOperation::Build() {
   return std::make_shared<NormalizeOp>(mean_[0], mean_[1], mean_[2], std_[0], std_[1], std_[2]);
 }
 
+#ifndef ENABLE_ANDROID
 // PadOperation
 PadOperation::PadOperation(std::vector<int32_t> padding, std::vector<uint8_t> fill_value, BorderType padding_mode)
     : padding_(padding), fill_value_(fill_value), padding_mode_(padding_mode) {}
@@ -843,7 +734,9 @@ RandomAffineOperation::RandomAffineOperation(const std::vector<float_t> &degrees
       scale_range_(scale_range),
       shear_ranges_(shear_ranges),
       interpolation_(interpolation),
-      fill_value_(fill_value) {}
+      fill_value_(fill_value) {
+  random_op_ = true;
+}
 
 Status RandomAffineOperation::ValidateParams() {
   // Degrees
@@ -912,12 +805,17 @@ Status RandomAffineOperation::ValidateParams() {
     MS_LOG(ERROR) << err_msg;
     RETURN_STATUS_SYNTAX_ERROR(err_msg);
   }
-  for (int32_t i = 0; i < scale_range_.size(); ++i) {
-    if (scale_range_[i] <= 0) {
-      std::string err_msg = "RandomAffine: scale must be greater than 0, got: " + std::to_string(fill_value_[i]);
-      MS_LOG(ERROR) << err_msg;
-      RETURN_STATUS_SYNTAX_ERROR(err_msg);
-    }
+  if (scale_range_[0] < 0) {
+    std::string err_msg =
+      "RandomAffine: min scale range must be greater than or equal to 0, got: " + std::to_string(scale_range_[0]);
+    MS_LOG(ERROR) << err_msg;
+    RETURN_STATUS_SYNTAX_ERROR(err_msg);
+  }
+  if (scale_range_[1] <= 0) {
+    std::string err_msg =
+      "RandomAffine: max scale range must be greater than 0, got: " + std::to_string(scale_range_[1]);
+    MS_LOG(ERROR) << err_msg;
+    RETURN_STATUS_SYNTAX_ERROR(err_msg);
   }
   if (scale_range_[0] > scale_range_[1]) {
     std::string err_msg =
@@ -976,7 +874,7 @@ std::shared_ptr<TensorOp> RandomAffineOperation::Build() {
 }
 
 // RandomColorOperation.
-RandomColorOperation::RandomColorOperation(float t_lb, float t_ub) : t_lb_(t_lb), t_ub_(t_ub) {}
+RandomColorOperation::RandomColorOperation(float t_lb, float t_ub) : t_lb_(t_lb), t_ub_(t_ub) { random_op_ = true; }
 
 Status RandomColorOperation::ValidateParams() {
   // Do some input validation.
@@ -1000,7 +898,9 @@ Status RandomColorOperation::ValidateParams() {
 // RandomColorAdjustOperation.
 RandomColorAdjustOperation::RandomColorAdjustOperation(std::vector<float> brightness, std::vector<float> contrast,
                                                        std::vector<float> saturation, std::vector<float> hue)
-    : brightness_(brightness), contrast_(contrast), saturation_(saturation), hue_(hue) {}
+    : brightness_(brightness), contrast_(contrast), saturation_(saturation), hue_(hue) {
+  random_op_ = true;
+}
 
 Status RandomColorAdjustOperation::ValidateParams() {
   // brightness
@@ -1121,11 +1021,14 @@ std::shared_ptr<TensorOp> RandomColorAdjustOperation::Build() {
 // RandomCropOperation
 RandomCropOperation::RandomCropOperation(std::vector<int32_t> size, std::vector<int32_t> padding, bool pad_if_needed,
                                          std::vector<uint8_t> fill_value, BorderType padding_mode)
-    : size_(size),
+    : TensorOperation(true),
+      size_(size),
       padding_(padding),
       pad_if_needed_(pad_if_needed),
       fill_value_(fill_value),
-      padding_mode_(padding_mode) {}
+      padding_mode_(padding_mode) {
+  random_op_ = true;
+}
 
 Status RandomCropOperation::ValidateParams() {
   // size
@@ -1192,7 +1095,12 @@ std::shared_ptr<TensorOp> RandomCropOperation::Build() {
 RandomCropDecodeResizeOperation::RandomCropDecodeResizeOperation(std::vector<int32_t> size, std::vector<float> scale,
                                                                  std::vector<float> ratio,
                                                                  InterpolationMode interpolation, int32_t max_attempts)
-    : size_(size), scale_(scale), ratio_(ratio), interpolation_(interpolation), max_attempts_(max_attempts) {}
+    : TensorOperation(true),
+      size_(size),
+      scale_(scale),
+      ratio_(ratio),
+      interpolation_(interpolation),
+      max_attempts_(max_attempts) {}
 
 Status RandomCropDecodeResizeOperation::ValidateParams() {
   // size
@@ -1208,18 +1116,17 @@ Status RandomCropDecodeResizeOperation::ValidateParams() {
     MS_LOG(ERROR) << err_msg;
     RETURN_STATUS_SYNTAX_ERROR(err_msg);
   }
-  for (int32_t i = 0; i < scale_.size(); ++i) {
-    if (scale_[i] < 0) {
-      std::string err_msg = "RandomCropDecodeResize: invalid scale, scale must be greater than or equal to 0, got: " +
-                            std::to_string(scale_[i]);
-      MS_LOG(ERROR) << err_msg;
-      RETURN_STATUS_SYNTAX_ERROR(err_msg);
-    }
-    if (scale_[i] == INT_MAX) {
-      std::string err_msg = "RandomCropDecodeResize: invalid scale, scale too large, got: " + std::to_string(scale_[i]);
-      MS_LOG(ERROR) << err_msg;
-      RETURN_STATUS_SYNTAX_ERROR(err_msg);
-    }
+  if (scale_[0] < 0) {
+    std::string err_msg = "RandomCropDecodeResize: invalid scale, min scale must be greater than or equal to 0, got: " +
+                          std::to_string(scale_[0]);
+    MS_LOG(ERROR) << err_msg;
+    RETURN_STATUS_SYNTAX_ERROR(err_msg);
+  }
+  if (scale_[1] <= 0) {
+    std::string err_msg =
+      "RandomCropDecodeResize: invalid scale, max scale must be greater than 0, got: " + std::to_string(scale_[1]);
+    MS_LOG(ERROR) << err_msg;
+    RETURN_STATUS_SYNTAX_ERROR(err_msg);
   }
   if (scale_[0] > scale_[1]) {
     std::string err_msg = "RandomCropDecodeResize: scale should be in (min,max) format. Got (max,min).";
@@ -1233,14 +1140,9 @@ Status RandomCropDecodeResizeOperation::ValidateParams() {
     RETURN_STATUS_SYNTAX_ERROR(err_msg);
   }
   for (int32_t i = 0; i < ratio_.size(); ++i) {
-    if (ratio_[i] < 0) {
-      std::string err_msg = "RandomCropDecodeResize: invalid ratio, ratio must be greater than or equal to 0, got: " +
-                            std::to_string(ratio_[i]);
-      MS_LOG(ERROR) << err_msg;
-      RETURN_STATUS_SYNTAX_ERROR(err_msg);
-    }
-    if (ratio_[i] == INT_MAX) {
-      std::string err_msg = "RandomCropDecodeResize: invalid ratio, ratio too large, got: " + std::to_string(ratio_[i]);
+    if (ratio_[i] <= 0) {
+      std::string err_msg =
+        "RandomCropDecodeResize: invalid ratio, ratio must be greater than 0, got: " + std::to_string(ratio_[i]);
       MS_LOG(ERROR) << err_msg;
       RETURN_STATUS_SYNTAX_ERROR(err_msg);
     }
@@ -1285,7 +1187,8 @@ std::shared_ptr<TensorOp> RandomCropDecodeResizeOperation::Build() {
 RandomCropWithBBoxOperation::RandomCropWithBBoxOperation(std::vector<int32_t> size, std::vector<int32_t> padding,
                                                          bool pad_if_needed, std::vector<uint8_t> fill_value,
                                                          BorderType padding_mode)
-    : size_(size),
+    : TensorOperation(true),
+      size_(size),
       padding_(padding),
       pad_if_needed_(pad_if_needed),
       fill_value_(fill_value),
@@ -1354,10 +1257,11 @@ std::shared_ptr<TensorOp> RandomCropWithBBoxOperation::Build() {
 }
 
 // RandomHorizontalFlipOperation
-RandomHorizontalFlipOperation::RandomHorizontalFlipOperation(float probability) : probability_(probability) {}
+RandomHorizontalFlipOperation::RandomHorizontalFlipOperation(float probability)
+    : TensorOperation(true), probability_(probability) {}
 
 Status RandomHorizontalFlipOperation::ValidateParams() {
-  RETURN_IF_NOT_OK(ValidateVectorProbability("RandomHorizontalFlip", probability_));
+  RETURN_IF_NOT_OK(ValidateProbability("RandomHorizontalFlip", probability_));
 
   return Status::OK();
 }
@@ -1369,10 +1273,10 @@ std::shared_ptr<TensorOp> RandomHorizontalFlipOperation::Build() {
 
 // RandomHorizontalFlipWithBBoxOperation
 RandomHorizontalFlipWithBBoxOperation::RandomHorizontalFlipWithBBoxOperation(float probability)
-    : probability_(probability) {}
+    : TensorOperation(true), probability_(probability) {}
 
 Status RandomHorizontalFlipWithBBoxOperation::ValidateParams() {
-  RETURN_IF_NOT_OK(ValidateVectorProbability("RandomHorizontalFlipWithBBox", probability_));
+  RETURN_IF_NOT_OK(ValidateProbability("RandomHorizontalFlipWithBBox", probability_));
 
   return Status::OK();
 }
@@ -1384,7 +1288,8 @@ std::shared_ptr<TensorOp> RandomHorizontalFlipWithBBoxOperation::Build() {
 }
 
 // RandomPosterizeOperation
-RandomPosterizeOperation::RandomPosterizeOperation(const std::vector<uint8_t> &bit_range) : bit_range_(bit_range) {}
+RandomPosterizeOperation::RandomPosterizeOperation(const std::vector<uint8_t> &bit_range)
+    : TensorOperation(true), bit_range_(bit_range) {}
 
 Status RandomPosterizeOperation::ValidateParams() {
   if (bit_range_.size() != 2) {
@@ -1417,11 +1322,86 @@ std::shared_ptr<TensorOp> RandomPosterizeOperation::Build() {
   return tensor_op;
 }
 
+// RandomResizeOperation
+RandomResizeOperation::RandomResizeOperation(std::vector<int32_t> size) : TensorOperation(true), size_(size) {}
+
+Status RandomResizeOperation::ValidateParams() {
+  // size
+  if (size_.size() != 2 && size_.size() != 1) {
+    std::string err_msg =
+      "RandomResize: size must be a vector of one or two values, got: " + std::to_string(size_.size());
+    MS_LOG(ERROR) << err_msg;
+    RETURN_STATUS_SYNTAX_ERROR(err_msg);
+  }
+  if (size_[0] <= 0 || (size_.size() == 2 && size_[1] <= 0)) {
+    std::string err_msg = "RandomResize: size must only contain positive integers.";
+    MS_LOG(ERROR) << "RandomResize: size must only contain positive integers, got: " << size_;
+    RETURN_STATUS_SYNTAX_ERROR(err_msg);
+  }
+  return Status::OK();
+}
+
+std::shared_ptr<TensorOp> RandomResizeOperation::Build() {
+  // If size is a single value, the smaller edge of the image will be
+  // resized to this value with the same image aspect ratio.
+  int32_t height = size_[0];
+  int32_t width = 0;
+
+  // User specified the width value.
+  if (size_.size() == 2) {
+    width = size_[1];
+  }
+
+  std::shared_ptr<RandomResizeOp> tensor_op = std::make_shared<RandomResizeOp>(height, width);
+  return tensor_op;
+}
+
+// RandomResizeWithBBoxOperation
+RandomResizeWithBBoxOperation::RandomResizeWithBBoxOperation(std::vector<int32_t> size)
+    : TensorOperation(true), size_(size) {}
+
+Status RandomResizeWithBBoxOperation::ValidateParams() {
+  // size
+  if (size_.size() != 2 && size_.size() != 1) {
+    std::string err_msg =
+      "RandomResizeWithBBox: size must be a vector of one or two values, got: " + std::to_string(size_.size());
+    MS_LOG(ERROR) << err_msg;
+    RETURN_STATUS_SYNTAX_ERROR(err_msg);
+  }
+  if (size_[0] <= 0 || (size_.size() == 2 && size_[1] <= 0)) {
+    std::string err_msg = "RandomResizeWithBBox: size must only contain positive integers.";
+    MS_LOG(ERROR) << "RandomResizeWithBBox: size must only contain positive integers, got: " << size_;
+    RETURN_STATUS_SYNTAX_ERROR(err_msg);
+  }
+  return Status::OK();
+}
+
+std::shared_ptr<TensorOp> RandomResizeWithBBoxOperation::Build() {
+  // If size is a single value, the smaller edge of the image will be
+  // resized to this value with the same image aspect ratio.
+  int32_t height = size_[0];
+  int32_t width = 0;
+
+  // User specified the width value.
+  if (size_.size() == 2) {
+    width = size_[1];
+  }
+
+  std::shared_ptr<RandomResizeWithBBoxOp> tensor_op = std::make_shared<RandomResizeWithBBoxOp>(height, width);
+  return tensor_op;
+}
+
 // RandomResizedCropOperation
 RandomResizedCropOperation::RandomResizedCropOperation(std::vector<int32_t> size, std::vector<float> scale,
                                                        std::vector<float> ratio, InterpolationMode interpolation,
                                                        int32_t max_attempts)
-    : size_(size), scale_(scale), ratio_(ratio), interpolation_(interpolation), max_attempts_(max_attempts) {}
+    : TensorOperation(true),
+      size_(size),
+      scale_(scale),
+      ratio_(ratio),
+      interpolation_(interpolation),
+      max_attempts_(max_attempts) {}
+
 Status RandomResizedCropOperation::ValidateParams() {
   // size
   if (size_.size() != 2 && size_.size() != 1) {
@@ -1442,9 +1422,15 @@ Status RandomResizedCropOperation::ValidateParams() {
     MS_LOG(ERROR) << err_msg;
     RETURN_STATUS_SYNTAX_ERROR(err_msg);
   }
-  if (scale_[0] < 0 || scale_[1] < 0) {
-    std::string err_msg = "RandomResizedCrop: scale must be greater than or equal to 0.";
-    MS_LOG(ERROR) << "RandomResizedCrop: scale must be greater than or equal to 0, got: " << scale_;
+  if (scale_[0] < 0) {
+    std::string err_msg = "RandomResizedCrop: min scale must be greater than or equal to 0.";
+    MS_LOG(ERROR) << "RandomResizedCrop: min scale must be greater than or equal to 0, got: " +
+                       std::to_string(scale_[0]);
+    RETURN_STATUS_SYNTAX_ERROR(err_msg);
+  }
+  if (scale_[1] <= 0) {
+    std::string err_msg = "RandomResizedCrop: max scale must be greater than 0.";
+    MS_LOG(ERROR) << "RandomResizedCrop: max scale must be greater than 0, got: " + std::to_string(scale_[1]);
     RETURN_STATUS_SYNTAX_ERROR(err_msg);
   }
   if (scale_[1] < scale_[0]) {
@@ -1455,13 +1441,14 @@ Status RandomResizedCropOperation::ValidateParams() {
   }
   // ratio
   if (ratio_.size() != 2) {
-    std::string err_msg = "RandomResizedCrop: ratio must be in the format of (min, max).";
-    MS_LOG(ERROR) << "RandomResizedCrop: ratio must be in the format of (min, max), but got: " << ratio_;
+    std::string err_msg =
+      "RandomResizedCrop: ratio must be a vector of two values, got: " + std::to_string(ratio_.size());
+    MS_LOG(ERROR) << err_msg;
     RETURN_STATUS_SYNTAX_ERROR(err_msg);
   }
-  if (ratio_[0] < 0 || ratio_[1] < 0) {
-    std::string err_msg = "RandomResizedCrop: ratio must be greater than or equal to 0.";
-    MS_LOG(ERROR) << "RandomResizedCrop: ratio must be greater than or equal to 0, got: " << ratio_;
+  if (ratio_[0] <= 0 || ratio_[1] <= 0) {
+    std::string err_msg = "RandomResizedCrop: ratio must be greater than 0.";
+    MS_LOG(ERROR) << "RandomResizedCrop: ratio must be greater than 0, got: " << ratio_;
     RETURN_STATUS_SYNTAX_ERROR(err_msg);
   }
   if (ratio_[1] < ratio_[0]) {
@@ -1470,13 +1457,109 @@ Status RandomResizedCropOperation::ValidateParams() {
                   << ratio_;
     RETURN_STATUS_SYNTAX_ERROR(err_msg);
   }
+  // max_attempts
+  if (max_attempts_ < 1) {
+    std::string err_msg =
+      "RandomResizedCrop: max_attempts must be greater than or equal to 1, got: " + std::to_string(max_attempts_);
+    MS_LOG(ERROR) << err_msg;
+    RETURN_STATUS_SYNTAX_ERROR(err_msg);
+  }
   return Status::OK();
 }
 
 std::shared_ptr<TensorOp> RandomResizedCropOperation::Build() {
-  int32_t height = size_[0], width = size_[0];
-  if (size_.size() == 2) width = size_[1];
+  int32_t height = size_[0];
+  int32_t width = size_[0];
+  // User specified the width value.
+  if (size_.size() == 2) {
+    width = size_[1];
+  }
   std::shared_ptr<RandomCropAndResizeOp> tensor_op = std::make_shared<RandomCropAndResizeOp>(
+    height, width, scale_[0], scale_[1], ratio_[0], ratio_[1], interpolation_, max_attempts_);
+  return tensor_op;
+}
+
+// RandomResizedCropWithBBoxOperation
+RandomResizedCropWithBBoxOperation::RandomResizedCropWithBBoxOperation(std::vector<int32_t> size,
+                                                                       std::vector<float> scale,
+                                                                       std::vector<float> ratio,
+                                                                       InterpolationMode interpolation,
+                                                                       int32_t max_attempts)
+    : size_(size), scale_(scale), ratio_(ratio), interpolation_(interpolation), max_attempts_(max_attempts) {}
+
+Status RandomResizedCropWithBBoxOperation::ValidateParams() {
+  // size
+  if (size_.size() != 2 && size_.size() != 1) {
+    std::string err_msg =
+      "RandomResizedCropWithBBox: size must be a vector of one or two values, got: " + std::to_string(size_.size());
+    MS_LOG(ERROR) << err_msg;
+    RETURN_STATUS_SYNTAX_ERROR(err_msg);
+  }
+  if (size_[0] <= 0 || (size_.size() == 2 && size_[1] <= 0)) {
+    std::string err_msg = "RandomResizedCropWithBBox: size must only contain positive integers.";
+    MS_LOG(ERROR) << "RandomResizedCropWithBBox: size must only contain positive integers, got: " << size_;
+    RETURN_STATUS_SYNTAX_ERROR(err_msg);
+  }
+  // scale
+  if (scale_.size() != 2) {
+    std::string err_msg =
+      "RandomResizedCropWithBBox: scale must be a vector of two values, got: " + std::to_string(scale_.size());
+    MS_LOG(ERROR) << err_msg;
+    RETURN_STATUS_SYNTAX_ERROR(err_msg);
+  }
+  if (scale_[0] < 0) {
+    std::string err_msg = "RandomResizedCropWithBBox: min scale must be greater than or equal to 0.";
+    MS_LOG(ERROR) << "RandomResizedCropWithBBox: min scale must be greater than or equal to 0, got: " +
+                       std::to_string(scale_[0]);
+    RETURN_STATUS_SYNTAX_ERROR(err_msg);
+  }
+  if (scale_[1] <= 0) {
+    std::string err_msg = "RandomResizedCropWithBBox: max scale must be greater than 0.";
+    MS_LOG(ERROR) << "RandomResizedCropWithBBox: max scale must be greater than 0, got: " + std::to_string(scale_[1]);
+    RETURN_STATUS_SYNTAX_ERROR(err_msg);
+  }
+  if (scale_[1] < scale_[0]) {
+    std::string err_msg = "RandomResizedCropWithBBox: scale must have a size of two in the format of (min, max).";
+    MS_LOG(ERROR) << "RandomResizedCropWithBBox: scale must have a size of two in the format of (min, max), but got: "
+                  << scale_;
+    RETURN_STATUS_SYNTAX_ERROR(err_msg);
+  }
+  // ratio
+  if (ratio_.size() != 2) {
+    std::string err_msg =
+      "RandomResizedCropWithBBox: ratio must be a vector of two values, got: " + std::to_string(ratio_.size());
+    MS_LOG(ERROR) << err_msg;
+    RETURN_STATUS_SYNTAX_ERROR(err_msg);
+  }
+  if (ratio_[0] <= 0 || ratio_[1] <= 0) {
+    std::string err_msg = "RandomResizedCropWithBBox: ratio must be greater than 0.";
+    MS_LOG(ERROR) << "RandomResizedCropWithBBox: ratio must be greater than 0, got: " << ratio_;
+    RETURN_STATUS_SYNTAX_ERROR(err_msg);
+  }
+  if (ratio_[1] < ratio_[0]) {
+    std::string err_msg = "RandomResizedCropWithBBox: ratio must have a size of two in the format of (min, max).";
+    MS_LOG(ERROR) << "RandomResizedCropWithBBox: ratio must have a size of two in the format of (min, max), but got: "
+                  << ratio_;
+    RETURN_STATUS_SYNTAX_ERROR(err_msg);
+  }
+  // max_attempts
+  if (max_attempts_ < 1) {
+    std::string err_msg = "RandomResizedCropWithBBox: max_attempts must be greater than or equal to 1, got: " +
+                          std::to_string(max_attempts_);
+    MS_LOG(ERROR) << err_msg;
+    RETURN_STATUS_SYNTAX_ERROR(err_msg);
+  }
+  return Status::OK();
+}
+
+std::shared_ptr<TensorOp> RandomResizedCropWithBBoxOperation::Build() {
+  int32_t height = size_[0];
+  int32_t width = size_[0];
+  // User specified the width value.
+  if (size_.size() == 2) {
+    width = size_[1];
+  }
+  std::shared_ptr<RandomCropAndResizeWithBBoxOp> tensor_op = std::make_shared<RandomCropAndResizeWithBBoxOp>(
     height, width, scale_[0], scale_[1], ratio_[0], ratio_[1], interpolation_, max_attempts_);
   return tensor_op;
 }
@@ -1485,7 +1568,8 @@ std::shared_ptr<TensorOp> RandomResizedCropOperation::Build() {
 RandomRotationOperation::RandomRotationOperation(std::vector<float> degrees, InterpolationMode interpolation_mode,
                                                  bool expand, std::vector<float> center,
                                                  std::vector<uint8_t> fill_value)
-    : degrees_(degrees),
+    : TensorOperation(true),
+      degrees_(degrees),
       interpolation_mode_(interpolation_mode),
       expand_(expand),
       center_(center),
@@ -1549,8 +1633,58 @@ std::shared_ptr<TensorOp> RandomRotationOperation::Build() {
   return tensor_op;
 }
 
+// RandomSelectSubpolicyOperation.
+RandomSelectSubpolicyOperation::RandomSelectSubpolicyOperation(
+  std::vector<std::vector<std::pair<std::shared_ptr<TensorOperation>, double>>> policy)
+    : TensorOperation(true), policy_(policy) {}
+
+Status RandomSelectSubpolicyOperation::ValidateParams() {
+  if (policy_.empty()) {
+    std::string err_msg = "RandomSelectSubpolicy: policy must not be empty";
+    MS_LOG(ERROR) << err_msg;
+    RETURN_STATUS_SYNTAX_ERROR(err_msg);
+  }
+  for (int32_t i = 0; i < policy_.size(); i++) {
+    if (policy_[i].empty()) {
+      std::string err_msg = "RandomSelectSubpolicy: policy[" + std::to_string(i) + "] must not be empty";
+      MS_LOG(ERROR) << err_msg;
+      RETURN_STATUS_SYNTAX_ERROR(err_msg);
+    }
+    for (int32_t j = 0; j < policy_[i].size(); j++) {
+      if (policy_[i][j].first == nullptr) {
+        std::string transform_pos = "[" + std::to_string(i) + "]" + "[" + std::to_string(j) + "]";
+        std::string err_msg = "RandomSelectSubpolicy: transform in policy" + transform_pos + " must not be null";
+        MS_LOG(ERROR) << err_msg;
+        RETURN_STATUS_SYNTAX_ERROR(err_msg);
+      }
+      if (policy_[i][j].second < 0.0 || policy_[i][j].second > 1.0) {
+        std::string transform_pos = "[" + std::to_string(i) + "]" + "[" + std::to_string(j) + "]";
+        std::string err_msg = "RandomSelectSubpolicy: probability of transform in policy" + transform_pos +
+                              " must be between 0.0 and 1.0, got: " + std::to_string(policy_[i][j].second);
+        MS_LOG(ERROR) << err_msg;
+        RETURN_STATUS_SYNTAX_ERROR(err_msg);
+      }
+    }
+  }
+  return Status::OK();
+}
+
+std::shared_ptr<TensorOp> RandomSelectSubpolicyOperation::Build() {
+  std::vector<Subpolicy> policy_tensor_ops;
+  for (int32_t i = 0; i < policy_.size(); i++) {
+    Subpolicy sub_policy_tensor_ops;
+    for (int32_t j = 0; j < policy_[i].size(); j++) {
+      sub_policy_tensor_ops.push_back(std::make_pair(policy_[i][j].first->Build(), policy_[i][j].second));
+    }
+    policy_tensor_ops.push_back(sub_policy_tensor_ops);
+  }
+  std::shared_ptr<RandomSelectSubpolicyOp> tensor_op = std::make_shared<RandomSelectSubpolicyOp>(policy_tensor_ops);
+  return tensor_op;
+}
+
 // Function to create RandomSharpness.
-RandomSharpnessOperation::RandomSharpnessOperation(std::vector<float> degrees) : degrees_(degrees) {}
+RandomSharpnessOperation::RandomSharpnessOperation(std::vector<float> degrees)
+    : TensorOperation(true), degrees_(degrees) {}
 
 Status RandomSharpnessOperation::ValidateParams() {
   if (degrees_.size() != 2 || degrees_[0] < 0 || degrees_[1] < 0) {
@@ -1574,7 +1708,8 @@ std::shared_ptr<TensorOp> RandomSharpnessOperation::Build() {
 }
 
 // RandomSolarizeOperation.
-RandomSolarizeOperation::RandomSolarizeOperation(std::vector<uint8_t> threshold) : threshold_(threshold) {}
+RandomSolarizeOperation::RandomSolarizeOperation(std::vector<uint8_t> threshold)
+    : TensorOperation(true), threshold_(threshold) {}
 
 Status RandomSolarizeOperation::ValidateParams() {
   if (threshold_.size() != 2) {
@@ -1605,10 +1740,11 @@ std::shared_ptr<TensorOp> RandomSolarizeOperation::Build() {
 }
 
 // RandomVerticalFlipOperation
-RandomVerticalFlipOperation::RandomVerticalFlipOperation(float probability) : probability_(probability) {}
+RandomVerticalFlipOperation::RandomVerticalFlipOperation(float probability)
+    : TensorOperation(true), probability_(probability) {}
 
 Status RandomVerticalFlipOperation::ValidateParams() {
-  RETURN_IF_NOT_OK(ValidateVectorProbability("RandomVerticalFlip", probability_));
+  RETURN_IF_NOT_OK(ValidateProbability("RandomVerticalFlip", probability_));
 
   return Status::OK();
 }
@@ -1620,10 +1756,10 @@ std::shared_ptr<TensorOp> RandomVerticalFlipOperation::Build() {
 
 // RandomVerticalFlipWithBBoxOperation
 RandomVerticalFlipWithBBoxOperation::RandomVerticalFlipWithBBoxOperation(float probability)
-    : probability_(probability) {}
+    : TensorOperation(true), probability_(probability) {}
 
 Status RandomVerticalFlipWithBBoxOperation::ValidateParams() {
-  RETURN_IF_NOT_OK(ValidateVectorProbability("RandomVerticalFlipWithBBox", probability_));
+  RETURN_IF_NOT_OK(ValidateProbability("RandomVerticalFlipWithBBox", probability_));
 
   return Status::OK();
 }
@@ -1669,6 +1805,8 @@ Status ResizeOperation::ValidateParams() {
 }
 
 std::shared_ptr<TensorOp> ResizeOperation::Build() {
+  // If size is a single value, the smaller edge of the image will be
+  // resized to this value with the same image aspect ratio.
   int32_t height = size_[0];
   int32_t width = 0;
 
@@ -1730,6 +1868,122 @@ std::shared_ptr<TensorOp> RgbaToRgbOperation::Build() {
   return tensor_op;
 }
 
+// SoftDvppDecodeRandomCropResizeJpegOperation
+SoftDvppDecodeRandomCropResizeJpegOperation::SoftDvppDecodeRandomCropResizeJpegOperation(std::vector<int32_t> size,
+                                                                                         std::vector<float> scale,
+                                                                                         std::vector<float> ratio,
+                                                                                         int32_t max_attempts)
+    : size_(size), scale_(scale), ratio_(ratio), max_attempts_(max_attempts) {}
+
+Status SoftDvppDecodeRandomCropResizeJpegOperation::ValidateParams() {
+  // size
+  if (size_.size() != 2 && size_.size() != 1) {
+    std::string err_msg = "SoftDvppDecodeRandomCropResizeJpeg: size must be a vector of one or two values, got: " +
+                          std::to_string(size_.size());
+    MS_LOG(ERROR) << err_msg;
+    RETURN_STATUS_SYNTAX_ERROR(err_msg);
+  }
+  if (size_[0] <= 0 || (size_.size() == 2 && size_[1] <= 0)) {
+    std::string err_msg = "SoftDvppDecodeRandomCropResizeJpeg: size must only contain positive integers.";
+    MS_LOG(ERROR) << "SoftDvppDecodeRandomCropResizeJpeg: size must only contain positive integers, got: " << size_;
+    RETURN_STATUS_SYNTAX_ERROR(err_msg);
+  }
+  // scale
+  if (scale_.size() != 2) {
+    std::string err_msg =
+      "SoftDvppDecodeRandomCropResizeJpeg: scale must be a vector of two values, got: " + std::to_string(scale_.size());
+    MS_LOG(ERROR) << err_msg;
+    RETURN_STATUS_SYNTAX_ERROR(err_msg);
+  }
+  if (scale_[0] < 0) {
+    std::string err_msg = "SoftDvppDecodeRandomCropResizeJpeg: min scale must be greater than or equal to 0.";
+    MS_LOG(ERROR) << "SoftDvppDecodeRandomCropResizeJpeg: min scale must be greater than or equal to 0, got: " +
+                       std::to_string(scale_[0]);
+    RETURN_STATUS_SYNTAX_ERROR(err_msg);
+  }
+  if (scale_[1] <= 0) {
+    std::string err_msg = "SoftDvppDecodeRandomCropResizeJpeg: max scale must be greater than 0.";
+    MS_LOG(ERROR) << "SoftDvppDecodeRandomCropResizeJpeg: max scale must be greater than 0, got: " +
+                       std::to_string(scale_[1]);
+    RETURN_STATUS_SYNTAX_ERROR(err_msg);
+  }
+  if (scale_[1] < scale_[0]) {
+    std::string err_msg = "SoftDvppDecodeRandomCropResizeJpeg: scale must be in the format of (min, max).";
+    MS_LOG(ERROR) << "SoftDvppDecodeRandomCropResizeJpeg: scale must be in the format of (min, max), but got: "
+                  << scale_;
+    RETURN_STATUS_SYNTAX_ERROR(err_msg);
+  }
+  // ratio
+  if (ratio_.size() != 2) {
+    std::string err_msg =
+      "SoftDvppDecodeRandomCropResizeJpeg: ratio must be a vector of two values, got: " + std::to_string(ratio_.size());
+    MS_LOG(ERROR) << err_msg;
+    RETURN_STATUS_SYNTAX_ERROR(err_msg);
+  }
+  if (ratio_[0] <= 0 || ratio_[1] <= 0) {
+    std::string err_msg = "SoftDvppDecodeRandomCropResizeJpeg: ratio must be greater than 0.";
+    MS_LOG(ERROR) << "SoftDvppDecodeRandomCropResizeJpeg: ratio must be greater than 0, got: " << ratio_;
+    RETURN_STATUS_SYNTAX_ERROR(err_msg);
+  }
+  if (ratio_[1] < ratio_[0]) {
+    std::string err_msg = "SoftDvppDecodeRandomCropResizeJpeg: ratio must be in the format of (min, max).";
+    MS_LOG(ERROR) << "SoftDvppDecodeRandomCropResizeJpeg: ratio must be in the format of (min, max), but got: "
+                  << ratio_;
+    RETURN_STATUS_SYNTAX_ERROR(err_msg);
+  }
+  // max_attempts
+  if (max_attempts_ < 1) {
+    std::string err_msg = "SoftDvppDecodeRandomCropResizeJpeg: max_attempts must be greater than or equal to 1, got: " +
+                          std::to_string(max_attempts_);
+    MS_LOG(ERROR) << err_msg;
+    RETURN_STATUS_SYNTAX_ERROR(err_msg);
+  }
+  return Status::OK();
+}
+
+std::shared_ptr<TensorOp> SoftDvppDecodeRandomCropResizeJpegOperation::Build() {
+  int32_t height = size_[0];
+  int32_t width = size_[0];
+  // User specified the width value.
+  if (size_.size() == 2) {
+    width = size_[1];
+  }
+
+  auto tensor_op = std::make_shared<SoftDvppDecodeRandomCropResizeJpegOp>(height, width, scale_[0], scale_[1],
+                                                                          ratio_[0], ratio_[1], max_attempts_);
+  return tensor_op;
+}
+
+// SoftDvppDecodeResizeJpegOperation
+SoftDvppDecodeResizeJpegOperation::SoftDvppDecodeResizeJpegOperation(std::vector<int32_t> size) : size_(size) {}
+
+Status SoftDvppDecodeResizeJpegOperation::ValidateParams() {
+  // size
+  if (size_.empty() || size_.size() > 2) {
+    std::string err_msg =
+      "SoftDvppDecodeResizeJpeg: size must be a vector of one or two values, got: " + std::to_string(size_.size());
+    MS_LOG(ERROR) << err_msg;
+    RETURN_STATUS_SYNTAX_ERROR(err_msg);
+  }
+  RETURN_IF_NOT_OK(ValidateVectorPositive("SoftDvppDecodeResizeJpeg", size_));
+
+  return Status::OK();
+}
+
+std::shared_ptr<TensorOp> SoftDvppDecodeResizeJpegOperation::Build() {
+  // If size is a single value, the smaller edge of the image will be
+  // resized to this value with the same image aspect ratio.
+  int32_t height = size_[0];
+  int32_t width = 0;
+
+  // User specified the width value.
+  if (size_.size() == 2) {
+    width = size_[1];
+  }
+  std::shared_ptr<SoftDvppDecodeResizeJpegOp> tensor_op = std::make_shared<SoftDvppDecodeResizeJpegOp>(height, width);
+  return tensor_op;
+}
+
 // SwapRedBlueOperation.
 SwapRedBlueOperation::SwapRedBlueOperation() {}
 
@@ -1746,21 +2000,15 @@ UniformAugOperation::UniformAugOperation(std::vector<std::shared_ptr<TensorOpera
 
 Status UniformAugOperation::ValidateParams() {
   // transforms
+  RETURN_IF_NOT_OK(ValidateVectorTransforms("UniformAug", transforms_));
   if (num_ops_ > transforms_.size()) {
-    std::string err_msg = "UniformAug: num_ops is greater than transforms size, num_ops: " + std::to_string(num_ops_);
+    std::string err_msg = "UniformAug: num_ops is greater than transforms size, but got: " + std::to_string(num_ops_);
     MS_LOG(ERROR) << err_msg;
     RETURN_STATUS_SYNTAX_ERROR(err_msg);
   }
-  for (int32_t i = 0; i < transforms_.size(); ++i) {
-    if (transforms_[i] == nullptr) {
-      std::string err_msg = "UniformAug: transform ops must not be null.";
-      MS_LOG(ERROR) << err_msg;
-      RETURN_STATUS_SYNTAX_ERROR(err_msg);
-    }
-  }
   // num_ops
   if (num_ops_ <= 0) {
-    std::string err_msg = "UniformAug: num_ops must be greater than 0, num_ops: " + std::to_string(num_ops_);
+    std::string err_msg = "UniformAug: num_ops must be greater than 0, but got: " + std::to_string(num_ops_);
     MS_LOG(ERROR) << err_msg;
     RETURN_STATUS_SYNTAX_ERROR(err_msg);
   }

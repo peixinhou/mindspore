@@ -193,7 +193,11 @@ class LiteMat {
 
   LiteMat(int width, int height, LDataType data_type = LDataType::UINT8);
 
+  LiteMat(int width, int height, void *p_data, LDataType data_type = LDataType::UINT8);
+
   LiteMat(int width, int height, int channel, LDataType data_type = LDataType::UINT8);
+
+  LiteMat(int width, int height, int channel, void *p_data, LDataType data_type = LDataType::UINT8);
 
   ~LiteMat();
 
@@ -203,7 +207,11 @@ class LiteMat {
 
   void Init(int width, int height, LDataType data_type = LDataType::UINT8);
 
+  void Init(int width, int height, void *p_data, LDataType data_type = LDataType::UINT8);
+
   void Init(int width, int height, int channel, LDataType data_type = LDataType::UINT8);
+
+  void Init(int width, int height, int channel, void *p_data, LDataType data_type = LDataType::UINT8);
 
   bool IsEmpty() const;
 
@@ -245,6 +253,16 @@ class LiteMat {
   LDataType data_type_;
   int *ref_count_;
 };
+
+/// \brief Calculates the difference between the two images for each element
+bool Subtract(const LiteMat &src_a, const LiteMat &src_b, LiteMat *dst);
+
+/// \brief Calculates the division between the two images for each element
+bool Divide(const LiteMat &src_a, const LiteMat &src_b, LiteMat *dst);
+
+/// \brief Calculates the multiply between the two images for each element
+bool Multiply(const LiteMat &src_a, const LiteMat &src_b, LiteMat *dst);
+
 }  // namespace dataset
 }  // namespace mindspore
 #endif  // MINI_MAT_H_
