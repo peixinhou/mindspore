@@ -31,6 +31,10 @@ using mindspore::schema::PrimitiveType_Squeeze;
 namespace mindspore::kernel {
 
 int ReshapeOpenCLKernel::Init() {
+  if ((in_tensors_.size() != 1 && in_tensors_.size() != 2) || out_tensors_.size() != 1) {
+    MS_LOG(ERROR) << "Invalid input size: " << in_tensors_.size() << ", output size: " << out_tensors_.size();
+    return RET_ERROR;
+  }
   std::string kernel_name = "reshape_NHWC4";
   if (out_tensors_[0]->shape().size() != 2 && out_tensors_[0]->shape().size() != 4) {
     MS_LOG(ERROR) << "Reshape output size should in 2,4";

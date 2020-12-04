@@ -42,6 +42,10 @@ using mindspore::schema::PrimitiveType_DepthwiseConv2D;
 namespace mindspore::kernel {
 
 int DepthwiseConv2dOpenCLKernel::Init() {
+  if ((in_tensors_.size() != 2 && in_tensors_.size() != 3) || out_tensors_.size() != 1) {
+    MS_LOG(ERROR) << "Invalid input size: " << in_tensors_.size() << ", output size: " << out_tensors_.size();
+    return RET_ERROR;
+  }
   std::string kernel_name = "DepthwiseConv2d";
   if (out_mem_type_ == OpenCLMemType::BUF) {
     kernel_name += "_BUF";

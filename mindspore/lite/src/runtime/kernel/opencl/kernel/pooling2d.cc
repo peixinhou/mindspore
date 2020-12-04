@@ -37,6 +37,10 @@ using mindspore::schema::PrimitiveType_Pooling;
 namespace mindspore {
 namespace kernel {
 int PoolingOpenCLKernel::Init() {
+  if (in_tensors_.size() != 1 || out_tensors_.size() != 1) {
+    MS_LOG(ERROR) << "Invalid input size: " << in_tensors_.size() << ", output size: " << out_tensors_.size();
+    return RET_ERROR;
+  }
   std::string kernel_name;
 #ifndef PROGRAM_WITH_IL
   std::string source;

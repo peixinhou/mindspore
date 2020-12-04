@@ -39,6 +39,10 @@ constexpr size_t CI_TILE = C4NUM;
 constexpr size_t CO_TILE = C4NUM;
 
 int ConvolutionOpenCLKernel::Init() {
+  if ((in_tensors_.size() != 2 && in_tensors_.size() != 3) || out_tensors_.size() != 1) {
+    MS_LOG(ERROR) << "Invalid input size: " << in_tensors_.size() << ", output size: " << out_tensors_.size();
+    return RET_ERROR;
+  }
   use_fp16_ = ocl_runtime_->GetFp16Enable();
   sizeof_FLT_ = use_fp16_ ? sizeof(float16_t) : sizeof(float);
 
