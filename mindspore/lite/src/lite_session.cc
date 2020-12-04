@@ -293,6 +293,10 @@ void LiteSession::InitGraphInOutTensors(const lite::Model *model) {
 }
 
 int LiteSession::CompileGraph(Model *model) {
+  if (!ModelVerify(*model)) {
+    MS_LOG(ERROR) << "Wrong model input";
+    return RET_ERROR;
+  }
   bool expected = false;
   if (!is_running_.compare_exchange_strong(expected, true)) {
     MS_LOG(ERROR) << "Not support multi-threading";
