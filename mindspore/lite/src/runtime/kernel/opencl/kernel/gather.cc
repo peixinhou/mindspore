@@ -31,6 +31,14 @@ using mindspore::schema::PrimitiveType_Gather;
 namespace mindspore::kernel {
 
 int GatherOpenCLKernel::Init() {
+  if (in_tensors_.size() != 2 || out_tensors_.size() != 1) {
+    MS_LOG(ERROR) << "Invalid input size: " << in_tensors_.size() << ", output size: " << out_tensors_.size();
+    return RET_ERROR;
+  }
+  if (in_tensors_.at(0)->shape().size() == 4) {
+    MS_LOG(ERROR) << "The dim of in_tensors->shape must be 4 but your dim is : " << in_tensors_.at(0)->shape().size();
+    return RET_ERROR;
+  }
   std::string kernel_name = "gather_NHWC4";
 #ifdef PROGRAM_WITH_IL
   kernel_ = ocl_runtime_->GetKernelFromBinary(kernel_name);

@@ -31,6 +31,14 @@ using mindspore::schema::PrimitiveType_Slice;
 namespace mindspore::kernel {
 
 int SliceOpenCLKernel::Init() {
+  if (in_tensors_.size() != 1 || out_tensors_.size() != 1) {
+    MS_LOG(ERROR) << "Invalid input size: " << in_tensors_.size() << ", output size: " << out_tensors_.size();
+    return RET_ERROR;
+  }
+  if (in_tensors_.at(0)->shape().size() == 4) {
+    MS_LOG(ERROR) << "The dim of in_tensors->shape must be 4 but your dim is : " << in_tensors_.at(0)->shape().size();
+    return RET_ERROR;
+  }
   std::set<std::string> build_options;
   std::string source = slice_source;
   std::string program_name = "slice";

@@ -32,11 +32,14 @@ using mindspore::schema::PrimitiveType_Activation;
 namespace mindspore::kernel {
 
 int HswishOpenCLKernel::Init() {
-  if (out_tensors_[0]->shape().size() > 4) {
-    MS_LOG(ERROR) << " only support dim <= 4";
+  if (in_tensors_.size() != 1 || out_tensors_.size() != 1) {
+    MS_LOG(ERROR) << "Invalid input size: " << in_tensors_.size() << ", output size: " << out_tensors_.size();
     return RET_ERROR;
   }
-
+  if (in_tensors_.at(0)->shape().size() == 4) {
+    MS_LOG(ERROR) << "The dim of in_tensors->shape must be 4 but your dim is : " << in_tensors_.at(0)->shape().size();
+    return RET_ERROR;
+  }
   std::string kernel_name = "hswish";
   std::set<std::string> build_options;
   std::string source = hswish_source;
@@ -87,7 +90,6 @@ int HswishOpenCLKernel::InferShapeTo4D() {
 
 int HswishOpenCLKernel::Run() {
   MS_LOG(DEBUG) << this->name() << " Running! ";
-  auto output_shape = out_tensors_[0]->shape();
   InferShapeTo4D();
   cl_int4 output_shape_ = {static_cast<cl_int>(N_), static_cast<cl_int>(H_), static_cast<cl_int>(W_),
                            static_cast<cl_int>(UP_DIV(C_, C4NUM))};

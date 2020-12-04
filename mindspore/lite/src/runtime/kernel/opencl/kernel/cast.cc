@@ -43,6 +43,14 @@ int CastOpenCLKernel::GetKernelName(std::string *kernel_name, CastParameter *par
 }
 
 int CastOpenCLKernel::Init() {
+  if (in_tensors_.size() != 1 || out_tensors_.size() != 1) {
+    MS_LOG(ERROR) << "Invalid input size: " << in_tensors_.size() << ", output size: " << out_tensors_.size();
+    return RET_ERROR;
+  }
+  if (in_tensors_.at(0)->shape().size() == 4) {
+    MS_LOG(ERROR) << "The dim of in_tensors->shape must be 4 but your dim is : " << in_tensors_.at(0)->shape().size();
+    return RET_ERROR;
+  }
   auto param = reinterpret_cast<CastParameter *>(this->op_parameter_);
   std::string kernel_name = "Cast";
   GetKernelName(&kernel_name, param);
