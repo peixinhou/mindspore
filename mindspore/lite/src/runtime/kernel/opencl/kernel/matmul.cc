@@ -31,6 +31,10 @@ using mindspore::schema::PrimitiveType_MatMul;
 namespace mindspore::kernel {
 
 int MatMulOpenCLKernel::Init() {
+  if (in_tensors_.size() != 2 || out_tensors_.size() != 1) {
+    MS_LOG(ERROR) << "Invalid input size: " << in_tensors_.size() << ", output size: " << out_tensors_.size();
+    return RET_ERROR;
+  }
   std::string kernel_name = "MatMul_NHWC4";
   auto param = reinterpret_cast<MatMulParameter *>(op_parameter_);
   transposeA = param->a_transpose_;

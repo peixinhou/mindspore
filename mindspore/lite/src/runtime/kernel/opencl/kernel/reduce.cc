@@ -41,6 +41,10 @@ using mindspore::schema::ReduceMode_ReduceSumSquare;
 namespace mindspore::kernel {
 
 int ReduceOpenCLKernel::Init() {
+  if (in_tensors_.size() != 1 || out_tensors_.size() != 1) {
+    MS_LOG(ERROR) << "Invalid input size: " << in_tensors_.size() << ", output size: " << out_tensors_.size();
+    return RET_ERROR;
+  }
   InitNHWCShape();
   auto reduce_param = reinterpret_cast<ReduceParameter *>(op_parameter_);
   if (reduce_param == nullptr) {

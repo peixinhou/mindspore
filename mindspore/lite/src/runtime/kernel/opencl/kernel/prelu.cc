@@ -75,6 +75,10 @@ int PReluOpenCLKernel::InitBuffer() {
 }
 
 int PReluOpenCLKernel::Init() {
+  if (in_tensors_.size() != 2 || out_tensors_.size() != 1) {
+    MS_LOG(ERROR) << "Invalid input size: " << in_tensors_.size() << ", output size: " << out_tensors_.size();
+    return RET_ERROR;
+  }
   auto input_tensor = in_tensors_[0];
   auto weight_tensor = in_tensors_[1];
   if (input_tensor->shape().size() != 4) {

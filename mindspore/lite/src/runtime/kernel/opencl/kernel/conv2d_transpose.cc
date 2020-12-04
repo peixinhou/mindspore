@@ -32,6 +32,10 @@ using mindspore::schema::PrimitiveType_DeConv2D;
 namespace mindspore::kernel {
 
 int Conv2dTransposeOpenCLKernel::Init() {
+  if ((in_tensors_.size() != 2 && in_tensors_.size() != 3) || out_tensors_.size() != 1) {
+    MS_LOG(ERROR) << "Invalid input size: " << in_tensors_.size() << ", output size: " << out_tensors_.size();
+    return RET_ERROR;
+  }
   ConvParameter *param = reinterpret_cast<ConvParameter *>(op_parameter_);
   if (param->pad_l_ != param->pad_r_ || param->kernel_h_ - param->stride_h_ != 2 * param->pad_l_ ||
       param->pad_u_ != param->pad_d_ || param->kernel_w_ - param->stride_w_ != 2 * param->pad_u_) {
