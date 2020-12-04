@@ -32,6 +32,8 @@ int NodeVerify(const Model &model);
 
 int SubGraphVerify(const Model &model);
 
+bool ModelVerify(const Model &model);
+
 Model *ImportFromBuffer(const char *model_buf, size_t size, bool take_buf);
 }  // namespace mindspore::lite
 #endif  // MINDSPORE_LITE_SRC_MODEL_COMMON_H_
