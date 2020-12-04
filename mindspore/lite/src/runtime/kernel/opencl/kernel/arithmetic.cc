@@ -165,6 +165,10 @@ int ArithmeticOpenCLKernel::SetArgs() {
 }
 
 int ArithmeticOpenCLKernel::Init() {
+  if (in_tensors_.size() != 2 || out_tensors_.size() != 1) {
+    MS_LOG(ERROR) << "Invalid input size: " << in_tensors_.size() << ", output size: " << out_tensors_.size();
+    return RET_ERROR;
+  }
   std::string kernel_name;
   auto *arithmetic_parameter = reinterpret_cast<const ArithmeticParameter *>(op_parameter_);
 

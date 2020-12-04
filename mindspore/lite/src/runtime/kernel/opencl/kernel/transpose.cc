@@ -34,6 +34,10 @@ using mindspore::schema::PrimitiveType_Transpose;
 namespace mindspore::kernel {
 
 int TransposeOpenCLKernel::Init() {
+  if ((in_tensors_.size() != 1 && in_tensors_.size() != 2) || out_tensors_.size() != 1) {
+    MS_LOG(ERROR) << "Invalid input size: " << in_tensors_.size() << ", output size: " << out_tensors_.size();
+    return RET_ERROR;
+  }
   std::string kernel_name = "transpose";
   enable_fp16_ = ocl_runtime_->GetFp16Enable();
   auto param = reinterpret_cast<TransposeParameter *>(op_parameter_);

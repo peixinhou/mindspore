@@ -43,6 +43,10 @@ using mindspore::schema::PrimitiveType_Activation;
 namespace mindspore::kernel {
 
 int ActivationOpenClKernel::Init() {
+  if (in_tensors_.size() != 1 || out_tensors_.size() != 1) {
+    MS_LOG(ERROR) << "Invalid input size: " << in_tensors_.size() << ", output size: " << out_tensors_.size();
+    return RET_ERROR;
+  }
   std::map<int, std::string> kernel_names{
     {ActivationType_LEAKY_RELU, "LeakyRelu"}, {ActivationType_RELU, "Relu"}, {ActivationType_SIGMOID, "Sigmoid"},
     {ActivationType_RELU6, "Relu6"},          {ActivationType_TANH, "Tanh"}, {ActivationType_SWISH, "Swish"},

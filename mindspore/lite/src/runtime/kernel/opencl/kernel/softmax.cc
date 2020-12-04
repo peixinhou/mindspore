@@ -78,6 +78,10 @@ int SoftmaxOpenCLKernel::SetWorkGroupSize1x1() {
 }
 
 int SoftmaxOpenCLKernel::Init() {
+  if (in_tensors_.size() != 1 || out_tensors_.size() != 1) {
+    MS_LOG(ERROR) << "Invalid input size: " << in_tensors_.size() << ", output size: " << out_tensors_.size();
+    return RET_ERROR;
+  }
   std::string kernel_name = "SoftMax";
   std::string program_name = "SoftMax";
   auto softmax_param = reinterpret_cast<SoftmaxParameter *>(op_parameter_);
