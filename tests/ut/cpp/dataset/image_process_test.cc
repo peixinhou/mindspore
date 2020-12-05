@@ -92,7 +92,7 @@ cv::Mat cv3CImageProcess(cv::Mat &image) {
   return imgR2;
 }
 
-TEST_F(MindDataImageProcess, testRGB) {
+TEST_F(MindDataImageProcess, DISABLED_testRGB) {
   std::string filename = "data/dataset/apple.jpg";
   cv::Mat image = cv::imread(filename, cv::ImreadModes::IMREAD_COLOR);
 
@@ -107,7 +107,7 @@ TEST_F(MindDataImageProcess, testRGB) {
   cv::Mat dst_image(lite_mat_rgb.height_, lite_mat_rgb.width_, CV_8UC3, lite_mat_rgb.data_ptr_);
 }
 
-TEST_F(MindDataImageProcess, test3C) {
+TEST_F(MindDataImageProcess, DISABLED_test3C) {
   std::string filename = "data/dataset/apple.jpg";
   cv::Mat image = cv::imread(filename, cv::ImreadModes::IMREAD_COLOR);
   cv::Mat cv_image = cv3CImageProcess(image);
@@ -151,7 +151,7 @@ bool ReadYUV(const char *filename, int w, int h, uint8_t **data) {
   return true;
 }
 
-TEST_F(MindDataImageProcess, testNV21ToBGR) {
+TEST_F(MindDataImageProcess, DISABLED_testNV21ToBGR) {
   //  ffmpeg -i ./data/dataset/apple.jpg  -s 1024*800 -pix_fmt nv21 ./data/dataset/yuv/test_nv21.yuv
   const char *filename = "data/dataset/yuv/test_nv21.yuv";
   int w = 1024;
@@ -173,7 +173,7 @@ TEST_F(MindDataImageProcess, testNV21ToBGR) {
   cv::Mat dst_image(lite_mat_bgr.height_, lite_mat_bgr.width_, CV_8UC3, lite_mat_bgr.data_ptr_);
 }
 
-TEST_F(MindDataImageProcess, testNV12ToBGR) {
+TEST_F(MindDataImageProcess, DISABLED_testNV12ToBGR) {
   //  ffmpeg -i ./data/dataset/apple.jpg  -s 1024*800 -pix_fmt nv12 ./data/dataset/yuv/test_nv12.yuv
   const char *filename = "data/dataset/yuv/test_nv12.yuv";
   int w = 1024;
@@ -193,7 +193,7 @@ TEST_F(MindDataImageProcess, testNV12ToBGR) {
   cv::Mat dst_image(lite_mat_bgr.height_, lite_mat_bgr.width_, CV_8UC3, lite_mat_bgr.data_ptr_);
 }
 
-TEST_F(MindDataImageProcess, testExtractChannel) {
+TEST_F(MindDataImageProcess, DISABLED_testExtractChannel) {
   std::string filename = "data/dataset/apple.jpg";
   cv::Mat src_image = cv::imread(filename, cv::ImreadModes::IMREAD_COLOR);
   cv::Mat dst_image;
@@ -219,7 +219,7 @@ TEST_F(MindDataImageProcess, testExtractChannel) {
   // cv::imwrite("./test_lite_r.jpg", dst_imageR);
 }
 
-TEST_F(MindDataImageProcess, testSplit) {
+TEST_F(MindDataImageProcess, DISABLED_testSplit) {
   std::string filename = "data/dataset/apple.jpg";
   cv::Mat src_image = cv::imread(filename, cv::ImreadModes::IMREAD_COLOR);
   std::vector<cv::Mat> dst_images;
@@ -241,7 +241,7 @@ TEST_F(MindDataImageProcess, testSplit) {
   cv::Mat dst_imageR(lite_r.height_, lite_r.width_, CV_8UC1, lite_r.data_ptr_);
 }
 
-TEST_F(MindDataImageProcess, testMerge) {
+TEST_F(MindDataImageProcess, DISABLED_testMerge) {
   std::string filename = "data/dataset/apple.jpg";
   cv::Mat src_image = cv::imread(filename, cv::ImreadModes::IMREAD_COLOR);
   std::vector<cv::Mat> dst_images;
@@ -317,7 +317,7 @@ cv::Mat cv1CImageProcess(cv::Mat &image) {
   return imgR2;
 }
 
-TEST_F(MindDataImageProcess, test1C) {
+TEST_F(MindDataImageProcess, DISABLED_test1C) {
   std::string filename = "data/dataset/apple.jpg";
   cv::Mat image = cv::imread(filename, cv::ImreadModes::IMREAD_COLOR);
   cv::Mat cv_image = cv1CImageProcess(image);
@@ -336,7 +336,7 @@ TEST_F(MindDataImageProcess, test1C) {
   CompareMat(cv_image, lite_norm_mat_cut);
 }
 
-TEST_F(MindDataImageProcess, TestPadd) {
+TEST_F(MindDataImageProcess, DISABLED_TestPadd) {
   std::string filename = "data/dataset/apple.jpg";
   cv::Mat image = cv::imread(filename, cv::ImreadModes::IMREAD_COLOR);
 
@@ -365,7 +365,7 @@ TEST_F(MindDataImageProcess, TestPadd) {
   cv::Mat dst_image(256 + top + bottom, 256 + left + right, CV_8UC3, makeborder.data_ptr_);
 }
 
-TEST_F(MindDataImageProcess, TestGetDefaultBoxes) {
+TEST_F(MindDataImageProcess, DISABLED_TestGetDefaultBoxes) {
   std::string benchmark = "data/dataset/testLite/default_boxes.bin";
   BoxesConfig config;
   config.img_shape = {300, 300};
@@ -398,7 +398,7 @@ TEST_F(MindDataImageProcess, TestGetDefaultBoxes) {
   EXPECT_LT(distance, 1e-5);
 }
 
-TEST_F(MindDataImageProcess, TestApplyNms) {
+TEST_F(MindDataImageProcess, DISABLED_TestApplyNms) {
   std::vector<std::vector<float>> all_boxes = {{1, 1, 2, 2}, {3, 3, 4, 4}, {5, 5, 6, 6}, {5, 5, 6, 6}};
   std::vector<float> all_scores = {0.6, 0.5, 0.4, 0.9};
   std::vector<int> keep = ApplyNms(all_boxes, all_scores, 0.5, 10);
@@ -407,7 +407,7 @@ TEST_F(MindDataImageProcess, TestApplyNms) {
   ASSERT_TRUE(keep[2] == 1);
 }
 
-TEST_F(MindDataImageProcess, TestAffineInput) {
+TEST_F(MindDataImageProcess, DISABLED_TestAffineInput) {
   LiteMat src(3, 3);
   LiteMat dst;
   double M[6] = {1};
@@ -416,7 +416,7 @@ TEST_F(MindDataImageProcess, TestAffineInput) {
   EXPECT_FALSE(Affine(src, dst, M, {0, 0}, UINT8_C1(0)));
 }
 
-TEST_F(MindDataImageProcess, TestAffine) {
+TEST_F(MindDataImageProcess, DISABLED_TestAffine) {
   // The input matrix
   // 0 0 1 0 0
   // 0 0 1 0 0
@@ -479,7 +479,7 @@ TEST_F(MindDataImageProcess, TestAffine) {
   }
 }
 
-TEST_F(MindDataImageProcess, TestSubtractUint8) {
+TEST_F(MindDataImageProcess, DISABLED_TestSubtractUint8) {
   const size_t cols = 4;
   // Test uint8
   LiteMat src1_uint8(1, cols);
@@ -498,7 +498,7 @@ TEST_F(MindDataImageProcess, TestSubtractUint8) {
   }
 }
 
-TEST_F(MindDataImageProcess, TestSubtractInt8) {
+TEST_F(MindDataImageProcess, DISABLED_TestSubtractInt8) {
   const size_t cols = 4;
   // Test int8
   LiteMat src1_int8(1, cols, LDataType(LDataType::INT8));
@@ -512,12 +512,11 @@ TEST_F(MindDataImageProcess, TestSubtractInt8) {
   LiteMat dst_int8;
   EXPECT_TRUE(Subtract(src1_int8, src2_int8, dst_int8));
   for (size_t i = 0; i < cols; i++) {
-    EXPECT_EQ(static_cast<INT8_C1 *>(expect_int8.data_ptr_)[i].c1,
-              static_cast<INT8_C1 *>(dst_int8.data_ptr_)[i].c1);
+    EXPECT_EQ(static_cast<INT8_C1 *>(expect_int8.data_ptr_)[i].c1, static_cast<INT8_C1 *>(dst_int8.data_ptr_)[i].c1);
   }
 }
 
-TEST_F(MindDataImageProcess, TestSubtractUInt16) {
+TEST_F(MindDataImageProcess, DISABLED_TestSubtractUInt16) {
   const size_t cols = 4;
   // Test uint16
   LiteMat src1_uint16(1, cols, LDataType(LDataType::UINT16));
@@ -536,7 +535,7 @@ TEST_F(MindDataImageProcess, TestSubtractUInt16) {
   }
 }
 
-TEST_F(MindDataImageProcess, TestSubtractInt16) {
+TEST_F(MindDataImageProcess, DISABLED_TestSubtractInt16) {
   const size_t cols = 4;
   // Test int16
   LiteMat src1_int16(1, cols, LDataType(LDataType::INT16));
@@ -555,7 +554,7 @@ TEST_F(MindDataImageProcess, TestSubtractInt16) {
   }
 }
 
-TEST_F(MindDataImageProcess, TestSubtractUInt32) {
+TEST_F(MindDataImageProcess, DISABLED_TestSubtractUInt32) {
   const size_t cols = 4;
   // Test uint16
   LiteMat src1_uint32(1, cols, LDataType(LDataType::UINT32));
@@ -574,7 +573,7 @@ TEST_F(MindDataImageProcess, TestSubtractUInt32) {
   }
 }
 
-TEST_F(MindDataImageProcess, TestSubtractInt32) {
+TEST_F(MindDataImageProcess, DISABLED_TestSubtractInt32) {
   const size_t cols = 4;
   // Test int32
   LiteMat src1_int32(1, cols, LDataType(LDataType::INT32));
@@ -593,7 +592,7 @@ TEST_F(MindDataImageProcess, TestSubtractInt32) {
   }
 }
 
-TEST_F(MindDataImageProcess, TestSubtractFloat) {
+TEST_F(MindDataImageProcess, DISABLED_TestSubtractFloat) {
   const size_t cols = 4;
   // Test float
   LiteMat src1_float(1, cols, LDataType(LDataType::FLOAT32));
@@ -612,7 +611,7 @@ TEST_F(MindDataImageProcess, TestSubtractFloat) {
   }
 }
 
-TEST_F(MindDataImageProcess, TestDivideUint8) {
+TEST_F(MindDataImageProcess, DISABLED_TestDivideUint8) {
   const size_t cols = 4;
   // Test uint8
   LiteMat src1_uint8(1, cols);
@@ -631,7 +630,7 @@ TEST_F(MindDataImageProcess, TestDivideUint8) {
   }
 }
 
-TEST_F(MindDataImageProcess, TestDivideInt8) {
+TEST_F(MindDataImageProcess, DISABLED_TestDivideInt8) {
   const size_t cols = 4;
   // Test int8
   LiteMat src1_int8(1, cols, LDataType(LDataType::INT8));
@@ -645,12 +644,11 @@ TEST_F(MindDataImageProcess, TestDivideInt8) {
   LiteMat dst_int8;
   EXPECT_TRUE(Divide(src1_int8, src2_int8, dst_int8));
   for (size_t i = 0; i < cols; i++) {
-    EXPECT_EQ(static_cast<INT8_C1 *>(expect_int8.data_ptr_)[i].c1,
-              static_cast<INT8_C1 *>(dst_int8.data_ptr_)[i].c1);
+    EXPECT_EQ(static_cast<INT8_C1 *>(expect_int8.data_ptr_)[i].c1, static_cast<INT8_C1 *>(dst_int8.data_ptr_)[i].c1);
   }
 }
 
-TEST_F(MindDataImageProcess, TestDivideUInt16) {
+TEST_F(MindDataImageProcess, DISABLED_TestDivideUInt16) {
   const size_t cols = 4;
   // Test uint16
   LiteMat src1_uint16(1, cols, LDataType(LDataType::UINT16));
@@ -669,7 +667,7 @@ TEST_F(MindDataImageProcess, TestDivideUInt16) {
   }
 }
 
-TEST_F(MindDataImageProcess, TestDivideInt16) {
+TEST_F(MindDataImageProcess, DISABLED_TestDivideInt16) {
   const size_t cols = 4;
   // Test int16
   LiteMat src1_int16(1, cols, LDataType(LDataType::INT16));
@@ -688,7 +686,7 @@ TEST_F(MindDataImageProcess, TestDivideInt16) {
   }
 }
 
-TEST_F(MindDataImageProcess, TestDivideUInt32) {
+TEST_F(MindDataImageProcess, DISABLED_TestDivideUInt32) {
   const size_t cols = 4;
   // Test uint16
   LiteMat src1_uint32(1, cols, LDataType(LDataType::UINT32));
@@ -707,7 +705,7 @@ TEST_F(MindDataImageProcess, TestDivideUInt32) {
   }
 }
 
-TEST_F(MindDataImageProcess, TestDivideInt32) {
+TEST_F(MindDataImageProcess, DISABLED_TestDivideInt32) {
   const size_t cols = 4;
   // Test int32
   LiteMat src1_int32(1, cols, LDataType(LDataType::INT32));
@@ -726,7 +724,7 @@ TEST_F(MindDataImageProcess, TestDivideInt32) {
   }
 }
 
-TEST_F(MindDataImageProcess, TestDivideFloat) {
+TEST_F(MindDataImageProcess, DISABLED_TestDivideFloat) {
   const size_t cols = 4;
   // Test float
   LiteMat src1_float(1, cols, LDataType(LDataType::FLOAT32));

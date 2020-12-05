@@ -181,7 +181,7 @@ if (NOT PLATFORM_ARM32 AND NOT PLATFORM_ARM64)
     endif ()
 endif ()
 
-if (BUILD_MINDDATA STREQUAL "lite" OR BUILD_MINDDATA STREQUAL "full")
+if (BUILD_MINDDATA STREQUAL "lite" OR BUILD_MINDDATA STREQUAL "full" OR BUILD_MINDDATA STREQUAL "wrapper")
     # add sentencepiece dependency
     # include(${TOP_DIR}/cmake/external_libs/sentencepiece.cmake)
     # json

@@ -2,6 +2,7 @@ set(MINDDATA_DIR ${CCSRC_DIR}/minddata/dataset)
 set(CMAKE_CXX_STANDARD 17)
 
 set(CMAKE_CXX_FLAGS_DEBUG "$ENV{CXXFLAGS} -O0 -g2 -ggdb -fno-inline-functions -fno-omit-frame-pointer -D_LIBCPP_INLINE_VISIBILITY='' -D_LIBCPP_DISABLE_EXTERN_TEMPLATE=1 -DHALF_ENABLE_CPP11_USER_LITERALS=0 -D_FORTIFY_SOURCE=2 -Wno-cpp")
+set(CMAKE_CXX_FLAGS_DEBUG "$ENV{CXXFLAGS} -Werror -Wno-return-std-move -Wno-unused-private-field -Wno-unused-lambda-capture -Wno-sign-compare -Wno-overloaded-virtual -Wno-unneeded-internal-declaration -Wno-unused-variable -Wno-pessimizing-move -Wno-inconsistent-missing-override")
 
 set(CMAKE_CXX_FLAGS "$ENV{CXXFLAGS} -I/usr/local/include -std=c++17 -Wall -fPIC")
 
@@ -80,6 +81,12 @@ AUX_SOURCE_DIRECTORY(${MINDDATA_DIR}/util MINDDATA_UTIL_SRC_FILES)
 AUX_SOURCE_DIRECTORY(${MINDDATA_DIR}/kernels/image/lite_cv  MINDDATA_KERNELS_IMAGE_LITE_CV_FILES)
 
 
+
+if (BUILD_MINDDATA STREQUAL "full")
+    set(BUILD_MINDDATA "wrapper")
+endif ()
+
+
 if (BUILD_MINDDATA STREQUAL "full")
     include_directories("${CMAKE_SOURCE_DIR}/../ccsrc/minddata/dataset/kernels/image")
     list(REMOVE_ITEM MINDDATA_API_SRC_FILES
@@ -105,62 +112,88 @@ if (BUILD_MINDDATA STREQUAL "full")
             "${MINDDATA_DIR}/engine/datasetops/cache_base_op.cc"
             "${MINDDATA_DIR}/engine/datasetops/cache_lookup_op.cc"
             "${MINDDATA_DIR}/engine/datasetops/cache_op.cc"
+            "${MINDDATA_DIR}/engine/datasetops/concat_op.cc"
+            "${MINDDATA_DIR}/engine/datasetops/rename_op.cc"
+            "${MINDDATA_DIR}/engine/datasetops/skip_op.cc"
+            "${MINDDATA_DIR}/engine/datasetops/take_op.cc"
+            "${MINDDATA_DIR}/engine/datasetops/zip_op.cc"
             )
 
     list(REMOVE_ITEM MINDDATA_ENGINE_DATASETOPS_SOURCE_SRC_FILES
-        "${MINDDATA_DIR}/engine/datasetops/source/generator_op.cc"
-        "${MINDDATA_DIR}/engine/datasetops/source/voc_op.cc"
-        "${MINDDATA_DIR}/engine/datasetops/source/manifest_op.cc"
-        "${MINDDATA_DIR}/engine/datasetops/source/mindrecord_op.cc"
-        "${MINDDATA_DIR}/engine/datasetops/source/tf_reader_op.cc"
-        )
+            "${MINDDATA_DIR}/engine/datasetops/source/generator_op.cc"
+            "${MINDDATA_DIR}/engine/datasetops/source/voc_op.cc"
+            "${MINDDATA_DIR}/engine/datasetops/source/manifest_op.cc"
+            "${MINDDATA_DIR}/engine/datasetops/source/mindrecord_op.cc"
+            "${MINDDATA_DIR}/engine/datasetops/source/tf_reader_op.cc"
+            "${MINDDATA_DIR}/engine/datasetops/source/celeba_op.cc"
+            "${MINDDATA_DIR}/engine/datasetops/source/cifar_op.cc"
+            "${MINDDATA_DIR}/engine/datasetops/source/clue_op.cc"
+            "${MINDDATA_DIR}/engine/datasetops/source/coco_op.cc"
+            "${MINDDATA_DIR}/engine/datasetops/source/csv_op.cc"
+            "${MINDDATA_DIR}/engine/datasetops/source/image_folder_op.cc"
+            "${MINDDATA_DIR}/engine/datasetops/source/mnist_op.cc"
+            "${MINDDATA_DIR}/engine/datasetops/source/random_data_op.cc"
+            "${MINDDATA_DIR}/engine/datasetops/source/text_file_op.cc"
+            "${MINDDATA_DIR}/engine/datasetops/source/voc_op.cc"
+            )
 
     list(REMOVE_ITEM MINDDATA_ENGINE_DATASETOPS_SOURCE_SAMPLER_SRC_FILES
-        "${MINDDATA_DIR}/engine/datasetops/source/sampler/python_sampler.cc"
-        )
+            "${MINDDATA_DIR}/engine/datasetops/source/sampler/python_sampler.cc"
+            )
 
     list(REMOVE_ITEM MINDDATA_ENGINE_OPT_POST_SRC_FILES
-        "${MINDDATA_DIR}/engine/opt/post/repeat_pass.cc"
-        )
+            "${MINDDATA_DIR}/engine/opt/post/repeat_pass.cc"
+            )
 
     list(REMOVE_ITEM MINDDATA_ENGINE_OPT_PRE_SRC_FILES
-        "${MINDDATA_DIR}/engine/opt/pre/cache_transform_pass.cc"
-        "${MINDDATA_DIR}/engine/opt/pre/cache_error_pass.cc"
-        )
+            "${MINDDATA_DIR}/engine/opt/pre/cache_transform_pass.cc"
+            "${MINDDATA_DIR}/engine/opt/pre/cache_error_pass.cc"
+            )
 
     list(REMOVE_ITEM MINDDATA_ENGINE_IR_CACHE_SRC_FILES
-        "${MINDDATA_DIR}/engine/ir/cache/dataset_cache_impl.cc"
-        )
+            "${MINDDATA_DIR}/engine/ir/cache/dataset_cache_impl.cc"
+            "${MINDDATA_DIR}/engine/ir/cache/pre_built_dataset_cache.cc"
+            )
 
     list(REMOVE_ITEM MINDDATA_ENGINE_IR_DATASETOPS_SOURCE_SRC_FILES
-        "${MINDDATA_DIR}/engine/ir/datasetops/source/generator_node.cc"
-        "${MINDDATA_DIR}/engine/ir/datasetops/source/manifest_node.cc"
-        "${MINDDATA_DIR}/engine/ir/datasetops/source/minddata_node.cc"
-        "${MINDDATA_DIR}/engine/ir/datasetops/source/tf_record_node.cc"
-        "${MINDDATA_DIR}/engine/ir/datasetops/source/voc_node.cc"
-        )
+            "${MINDDATA_DIR}/engine/ir/datasetops/source/generator_node.cc"
+            "${MINDDATA_DIR}/engine/ir/datasetops/source/manifest_node.cc"
+            "${MINDDATA_DIR}/engine/ir/datasetops/source/minddata_node.cc"
+            "${MINDDATA_DIR}/engine/ir/datasetops/source/tf_record_node.cc"
+            "${MINDDATA_DIR}/engine/ir/datasetops/source/voc_node.cc"
+            "${MINDDATA_DIR}/engine/ir/datasetops/source/celeba_node.cc"
+            "${MINDDATA_DIR}/engine/ir/datasetops/source/cifar10_node.cc"
+            "${MINDDATA_DIR}/engine/ir/datasetops/source/cifar100_node.cc"
+            "${MINDDATA_DIR}/engine/ir/datasetops/source/coco_node.cc"
+            "${MINDDATA_DIR}/engine/ir/datasetops/source/csv_node.cc"
+            "${MINDDATA_DIR}/engine/ir/datasetops/source/image_folder_node.cc"
+            "${MINDDATA_DIR}/engine/ir/datasetops/source/manifest_node.cc"
+            "${MINDDATA_DIR}/engine/ir/datasetops/source/mnist_node.cc"
+            "${MINDDATA_DIR}/engine/ir/datasetops/source/random_node.cc"
+            "${MINDDATA_DIR}/engine/ir/datasetops/source/text_file_node.cc"
+            "${MINDDATA_DIR}/engine/ir/datasetops/source/clue_node.cc"
+            )
     list(REMOVE_ITEM MINDDATA_KERNELS_IMAGE_SRC_FILES
-        "${MINDDATA_DIR}/kernels/image/affine_op.cc"
-        "${MINDDATA_DIR}/kernels/image/auto_contrast_op.cc"
-        "${MINDDATA_DIR}/kernels/image/bounding_box_op.cc"
-        "${MINDDATA_DIR}/kernels/image/bounding_box_augment_op.cc"
-        "${MINDDATA_DIR}/kernels/image/center_crop_op.cc"
-        "${MINDDATA_DIR}/kernels/image/concatenate_op.cc"
-        "${MINDDATA_DIR}/kernels/image/cut_out_op.cc"
-        "${MINDDATA_DIR}/kernels/image/cutmix_batch_op.cc"
-        "${MINDDATA_DIR}/kernels/image/equalize_op.cc"
-	"${MINDDATA_DIR}/kernels/image/hwc_to_chw_op.cc"
-        "${MINDDATA_DIR}/kernels/image/image_utils.cc"
-        "${MINDDATA_DIR}/kernels/image/invert_op.cc"
-        "${MINDDATA_DIR}/kernels/image/math_utils.cc"
-        "${MINDDATA_DIR}/kernels/image/mixup_batch_op.cc"
-        "${MINDDATA_DIR}/kernels/image/pad_op.cc"
-        "${MINDDATA_DIR}/kernels/image/posterize_op.cc"
-        "${MINDDATA_DIR}/kernels/image/random_affine_op.cc"
-        "${MINDDATA_DIR}/kernels/image/random_color_adjust_op.cc"
-        "${MINDDATA_DIR}/kernels/image/random_crop_and_resize_with_bbox_op.cc"
-        "${MINDDATA_DIR}/kernels/image/random_crop_decode_resize_op.cc"
-        "${MINDDATA_DIR}/kernels/image/random_crop_and_resize_op.cc"
+            "${MINDDATA_DIR}/kernels/image/affine_op.cc"
+            "${MINDDATA_DIR}/kernels/image/auto_contrast_op.cc"
+            "${MINDDATA_DIR}/kernels/image/bounding_box_op.cc"
+            "${MINDDATA_DIR}/kernels/image/bounding_box_augment_op.cc"
+            "${MINDDATA_DIR}/kernels/image/concatenate_op.cc"
+            "${MINDDATA_DIR}/kernels/image/cut_out_op.cc"
+            "${MINDDATA_DIR}/kernels/image/cutmix_batch_op.cc"
+            "${MINDDATA_DIR}/kernels/image/equalize_op.cc"
+            "${MINDDATA_DIR}/kernels/image/hwc_to_chw_op.cc"
+            "${MINDDATA_DIR}/kernels/image/image_utils.cc"
+            "${MINDDATA_DIR}/kernels/image/invert_op.cc"
+            "${MINDDATA_DIR}/kernels/image/math_utils.cc"
+            "${MINDDATA_DIR}/kernels/image/mixup_batch_op.cc"
+            "${MINDDATA_DIR}/kernels/image/pad_op.cc"
+            "${MINDDATA_DIR}/kernels/image/posterize_op.cc"
+            "${MINDDATA_DIR}/kernels/image/random_affine_op.cc"
+            "${MINDDATA_DIR}/kernels/image/random_color_adjust_op.cc"
+            "${MINDDATA_DIR}/kernels/image/random_crop_and_resize_with_bbox_op.cc"
+            "${MINDDATA_DIR}/kernels/image/random_crop_decode_resize_op.cc"
+            "${MINDDATA_DIR}/kernels/image/random_crop_and_resize_op.cc"
             "${MINDDATA_DIR}/kernels/image/random_crop_op.cc"
             "${MINDDATA_DIR}/kernels/image/random_crop_with_bbox_op.cc"
             "${MINDDATA_DIR}/kernels/image/random_horizontal_flip_op.cc"
@@ -189,7 +222,14 @@ if (BUILD_MINDDATA STREQUAL "full")
             "${MINDDATA_DIR}/engine/ir/datasetops/bucket_batch_by_length_node.cc"
             "${MINDDATA_DIR}/engine/ir/datasetops/build_sentence_piece_vocab_node.cc"
             "${MINDDATA_DIR}/engine/ir/datasetops/build_vocab_node.cc"
+            "${MINDDATA_DIR}/engine/ir/datasetops/filter_node.cc"
             "${MINDDATA_DIR}/engine/ir/datasetops/sync_wait_node.cc"
+            "${MINDDATA_DIR}/engine/ir/datasetops/skip_node.cc"
+            "${MINDDATA_DIR}/engine/ir/datasetops/take_node.cc"
+            "${MINDDATA_DIR}/engine/ir/datasetops/transfer_node.cc"
+            "${MINDDATA_DIR}/engine/ir/datasetops/zip_node.cc"
+            "${MINDDATA_DIR}/engine/ir/datasetops/rename_node.cc"
+            "${MINDDATA_DIR}/engine/ir/datasetops/concat_node.cc"
             )
     list(REMOVE_ITEM MINDDATA_ENGINE_CONSUMERS_SRC_FILES
             "${MINDDATA_DIR}/engine/consumers/python_tree_consumer.cc"
@@ -205,48 +245,47 @@ if (BUILD_MINDDATA STREQUAL "full")
     include_directories("${CMAKE_BINARY_DIR}/minddata/dataset/engine/cache")
 
     if (BUILD_MINDDATA_EXAMPLE AND (PLATFORM_ARM32 OR PLATFORM_ARM64))
-      set(MINDDATA_EXAMPLE_SRC ${CMAKE_CURRENT_SOURCE_DIR}/example/jni-example.cc)
+        set(MINDDATA_TODAPI_SRC ${CMAKE_CURRENT_SOURCE_DIR}/wrapper/MDToDApi.cc)
     endif ()
 
     add_library(minddata-lite SHARED
             ${MINDDATA_API_SRC_FILES}
-        ${MINDDATA_CALLBACK_SRC_FILES}
-        ${MINDDATA_CORE_SRC_FILES}
-        ${MINDDATA_ENGINE_SRC_FILES}
-        #${MINDDATA_ENGINE_CACHE_SRC_FILES}
-        ${MINDDATA_ENGINE_CONSUMERS_SRC_FILES}
-        ${MINDDATA_ENGINE_DATASETOPS_SRC_FILES}
-        ${MINDDATA_ENGINE_DATASETOPS_MAPOP_SRC_FILES}
-        ${MINDDATA_ENGINE_DATASETOPS_SOURCE_SRC_FILES}
-        ${MINDDATA_ENGINE_DATASETOPS_SOURCE_SAMPLER_SRC_FILES}
-        ${MINDDATA_ENGINE_IR_DATASETOPS_SRC_FILES}
-	${MINDDATA_ENGINE_IR_CACHE_SRC_FILES}
-        ${MINDDATA_ENGINE_IR_DATASETOPS_SOURCE_SRC_FILES}
-        ${MINDDATA_ENGINE_OPT_SRC_FILES}
-        ${MINDDATA_ENGINE_OPT_OPTIONAL_SRC_FILES}
-        ${MINDDATA_ENGINE_OPT_POST_SRC_FILES}
-        ${MINDDATA_ENGINE_OPT_PRE_SRC_FILES}
-        ${MINDDATA_ENGINE_OPT_UTIL_SRC_FILES}
-        ${MINDDATA_ENGINE_PERF_SRC_FILES}
-        ${MINDDATA_KERNELS_SRC_FILES}
-	${MINDDATA_KERNELS_IMAGE_LITE_CV_FILES}
-        ${MINDDATA_KERNELS_IMAGE_SRC_FILES}
-        ${MINDDATA_KERNELS_DATA_SRC_FILES}
-        ${MINDDATA_UTIL_SRC_FILES}
-        ${MINDDATA_EXAMPLE_SRC}
-        ${CMAKE_CURRENT_SOURCE_DIR}/../src/common/log_adapter.cc
-        ${CORE_DIR}/utils/ms_utils.cc
-        )
+            ${MINDDATA_CALLBACK_SRC_FILES}
+            ${MINDDATA_CORE_SRC_FILES}
+            ${MINDDATA_ENGINE_SRC_FILES}
+            #${MINDDATA_ENGINE_CACHE_SRC_FILES}
+            ${MINDDATA_ENGINE_CONSUMERS_SRC_FILES}
+            ${MINDDATA_ENGINE_DATASETOPS_SRC_FILES}
+            ${MINDDATA_ENGINE_DATASETOPS_MAPOP_SRC_FILES}
+            ${MINDDATA_ENGINE_DATASETOPS_SOURCE_SRC_FILES}
+            ${MINDDATA_ENGINE_DATASETOPS_SOURCE_SAMPLER_SRC_FILES}
+            ${MINDDATA_ENGINE_IR_DATASETOPS_SRC_FILES}
+            ${MINDDATA_ENGINE_IR_CACHE_SRC_FILES}
+            ${MINDDATA_ENGINE_IR_DATASETOPS_SOURCE_SRC_FILES}
+            ${MINDDATA_ENGINE_OPT_SRC_FILES}
+            ${MINDDATA_ENGINE_OPT_OPTIONAL_SRC_FILES}
+            ${MINDDATA_ENGINE_OPT_POST_SRC_FILES}
+            ${MINDDATA_ENGINE_OPT_PRE_SRC_FILES}
+            ${MINDDATA_ENGINE_OPT_UTIL_SRC_FILES}
+            ${MINDDATA_ENGINE_PERF_SRC_FILES}
+            ${MINDDATA_KERNELS_SRC_FILES}
+            ${MINDDATA_KERNELS_IMAGE_LITE_CV_FILES}
+            ${MINDDATA_KERNELS_IMAGE_SRC_FILES}
+            ${MINDDATA_KERNELS_DATA_SRC_FILES}
+            ${MINDDATA_UTIL_SRC_FILES}
+            ${MINDDATA_EXAMPLE_SRC}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/common/log_adapter.cc
+            ${CORE_DIR}/utils/ms_utils.cc
+            )
 
+    find_package(Threads REQUIRED)
     target_link_libraries(minddata-lite
-        securec
-        jpeg-turbo
-        jpeg
-	#opencv_core
-	#opencv_imgcodecs
-	#opencv_imgproc
-        mindspore::json
-        )
+            securec
+            jpeg-turbo
+            jpeg
+            mindspore::json
+            Threads::Threads
+            )
 
     # ref: https://github.com/android/ndk/issues/1202
     if (PLATFORM_ARM32)
@@ -260,11 +299,73 @@ if (BUILD_MINDDATA STREQUAL "full")
     if (PLATFORM_ARM32 OR PLATFORM_ARM64)
         target_link_libraries(minddata-lite log)
     elseif (BUILD_MINDDATA_EXAMPLE)
-        add_executable(mdlite-example ${CMAKE_CURRENT_SOURCE_DIR}/example/x86-example.cc)
-        target_link_libraries(mdlite-example minddata-lite)
-        add_custom_command(TARGET mdlite-example POST_BUILD
-            COMMAND cp -rf ${CMAKE_CURRENT_SOURCE_DIR}/example/testCifar10Data ${CMAKE_BINARY_DIR}/minddata
+    endif()
+elseif (BUILD_MINDDATA STREQUAL "wrapper")
+    include_directories("${MINDDATA_DIR}/kernels/image")
+    include_directories("${MINDDATA_DIR}/util")
+    include_directories(${CMAKE_CURRENT_SOURCE_DIR}/wrapper)
+    set(MINDDATA_TODAPI_SRC
+            ${MINDDATA_DIR}/core/tensor_shape.cc
+            ${MINDDATA_DIR}/core/tensor.cc
+            ${MINDDATA_DIR}/core/config_manager.cc
+            ${MINDDATA_DIR}/core/data_type.cc
+            ${MINDDATA_DIR}/core/tensor_helpers.cc
+            ${MINDDATA_DIR}/core/global_context.cc
+            ${MINDDATA_DIR}/core/tensor_row.cc
+            ${MINDDATA_DIR}/api/vision.cc
+            ${MINDDATA_DIR}/api/execute.cc
+            ${MINDDATA_DIR}/api/transforms.cc
+            ${MINDDATA_DIR}/util/path.cc
+            ${MINDDATA_DIR}/util/status.cc
+            ${MINDDATA_DIR}/util/data_helper.cc
+            ${MINDDATA_DIR}/util/memory_pool.cc
+            ${MINDDATA_DIR}/engine/data_schema.cc
+            ${MINDDATA_DIR}/kernels/tensor_op.cc
+            ${MINDDATA_DIR}/kernels/image/lite_image_utils.cc
+            ${MINDDATA_DIR}/kernels/image/center_crop_op.cc
+            ${MINDDATA_DIR}/kernels/image/crop_op.cc
+            ${MINDDATA_DIR}/kernels/image/normalize_op.cc
+            ${MINDDATA_DIR}/kernels/image/resize_op.cc
+            ${MINDDATA_DIR}/kernels/data/compose_op.cc
+            ${MINDDATA_DIR}/kernels/data/duplicate_op.cc
+            ${MINDDATA_DIR}/kernels/data/one_hot_op.cc
+            ${MINDDATA_DIR}/kernels/data/random_apply_op.cc
+            ${MINDDATA_DIR}/kernels/data/random_choice_op.cc
+            ${MINDDATA_DIR}/kernels/data/type_cast_op.cc
+            ${MINDDATA_DIR}/kernels/data/data_utils.cc
+            ${MINDDATA_DIR}/kernels/image/exif_utils.cc
+            ${CMAKE_CURRENT_SOURCE_DIR}/wrapper/MDToDApi.cc
+            ${CMAKE_CURRENT_SOURCE_DIR}/wrapper/album_op_android.cc
             )
+
+    add_library(minddata-lite SHARED
+            ${MINDDATA_KERNELS_IMAGE_LITE_CV_FILES}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/common/log_adapter.cc
+            ${CORE_DIR}/utils/ms_utils.cc
+            ${MINDDATA_TODAPI_SRC}
+            )
+
+    find_package(Threads REQUIRED)
+    target_link_libraries(minddata-lite
+            securec
+            jpeg-turbo
+            jpeg
+            mindspore::json
+            Threads::Threads
+            )
+
+    # ref: https://github.com/android/ndk/issues/1202
+    if (PLATFORM_ARM32)
+        file(GLOB_RECURSE LIBCLANG_RT_LIB $ENV{ANDROID_NDK}/libclang_rt.builtins-arm-android.a)
+        if (LIBCLANG_RT_LIB STREQUAL "")
+            MESSAGE(FATAL_ERROR "Cannot find libclang_rt.builtins-arm-androi2d.a in $ENV{ANDROID_NDK}")
+        endif()
+        target_link_libraries(minddata-lite ${LIBCLANG_RT_LIB})
+    endif()
+
+    if (PLATFORM_ARM32 OR PLATFORM_ARM64)
+        target_link_libraries(minddata-lite log)
+    elseif (BUILD_MINDDATA_EXAMPLE)
     endif()
 elseif (BUILD_MINDDATA STREQUAL "lite")
     list(REMOVE_ITEM MINDDATA_CORE_SRC_FILES "${MINDDATA_DIR}/core/client.cc")
@@ -341,9 +442,6 @@ elseif (BUILD_MINDDATA STREQUAL "lite")
         securec
         jpeg-turbo
         jpeg
-	# opencv_core
-	# opencv_imgcodecs
-	# opencv_imgproc
         mindspore::json
         )
 
