@@ -118,7 +118,6 @@ extern "C" MDToDApi *MDToDApi_createPipeLine(MDToDConf_t MDConf) {
     if ((MDConf.ResizeSizeWH[0] != 0) && (MDConf.ResizeSizeWH[1] != 0)) {
       std::vector<int> Resize(MDConf.ResizeSizeWH, MDConf.ResizeSizeWH + 2);
       std::shared_ptr<TensorOperation> resize_op = mindspore::dataset::vision::Resize(Resize);
-      assert(resize_op != nullptr);
       MS_LOG(WARNING) << "Push back resize";
       mapOperations.push_back(resize_op);
       // hasBatch = true;  Batch not currently supported inMInddata-Lite
@@ -126,7 +125,6 @@ extern "C" MDToDApi *MDToDApi_createPipeLine(MDToDConf_t MDConf) {
     if ((MDConf.CropSizeWH[0] != 0) && (MDConf.CropSizeWH[1] != 0)) {
       std::vector<int> Crop(MDConf.CropSizeWH, MDConf.CropSizeWH + 2);
       std::shared_ptr<TensorOperation> center_crop_op = mindspore::dataset::vision::CenterCrop(Crop);
-      assert(center_crop_op != nullptr);
       MS_LOG(WARNING) << "Push back crop";
       mapOperations.push_back(center_crop_op);
       // hasBatch = true;  Batch not currently supported inMInddata-Lite
@@ -249,14 +247,14 @@ extern "C" int MDToDApi_GetNext(MDToDApi *pMDToDApi, MDToDResult_t *results) {
   MS_LOG(INFO) << "Start GetNext";
   if (pMDToDApi == nullptr) {
     MS_LOG(ERROR) << "GetNext called with null ptr. abort";
-    assert(pMDToDApi != nullptr);
+    return -1;
   }
 
   // Set defualt
   results->fileid = -1;
   results->embeddingBuff.DataSize = 0;
   results->imageBuff.DataSize = 0;
-  MS_LOG(INFO) << "Start GetNext [1]" << pMDToDApi;
+  MS_LOG(INFO) << "Start GetNext [1]";
   // get next row for dataset
   std::unordered_map<std::string, std::shared_ptr<Tensor>> row;
   if (pMDToDApi->_iter == nullptr) {
