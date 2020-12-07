@@ -244,6 +244,10 @@ int AlbumOp::GetOrientation(const std::string &folder_path) {
   fseek(fp, 0, SEEK_END);
   int64_t fsize = ftell(fp);
   rewind(fp);
+  if (fsize > INT_MAX) {
+    fclose(fp);
+    return 0;
+  }
   unsigned char *buf = new unsigned char[fsize];
   if (fread(buf, 1, fsize, fp) != fsize) {
     MS_LOG(WARNING) << "read file size error for EXIF:  file = " << folder_path;
