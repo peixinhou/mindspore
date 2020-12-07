@@ -201,32 +201,30 @@ int SubGraphVerify(const Model &model) {
   auto tensor_size = model.all_tensors_.size();
   auto node_size = model.all_nodes_.size();
 
-  if (!model.sub_graphs_.empty()) {
-    for (auto &graph : model.sub_graphs_) {
-      if (graph == nullptr) {
-        MS_LOG(ERROR) << "graph is null.";
-        return RET_ERROR;
-      }
-      if (std::any_of(graph->input_indices_.begin(), graph->input_indices_.end(),
-                      [&tensor_size](const uint32_t &idx) { return idx >= tensor_size; })) {
-        MS_LOG(ERROR) << "Index of graph->input_indices_ is beyond tensor_size.";
-        return RET_ERROR;
-      }
-      if (std::any_of(graph->output_indices_.begin(), graph->output_indices_.end(),
-                      [&tensor_size](const uint32_t &idx) { return idx >= tensor_size; })) {
-        MS_LOG(ERROR) << "Index of graph->output_indices_ is beyond tensor_size.";
-        return RET_ERROR;
-      }
-      if (std::any_of(graph->tensor_indices_.begin(), graph->tensor_indices_.end(),
-                      [&tensor_size](const uint32_t &idx) { return idx >= tensor_size; })) {
-        MS_LOG(ERROR) << "Index of graph->tensor_indices_ is beyond tensor_size.";
-        return RET_ERROR;
-      }
-      if (std::any_of(graph->node_indices_.begin(), graph->node_indices_.end(),
-                      [&node_size](const uint32_t &idx) { return idx >= node_size; })) {
-        MS_LOG(ERROR) << "Index of graph->node_indices_ is beyond node_size.";
-        return RET_ERROR;
-      }
+  for (auto &graph : model.sub_graphs_) {
+    if (graph == nullptr) {
+      MS_LOG(ERROR) << "graph is null.";
+      return RET_ERROR;
+    }
+    if (std::any_of(graph->input_indices_.begin(), graph->input_indices_.end(),
+                    [&tensor_size](const uint32_t &idx) { return idx >= tensor_size; })) {
+      MS_LOG(ERROR) << "Index of graph->input_indices_ is beyond tensor_size.";
+      return RET_ERROR;
+    }
+    if (std::any_of(graph->output_indices_.begin(), graph->output_indices_.end(),
+                    [&tensor_size](const uint32_t &idx) { return idx >= tensor_size; })) {
+      MS_LOG(ERROR) << "Index of graph->output_indices_ is beyond tensor_size.";
+      return RET_ERROR;
+    }
+    if (std::any_of(graph->tensor_indices_.begin(), graph->tensor_indices_.end(),
+                    [&tensor_size](const uint32_t &idx) { return idx >= tensor_size; })) {
+      MS_LOG(ERROR) << "Index of graph->tensor_indices_ is beyond tensor_size.";
+      return RET_ERROR;
+    }
+    if (std::any_of(graph->node_indices_.begin(), graph->node_indices_.end(),
+                    [&node_size](const uint32_t &idx) { return idx >= node_size; })) {
+      MS_LOG(ERROR) << "Index of graph->node_indices_ is beyond node_size.";
+      return RET_ERROR;
     }
   }
   return RET_OK;
