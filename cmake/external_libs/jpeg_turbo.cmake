@@ -14,7 +14,7 @@ else()
     set(jpeg_turbo_CFLAGS "-fstack-protector-all -Wno-maybe-uninitialized -Wno-unused-parameter -fPIC -D_FORTIFY_SOURCE=2 -O2")
 endif()
 
-set(jpeg_turbo_LDFLAGS "-Wl,-z,relro,-z,now,-z,noexecstack")
+set(jpeg_turbo_LDFLAGS "-Wl,-z,relro,-z,now,-z,noexecstack,-s")
 mindspore_add_pkg(jpeg_turbo
         VER 2.0.4
         LIBS jpeg turbojpeg
