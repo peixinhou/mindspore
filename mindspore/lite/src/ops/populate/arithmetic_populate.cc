@@ -58,15 +58,16 @@ Registry RealDivParameterRegistry(schema::PrimitiveType_RealDiv, PopulateArithme
 Registry LogicalAndParameterRegistry(schema::PrimitiveType_LogicalAnd, PopulateArithmetic);
 Registry ParameterRegistry(schema::PrimitiveType_LogicalOr, PopulateArithmetic);
 Registry EqualParameterRegistry(schema::PrimitiveType_Equal, PopulateArithmetic);
+Registry NotEqualParameterRegistry(schema::PrimitiveType_NotEqual, PopulateArithmetic);
 Registry LessParameterRegistry(schema::PrimitiveType_Less, PopulateArithmetic);
+Registry LessEqualParameterRegistry(schema::PrimitiveType_LessEqual, PopulateArithmetic);
 Registry GreaterParameterRegistry(schema::PrimitiveType_Greater, PopulateArithmetic);
 Registry GreaterEqualParameterRegistry(schema::PrimitiveType_GreaterEqual, PopulateArithmetic);
-Registry NotEqualParameterRegistry(schema::PrimitiveType_NotEqual, PopulateArithmetic);
-Registry LessEqualParameterRegistry(schema::PrimitiveType_LessEqual, PopulateArithmetic);
 Registry MaximumParameterRegistry(schema::PrimitiveType_Maximum, PopulateArithmetic);
 Registry MinimumParameterRegistry(schema::PrimitiveType_Minimum, PopulateArithmetic);
 Registry FloorDivParameterRegistry(schema::PrimitiveType_FloorDiv, PopulateArithmetic);
 Registry FloorModParameterRegistry(schema::PrimitiveType_FloorMod, PopulateArithmetic);
+Registry ModParameterRegistry(schema::PrimitiveType_Mod, PopulateArithmetic);
 Registry SquaredDifferenceParameterRegistry(schema::PrimitiveType_SquaredDifference, PopulateArithmetic);
 }  // namespace lite
 }  // namespace mindspore

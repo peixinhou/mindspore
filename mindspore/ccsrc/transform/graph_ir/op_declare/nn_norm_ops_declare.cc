@@ -41,13 +41,13 @@ REG_ADPT_DESC(SoftmaxCrossEntropyWithLogits, prim::kPrimSoftmaxCrossEntropyWithL
 
 // SmoothL1Loss
 INPUT_MAP(SmoothL1Loss) = {{1, INPUT_DESC(predict)}, {2, INPUT_DESC(label)}};
-ATTR_MAP(SmoothL1Loss) = {{"sigma", ATTR_DESC(sigma, AnyTraits<float>())}};
+ATTR_MAP(SmoothL1Loss) = {{"beta", ATTR_DESC(sigma, AnyTraits<float>())}};
 OUTPUT_MAP(SmoothL1Loss) = {{0, OUTPUT_DESC(loss)}};
 REG_ADPT_DESC(SmoothL1Loss, kNameSmoothL1Loss, ADPT_DESC(SmoothL1Loss))
 
 // SmoothL1LossGrad
 INPUT_MAP(SmoothL1LossGrad) = {{1, INPUT_DESC(predict)}, {2, INPUT_DESC(label)}, {3, INPUT_DESC(dout)}};
-ATTR_MAP(SmoothL1LossGrad) = {{"sigma", ATTR_DESC(sigma, AnyTraits<float>())}};
+ATTR_MAP(SmoothL1LossGrad) = {{"beta", ATTR_DESC(sigma, AnyTraits<float>())}};
 OUTPUT_MAP(SmoothL1LossGrad) = {{0, OUTPUT_DESC(gradient)}};
 REG_ADPT_DESC(SmoothL1LossGrad, kNameSmoothL1LossGrad, ADPT_DESC(SmoothL1LossGrad))
 
@@ -82,8 +82,8 @@ REG_ADPT_DESC(LogSoftmaxV2, prim::kPrimLogSoftmax->name(), ADPT_DESC(LogSoftmaxV
 
 // LayerNorm
 INPUT_MAP(LayerNorm) = {{1, INPUT_DESC(x)}, {2, INPUT_DESC(gamma)}, {3, INPUT_DESC(beta)}};
-ATTR_MAP(LayerNorm) = {{"begin_norm_axis", ATTR_DESC(begin_norm_axis, AnyTraits<int>())},
-                       {"begin_params_axis", ATTR_DESC(begin_params_axis, AnyTraits<int>())},
+ATTR_MAP(LayerNorm) = {{"begin_norm_axis", ATTR_DESC(begin_norm_axis, AnyTraits<int64_t>())},
+                       {"begin_params_axis", ATTR_DESC(begin_params_axis, AnyTraits<int64_t>())},
                        {"epsilon", ATTR_DESC(epsilon, AnyTraits<float>())}};
 OUTPUT_MAP(LayerNorm) = {{0, OUTPUT_DESC(y)}, {1, OUTPUT_DESC(mean)}, {2, OUTPUT_DESC(variance)}};
 REG_ADPT_DESC(LayerNorm, prim::kPrimLayerNorm->name(), ADPT_DESC(LayerNorm))

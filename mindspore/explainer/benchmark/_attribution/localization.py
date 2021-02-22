@@ -16,7 +16,7 @@
 import numpy as np
 
 from mindspore.train._utils import check_value_type
-from .metric import AttributionMetric
+from .metric import LabelSensitiveMetric
 from ..._operators import maximum, reshape, Tensor
 from ..._utils import format_tensor_to_ndarray
 
@@ -37,7 +37,7 @@ def _mask_out_saliency(saliency, threshold):
     return mask_out
 
 
-class Localization(AttributionMetric):
+class Localization(LabelSensitiveMetric):
     r"""
     Provides evaluation on the localization capability of XAI methods.
 
@@ -110,10 +110,13 @@ class Localization(AttributionMetric):
             numpy.ndarray, 1D array of shape :math:`(N,)`, result of localization evaluated on `explainer`.
 
         Examples:
-            >>> # init an explainer, the network should contain the output activation function.
+            >>> import numpy as np
+            >>> import mindspore as ms
+            >>> from mindspore.explainer.explanation import Gradient
+            >>> # init an explainer with a trained network, e.g., resnet50
             >>> gradient = Gradient(network)
             >>> inputs = ms.Tensor(np.random.rand(1, 3, 224, 224), ms.float32)
-            >>> masks = np.zeros(1, 1, 224, 224)
+            >>> masks = np.zeros([1, 1, 224, 224])
             >>> masks[:, :, 65: 100, 65: 100] = 1
             >>> targets = 5
             >>> # usage 1: input the explainer and the data to be explained,

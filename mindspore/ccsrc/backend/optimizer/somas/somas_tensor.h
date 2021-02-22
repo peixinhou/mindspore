@@ -49,7 +49,6 @@ enum TensorType {
   kSummaryInput,
   kRefNodeInput,
   kRefNodeOutput,
-  kGap,
   kUnknown
 };
 
@@ -72,6 +71,7 @@ class SomasTensor {
 
   bool ref_overlap_;
   bool between_streams_;
+  bool contiguous_;
 
   lifetime_t lifetime_;
   TensorType type_;
@@ -104,12 +104,11 @@ class SomasTensor {
   bool IsSemiLifelongStart() { return lifelong_value_ == kLifeLongGraphStart; }
   bool IsSemiLifelongEnd() { return lifelong_value_ == kLifeLongGraphEnd; }
   bool IsRefOverlap() { return ref_overlap_; }
-  bool IsGap() { return type_ == kGap; }
 
   // Computing functions
-  void SetOffset(size_t start_offset = 0) {
-    if (aligned_size_ != 0 && type_ != kGetNextOutput) {
-      offset_ = start_offset + solver_tensor_desc_->offset_;
+  void SetOffset() {
+    if (aligned_size_ != 0) {
+      offset_ = solver_tensor_desc_->offset_;
     }
   }
   SomasSolverTensorDescPtr GetSolverTensorDesc();

@@ -52,6 +52,34 @@ def test_cast():
     assert np.all(result.asnumpy() == expect)
 
 
+def test_ones():
+    ones = P.Ones()
+    output = ones((2, 3), mstype.int32)
+    assert output.asnumpy().shape == (2, 3)
+    assert np.sum(output.asnumpy()) == 6
+
+
+def test_ones_1():
+    ones = P.Ones()
+    output = ones(2, mstype.int32)
+    assert output.asnumpy().shape == (2,)
+    assert np.sum(output.asnumpy()) == 2
+
+
+def test_zeros():
+    zeros = P.Zeros()
+    output = zeros((2, 3), mstype.int32)
+    assert output.asnumpy().shape == (2, 3)
+    assert np.sum(output.asnumpy()) == 0
+
+
+def test_zeros_1():
+    zeros = P.Zeros()
+    output = zeros(2, mstype.int32)
+    assert output.asnumpy().shape == (2,)
+    assert np.sum(output.asnumpy()) == 0
+
+
 @non_graph_engine
 def test_reshape():
     input_tensor = Tensor(np.array([[-0.1, 0.3, 3.6], [0.4, 0.5, -3.2]]))
@@ -180,7 +208,7 @@ class CustNet3(Cell):
 class MathBinaryNet1(Cell):
     def __init__(self):
         super(MathBinaryNet1, self).__init__()
-        self.add = P.TensorAdd()
+        self.add = P.Add()
         self.mul = P.Mul()
         self.max = P.Maximum()
         self.number = 3
@@ -230,19 +258,19 @@ class SpaceToBatchNet(Cell):
 class PackNet(Cell):
     def __init__(self):
         super(PackNet, self).__init__()
-        self.pack = P.Pack()
+        self.stack = P.Stack()
 
     def construct(self, x):
-        return self.pack((x, x))
+        return self.stack((x, x))
 
 
 class UnpackNet(Cell):
     def __init__(self):
         super(UnpackNet, self).__init__()
-        self.unpack = P.Unpack()
+        self.unstack = P.Unstack()
 
     def construct(self, x):
-        return self.unpack(x)
+        return self.unstack(x)
 class SpaceToDepthNet(Cell):
     def __init__(self):
         super(SpaceToDepthNet, self).__init__()

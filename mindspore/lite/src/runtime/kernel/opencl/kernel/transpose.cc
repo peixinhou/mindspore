@@ -33,31 +33,65 @@ using mindspore::schema::PrimitiveType_Transpose;
 
 namespace mindspore::kernel {
 
-int TransposeOpenCLKernel::Init() {
+int TransposeOpenCLKernel::CheckSpecs() {
   if ((in_tensors_.size() != 1 && in_tensors_.size() != 2) || out_tensors_.size() != 1) {
-    MS_LOG(ERROR) << "Invalid input size: " << in_tensors_.size() << ", output size: " << out_tensors_.size();
+    MS_LOG(ERROR) << "Transpose input output size unsupported.";
     return RET_ERROR;
   }
-  std::string kernel_name = "transpose";
-  enable_fp16_ = ocl_runtime_->GetFp16Enable();
+  tensor_size_ = GpuTensorInfo(out_tensors_[0]);
+  if (tensor_size_.NDim > 4) {
+    MS_LOG(ERROR) << "Transpose don't support 5d tensor or higher.";
+    return RET_ERROR;
+  }
+  return RET_OK;
+}
+
+int TransposeOpenCLKernel::Prepare() {
   auto param = reinterpret_cast<TransposeParameter *>(op_parameter_);
-  if (in_tensors_[0]->shape().size() != 4 || in_tensors_[0]->shape()[0] > 1) {
-    MS_LOG(ERROR) << "Transpose only support 4d tensor and n = 1 yet.";
-    return mindspore::lite::RET_ERROR;
-  }
-  if (param->num_axes_ == 4 && param->perm_[0] == 0 && param->perm_[1] == 3 && param->perm_[2] == 1 &&
-      param->perm_[3] == 2) {
-    kernel_name += "_0312";
-    type = TransposeType::AXIS0312;
-  } else if (param->num_axes_ == 4 && param->perm_[0] == 0 && param->perm_[1] == 2 && param->perm_[2] == 3 &&
-             param->perm_[3] == 1) {
-    kernel_name += "_0231";
-    type = TransposeType::AXIS0231;
+  if (tensor_size_.NDim == 2) {
+    perm_4d_[0] = tensor_size_.AlignAxis(param->perm_[0]);
+    perm_4d_[1] = 1;
+    perm_4d_[2] = 2;
+    perm_4d_[3] = tensor_size_.AlignAxis(param->perm_[1]);
+    if (param->num_axes_ != tensor_size_.NDim) {
+      perm_4d_[0] = 0;
+      perm_4d_[1] = 1;
+      perm_4d_[2] = 2;
+      perm_4d_[3] = 3;
+    }
+  } else if (tensor_size_.NDim == 3) {
+    perm_4d_[0] = tensor_size_.AlignAxis(param->perm_[0]);
+    perm_4d_[1] = 1;
+    perm_4d_[2] = tensor_size_.AlignAxis(param->perm_[1]);
+    perm_4d_[3] = tensor_size_.AlignAxis(param->perm_[2]);
+  } else if (tensor_size_.NDim == 4) {
+    perm_4d_[0] = tensor_size_.AlignAxis(param->perm_[0]);
+    perm_4d_[1] = tensor_size_.AlignAxis(param->perm_[1]);
+    perm_4d_[2] = tensor_size_.AlignAxis(param->perm_[2]);
+    perm_4d_[3] = tensor_size_.AlignAxis(param->perm_[3]);
   } else {
-    MS_LOG(ERROR) << "unsupported transpose axes.";
-    return mindspore::lite::RET_ERROR;
+    perm_4d_[0] = 0;
+    perm_4d_[1] = 1;
+    perm_4d_[2] = 2;
+    perm_4d_[3] = 3;
   }
-  if (in_tensors_[0]->shape()[2] * UP_DIV(in_tensors_[0]->shape()[3], C4NUM) > MAX_IMAGE2D_SIZE) {
+  if (tensor_size_.N == 1 && perm_4d_[0] == 0 && perm_4d_[1] == 3 && perm_4d_[2] == 1 && perm_4d_[3] == 2) {
+    type_ = TransposeType::AXIS0312;
+  } else if (tensor_size_.N == 1 && perm_4d_[0] == 0 && perm_4d_[1] == 2 && perm_4d_[2] == 3 && perm_4d_[3] == 1) {
+    type_ = TransposeType::AXIS0231;
+  } else {
+    type_ = TransposeType::GENERAL;
+  }
+  std::string kernel_name = "transpose";
+  if (type_ == TransposeType::AXIS0312) {
+    kernel_name += "_0312";
+  } else if (type_ == TransposeType::AXIS0231) {
+    kernel_name += "_0231";
+  } else {
+    kernel_name += "_general";
+  }
+  if (in_tensors_[0]->shape().size() == 4 &&
+      in_tensors_[0]->shape()[2] * UP_DIV(in_tensors_[0]->shape()[3], C4NUM) > ocl_runtime_->GetMaxImage2DWidth()) {
     // just for input
     kernel_name += "_oversize";
   }
@@ -66,64 +100,69 @@ int TransposeOpenCLKernel::Init() {
 #ifdef PROGRAM_WITH_IL
   kernel_ = ocl_runtime_->GetKernelFromBinary(kernel_name);
 #else
-  std::set<std::string> build_options;
   std::string source = transpose_source;
   std::string program_name = "transpose";
   ocl_runtime_->LoadSource(program_name, source);
-  ocl_runtime_->BuildKernel(kernel_, program_name, kernel_name, build_options);
+  ocl_runtime_->BuildKernel(kernel_, program_name, kernel_name);
 #endif
-
+  SetConstArgs();
+  SetGlobalLocal();
   MS_LOG(DEBUG) << kernel_name << " Init Done!";
   return mindspore::lite::RET_OK;
 }
 
+void TransposeOpenCLKernel::SetConstArgs() {
+  size_t n = tensor_size_.N;
+  size_t h = tensor_size_.H;
+  size_t w = tensor_size_.W;
+  size_t c = tensor_size_.C;
+  int arg_idx = 2;
+  cl_int4 shape = {static_cast<int>(n), static_cast<int>(h), static_cast<int>(w), static_cast<int>(c)};
+  ocl_runtime_->SetKernelArg(kernel_, arg_idx++, shape);
+  if (type_ == TransposeType::GENERAL) {
+    int de_perm[4];  // output to input perm
+    for (int i = 0; i < 4; i++) {
+      de_perm[perm_4d_[i]] = i;
+    }
+    cl_int4 de_perm_cl = {de_perm[0], de_perm[1], de_perm[2], de_perm[3]};
+    ocl_runtime_->SetKernelArg(kernel_, arg_idx++, de_perm_cl);
+    GpuTensorInfo in_shape = GpuTensorInfo(in_tensors_[0]);
+    cl_int4 in_shape_int4 = {static_cast<cl_int>(in_shape.N), static_cast<cl_int>(in_shape.H),
+                             static_cast<cl_int>(in_shape.W), static_cast<cl_int>(in_shape.C)};
+    ocl_runtime_->SetKernelArg(kernel_, arg_idx++, in_shape_int4);
+  }
+}
+
+void TransposeOpenCLKernel::SetGlobalLocal() {
+  size_t n = tensor_size_.N;
+  size_t h = tensor_size_.H;
+  size_t w = tensor_size_.W;
+  size_t c = tensor_size_.C;
+  size_t c4 = UP_DIV(c, 4);
+  local_size_ = {};
+  if (type_ == TransposeType::AXIS0312) {  // NHWC -> NCHW
+    global_size_ = {UP_DIV(h, C4NUM), w, c4};
+  } else if (type_ == TransposeType::AXIS0231) {  // NCHW -> NHWC
+    global_size_ = {h, UP_DIV(w, C4NUM), c4};
+  } else {  // general
+    global_size_ = {n * h, w, c4};
+  }
+  AlignGlobalLocal(global_size_, local_size_);
+}
+
 int TransposeOpenCLKernel::Run() {
   MS_LOG(DEBUG) << this->name() << " Running!";
-  std::vector<int> shapex = out_tensors_[0]->shape();
-  size_t n = shapex[0];  // n=1
-  size_t h = shapex[1];
-  size_t w = shapex[2];
-  size_t c = shapex[3];
-  size_t c4 = UP_DIV(c, 4);
-  std::vector<size_t> local = {};
-  std::vector<size_t> global;
-  if (type == TransposeType::AXIS0312) {  // NHWC -> NCHW
-    global = {UP_DIV(h, C4NUM), w, c4};
-  } else if (type == TransposeType::AXIS0231) {  // NCHW -> NHWC
-    global = {h, UP_DIV(w, C4NUM), c4};
-  }
-  cl_int4 shape = {static_cast<int>(n), static_cast<int>(h), static_cast<int>(w), static_cast<int>(c)};
   int arg_idx = 0;
   ocl_runtime_->SetKernelArg(kernel_, arg_idx++, in_tensors_[0]->data_c());
   ocl_runtime_->SetKernelArg(kernel_, arg_idx++, out_tensors_[0]->data_c());
-  ocl_runtime_->SetKernelArg(kernel_, arg_idx++, shape);
-  ocl_runtime_->RunKernel(kernel_, global, local, nullptr);
+  ocl_runtime_->RunKernel(kernel_, global_range_, local_range_, nullptr, &event_);
   return mindspore::lite::RET_OK;
 }
 
-kernel::LiteKernel *OpenCLTransposeKernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                                 const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter,
-                                                 const lite::InnerContext *ctx, const kernel::KernelKey &desc,
-                                                 const mindspore::lite::PrimitiveC *primitive) {
-  auto *kernel =
-    new (std::nothrow) TransposeOpenCLKernel(reinterpret_cast<OpParameter *>(opParameter), inputs, outputs);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "kernel " << opParameter->name_ << "is nullptr.";
-    free(opParameter);
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != mindspore::lite::RET_OK) {
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
-}
-
-REG_KERNEL(kGPU, kNumberTypeFloat32, PrimitiveType_Transpose, OpenCLTransposeKernelCreator)
-REG_KERNEL(kGPU, kNumberTypeFloat16, PrimitiveType_Transpose, OpenCLTransposeKernelCreator)
-REG_KERNEL(kGPU, kNumberTypeFloat32, PrimitiveType_Nhwc2Nchw, OpenCLTransposeKernelCreator)
-REG_KERNEL(kGPU, kNumberTypeFloat16, PrimitiveType_Nhwc2Nchw, OpenCLTransposeKernelCreator)
-REG_KERNEL(kGPU, kNumberTypeFloat32, PrimitiveType_Nchw2Nhwc, OpenCLTransposeKernelCreator)
-REG_KERNEL(kGPU, kNumberTypeFloat16, PrimitiveType_Nchw2Nhwc, OpenCLTransposeKernelCreator)
+REG_KERNEL(kGPU, kNumberTypeFloat32, PrimitiveType_Transpose, OpenCLKernelCreator<TransposeOpenCLKernel>)
+REG_KERNEL(kGPU, kNumberTypeFloat16, PrimitiveType_Transpose, OpenCLKernelCreator<TransposeOpenCLKernel>)
+REG_KERNEL(kGPU, kNumberTypeFloat32, PrimitiveType_Nhwc2Nchw, OpenCLKernelCreator<TransposeOpenCLKernel>)
+REG_KERNEL(kGPU, kNumberTypeFloat16, PrimitiveType_Nhwc2Nchw, OpenCLKernelCreator<TransposeOpenCLKernel>)
+REG_KERNEL(kGPU, kNumberTypeFloat32, PrimitiveType_Nchw2Nhwc, OpenCLKernelCreator<TransposeOpenCLKernel>)
+REG_KERNEL(kGPU, kNumberTypeFloat16, PrimitiveType_Nchw2Nhwc, OpenCLKernelCreator<TransposeOpenCLKernel>)
 }  // namespace mindspore::kernel

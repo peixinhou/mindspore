@@ -29,20 +29,60 @@ namespace dataset {
 class TransferNode : public DatasetNode {
  public:
   /// \brief Constructor
-  TransferNode(std::shared_ptr<DatasetNode> child, bool send_epoch_end);
+  TransferNode(std::shared_ptr<DatasetNode> child, std::string queue_name, std::string device_type, bool send_epoch_end,
+               int32_t total_batch, bool create_data_info_queue);
 
   /// \brief Destructor
   ~TransferNode() = default;
 
+  /// \brief Node name getter
+  /// \return Name of the current node
+  std::string Name() const override { return kTransferNode; }
+
+  /// \brief Print the description
+  /// \param out - The output stream to write output to
+  void Print(std::ostream &out) const override;
+
+  /// \brief Copy the node to a new object
+  /// \return A shared pointer to the new copy
+  std::shared_ptr<DatasetNode> Copy() override;
+
   /// \brief a base class override function to create the required runtime dataset op objects for this class
-  /// \return shared pointer to the list of newly created DatasetOps
-  std::vector<std::shared_ptr<DatasetOp>> Build() override;
+  /// \param node_ops - A vector containing shared pointer to the Dataset Ops that this object will create
+  /// \return Status Status::OK() if build successfully
+  Status Build(std::vector<std::shared_ptr<DatasetOp>> *const node_ops) override;
 
   /// \brief Parameters validation
   /// \return Status Status::OK() if all the parameters are valid
   Status ValidateParams() override;
 
   static Status get_distribution(std::shared_ptr<DatasetNode> ds, int32_t *device_id);
+
+  /// \brief Base-class override for accepting IRNodePass visitor
+  /// \param[in] p The node to visit
+  /// \param[out] modified Indicator if the node was modified
+  /// \return Status of the node visit
+  Status Accept(IRNodePass *const p, bool *const modified) override;
+
+  /// \brief Base-class override for accepting IRNodePass visitor
+  /// \param[in] p The node to visit
+  /// \param[out] modified Indicator if the node was modified
+  /// \return Status of the node visit
+  Status AcceptAfter(IRNodePass *const p, bool *const modified) override;
+
+  /// \brief Getter functions
+  const std::string &QueueName() const { return queue_name_; }
+  int32_t DeviceId() const { return device_id_; }
+  const std::string &DeviceType() const { return device_type_; }
+  int32_t PrefetchSize() const { return prefetch_size_; }
+  bool SendEpochEnd() const { return send_epoch_end_; }
+  int32_t TotalBatch() const { return total_batch_; }
+  bool CreateDataInfoQueue() const { return create_data_info_queue_; }
+
+  /// \brief Get the arguments of node
+  /// \param[out] out_json JSON string of all attributes
+  /// \return Status of the function
+  Status to_json(nlohmann::json *out_json) override;
 
  private:
   std::string queue_name_;
@@ -51,6 +91,7 @@ class TransferNode : public DatasetNode {
   int32_t prefetch_size_;
   bool send_epoch_end_;
   int32_t total_batch_;
+  bool create_data_info_queue_;
 };
 
 }  // namespace dataset

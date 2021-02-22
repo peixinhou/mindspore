@@ -88,7 +88,7 @@ std::string AbstractBase::ToString() const {
   return buffer.str();
 }
 
-AbstractBasePtr AbstractScalar::Broaden(uint8_t config) const { return AbstractBase::Broaden(config); }
+AbstractBasePtr AbstractScalar::Broaden(uint8_t config) const { return Clone(); }
 
 AbstractBasePtr AbstractScalar::Join(const AbstractBasePtr &other) {
   MS_EXCEPTION_IF_NULL(other);
@@ -192,7 +192,7 @@ const AbstractBasePtr AbstractSequeue::operator[](const std::size_t &dim) const 
 
 std::string AbstractSequeue::ToString() const {
   std::ostringstream buffer;
-  int i = 0;
+  int64_t i = 0;
   for (const auto &ele : elements_) {
     MS_EXCEPTION_IF_NULL(ele);
     buffer << "element[" << i << "]: " << ele->ToString() << ",";
@@ -508,6 +508,7 @@ AbstractBasePtr AbstractTensor::Clone() const {
   ShapePtr shp = shape();
   clone->set_shape(shp->Clone());
   clone->set_value(GetValueTrack());
+  clone->set_value_range(get_min_value(), get_max_value());
   return clone;
 }
 
@@ -1209,5 +1210,42 @@ std::string AbstractSparseTensor::ToString() const {
          << ", dense_shape: " << dense_shape_->ToString();
   return buffer.str();
 }
+
+AbstractBasePtr AbstractUMonad::Join(const AbstractBasePtr &other) {
+  MS_EXCEPTION_IF_NULL(other);
+  if (other->isa<AbstractUMonad>()) {
+    return shared_from_base<AbstractBase>();
+  }
+  MS_EXCEPTION(TypeError) << "Type join failed, type1 = " << GetTypeTrack()->ToString()
+                          << ", type2 = " << other->GetTypeTrack()->ToString();
+}
+
+bool AbstractUMonad::operator==(const AbstractUMonad &) const { return true; }
+
+bool AbstractUMonad::operator==(const AbstractBase &other) const {
+  if (&other == this) {
+    return true;
+  }
+  return other.isa<AbstractUMonad>();
+}
+
+AbstractBasePtr AbstractIOMonad::Join(const AbstractBasePtr &other) {
+  MS_EXCEPTION_IF_NULL(other);
+  if (other->isa<AbstractIOMonad>()) {
+    return shared_from_base<AbstractBase>();
+  }
+  MS_EXCEPTION(TypeError) << "Type join failed, type1 = " << GetTypeTrack()->ToString()
+                          << ", type2 = " << other->GetTypeTrack()->ToString();
+}
+
+bool AbstractIOMonad::operator==(const AbstractIOMonad &) const { return true; }
+
+bool AbstractIOMonad::operator==(const AbstractBase &other) const {
+  if (&other == this) {
+    return true;
+  }
+  return other.isa<AbstractIOMonad>();
+}
+
 }  // namespace abstract
 }  // namespace mindspore

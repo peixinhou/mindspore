@@ -30,7 +30,7 @@ namespace opt {
 const BaseRef BatchNormAddReluFusion::DefinePattern() const {
   VectorRef batch_norm_ex = VectorRef({prim::kPrimFusedBatchNormEx, x_, scale_, bias_, mean_, var_});
   VectorRef tuple_get_item = VectorRef({prim::kPrimTupleGetItem, batch_norm_ex, index_});
-  VectorRef tensor_add = VectorRef({prim::kPrimTensorAdd, tuple_get_item, z_});
+  VectorRef tensor_add = VectorRef({prim::kPrimAdd, tuple_get_item, z_});
   VectorRef relu = VectorRef({prim::kPrimRelu, tensor_add});
   return relu;
 }
@@ -46,10 +46,14 @@ const AnfNodePtr BatchNormAddReluFusion::Process(const FuncGraphPtr &graph, cons
   MS_EXCEPTION_IF_NULL(tuple_get_item);
   auto batch_norm_ex = AnfAlgo::GetInputNode(utils::cast<CNodePtr>(tuple_get_item), 0);
   MS_EXCEPTION_IF_NULL(batch_norm_ex);
-  auto format_attr = AnfAlgo::GetCNodePrimitive(batch_norm_ex)->GetAttr("data_format");
+  auto format_attr = AnfAlgo::GetCNodePrimitive(batch_norm_ex)->GetAttr("format");
   MS_EXCEPTION_IF_NULL(format_attr);
   auto format = GetValue<std::string>(format_attr);
   if (AnfAlgo::GetInputFormat(batch_norm_ex, 0) != kOpFormat_NHWC && format != "NHWC") {
+    return nullptr;
+  }
+  auto shape = AnfAlgo::GetInputDeviceShape(batch_norm_ex, 0);
+  if (shape.back() % kBNChannelMultipleFactor != 0) {
     return nullptr;
   }
 

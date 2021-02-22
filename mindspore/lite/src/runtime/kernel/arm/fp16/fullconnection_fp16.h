@@ -17,43 +17,26 @@
 #ifndef MINDSPORE_LITE_SRC_RUNTIME_KERNEL_ARM_FP16_FULLCONNECTION_H_
 #define MINDSPORE_LITE_SRC_RUNTIME_KERNEL_ARM_FP16_FULLCONNECTION_H_
 
-#ifdef ENABLE_NEON
 #include <arm_neon.h>
-#endif
 #include <vector>
-#include "src/lite_kernel.h"
-#include "nnacl/matmul_parameter.h"
-#include "src/runtime/kernel/arm/base/fullconnection_base.h"
+#include "src/runtime/kernel/arm/fp16/matmul_base_fp16.h"
 
 namespace mindspore::kernel {
-class FullconnectionFP16CPUKernel : public FullconnectionBaseCPUKernel {
+class FullconnectionFP16CPUKernel : public MatmulBaseFP16CPUKernel {
  public:
   explicit FullconnectionFP16CPUKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
                                        const std::vector<lite::Tensor *> &outputs, const lite::InnerContext *ctx,
                                        const mindspore::lite::PrimitiveC *primitive)
-      : FullconnectionBaseCPUKernel(parameter, inputs, outputs, ctx, primitive) {}
-  ~FullconnectionFP16CPUKernel() override;
+      : MatmulBaseFP16CPUKernel(parameter, inputs, outputs, ctx, primitive) {}
+  ~FullconnectionFP16CPUKernel() override = default;
+
   int Init() override;
   int ReSize() override;
   int Run() override;
-  int RunImpl(int task_id);
 
  private:
-  void InitMatrixA(float *a_ptr, float16_t *a_pack_ptr);
-  void InitMatrixA(float16_t *a_ptr, float16_t *a_pack_ptr);
-  void InitMatrixB(float *b_ptr, float16_t *b_pack_ptr);
-  void InitMatrixB(float16_t *b_ptr, float16_t *b_pack_ptr);
-  void FreeTmpBuffer();
-
- private:
-  float16_t *a_pack_ptr_ = nullptr;
-  float16_t *b_pack_ptr_ = nullptr;
-  float16_t *bias_ptr_ = nullptr;
-  float16_t *output_fp16_ = nullptr;
-  float16_t *output_ptr_ = nullptr;
-  float16_t *a_ptr_ = nullptr;
-  float16_t *b_ptr_ = nullptr;
-  bool is_vector_input_ = false;
+  void InitAShape();
+  void InitBShape();
 };
 }  // namespace mindspore::kernel
 

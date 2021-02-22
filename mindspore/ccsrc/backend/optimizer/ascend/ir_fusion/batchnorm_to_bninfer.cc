@@ -46,12 +46,12 @@ CNodePtr CreateBNInfer(const FuncGraphPtr &graph, const CNodePtr &batchnorm, con
 
 bool CheckIndex(const AnfNodePtr &index_node) {
   MS_EXCEPTION_IF_NULL(index_node);
-  if (!IsValueNode<Int32Imm>(index_node)) {
+  if (!IsValueNode<Int64Imm>(index_node)) {
     return false;
   }
   ValueNodePtr value_node = index_node->cast<ValueNodePtr>();
   MS_EXCEPTION_IF_NULL(value_node);
-  int index = GetValue<int>(value_node->value());
+  auto index = GetValue<int64_t>(value_node->value());
   if (index != 0) {
     MS_LOG(DEBUG) << "tuple_getitem must be 0th output of BatchNorm";
     return false;
@@ -62,8 +62,8 @@ bool CheckIndex(const AnfNodePtr &index_node) {
 bool CheckBatchNorm(const FuncGraphPtr &graph, const CNodePtr &batchnorm) {
   MS_EXCEPTION_IF_NULL(graph);
   MS_EXCEPTION_IF_NULL(batchnorm);
-  if (batchnorm->size() < kBatchNormInputNum + 1) {
-    MS_LOG(DEBUG) << "BatchNorm's input less than " << kBatchNormInputNum;
+  if (AnfAlgo::GetInputTensorNum(batchnorm) < kBnInputTensorNum) {
+    MS_LOG(DEBUG) << "BatchNorm's input less than " << kBnInputTensorNum;
     return false;
   }
   if (!AnfAlgo::HasNodeAttr(kAttrIsTraining, batchnorm)) {
@@ -87,7 +87,7 @@ bool NeedFusion(const FuncGraphPtr &graph, const AnfNodePtr &node, CNodePtr *bat
   MS_EXCEPTION_IF_NULL(node);
   auto tuple_getitem = node->cast<CNodePtr>();
   MS_EXCEPTION_IF_NULL(tuple_getitem);
-  CheckCNodeInputSize(tuple_getitem, kTupleGetItemInputSize);
+  CheckCNodeInputSize(tuple_getitem, kTupleGetItemInputTensorNum);
   AnfNodePtr index_node = tuple_getitem->input(kInputNodeOutputIndexInTupleGetItem);
   MS_EXCEPTION_IF_NULL(index_node);
   if (!CheckIndex(index_node)) {

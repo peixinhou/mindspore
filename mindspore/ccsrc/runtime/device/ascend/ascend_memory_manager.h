@@ -17,6 +17,7 @@
 #ifndef MINDSPORE_CCSRC_RUNTIME_DEVICE_ASCEND_ASCEND_MEMORY_MANAGER_H_
 #define MINDSPORE_CCSRC_RUNTIME_DEVICE_ASCEND_ASCEND_MEMORY_MANAGER_H_
 #include "runtime/device/memory_manager.h"
+#include "graphengine/inc/external/runtime/rt_error_codes.h"
 namespace mindspore {
 namespace device {
 namespace ascend {
@@ -30,9 +31,11 @@ class AscendMemoryManager : public MemoryManager {
   void ResetDynamicMemory() override;
   void ClearGlobalIdleMem() override;
   void *MallocMemFromMemPool(size_t size) override;
+  uint64_t GetDeviceMemSize();
+  void MallocSomasDynamicMem(const session::KernelGraph *graph);
 
  protected:
-  uint8_t *MallocStaticMem(size_t size, bool communication_mem) override;
+  uint8_t *MallocStaticMem(size_t size, bool communication_mem, uint32_t graph_id = kInvalidGraphId) override;
   uint8_t *MallocDynamicMem(size_t size, bool communication_mem) override;
 
  private:

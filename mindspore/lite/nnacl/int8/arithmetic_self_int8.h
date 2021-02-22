@@ -22,7 +22,7 @@
 #endif
 #include "nnacl/op_base.h"
 #include "nnacl/errorcode.h"
-#include "nnacl/quantization/quantize.h"
+#include "nnacl/int8/quantize.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -49,6 +49,8 @@ int Int8ElementRsqrt(int8_t *input, int8_t *output, int element_size, ArithSelfQ
 int Int8ElementSquare(int8_t *input, int8_t *output, int element_size, ArithSelfQuantArg para);
 
 int Int8ElementLogicalNot(int8_t *input, int8_t *output, int element_size, ArithSelfQuantArg para);
+
+int Int8ElementReciprocal(int8_t *input, int8_t *output, int element_size, ArithSelfQuantArg para);
 
 #ifdef __cplusplus
 }

@@ -23,7 +23,7 @@ namespace mindspore {
 namespace lite {
 
 OpParameter *PopulateSplitParameter(const mindspore::lite::PrimitiveC *primitive) {
-  SplitParameter *split_param = reinterpret_cast<SplitParameter *>(malloc(sizeof(SplitParameter)));
+  auto *split_param = reinterpret_cast<SplitParameter *>(malloc(sizeof(SplitParameter)));
   if (split_param == nullptr) {
     MS_LOG(ERROR) << "malloc SplitParameter failed.";
     return nullptr;
@@ -31,14 +31,28 @@ OpParameter *PopulateSplitParameter(const mindspore::lite::PrimitiveC *primitive
   memset(split_param, 0, sizeof(SplitParameter));
   auto param = reinterpret_cast<mindspore::lite::Split *>(const_cast<mindspore::lite::PrimitiveC *>(primitive));
   split_param->op_parameter_.type_ = primitive->Type();
-  split_param->num_split_ = param->GetNumberSplit();
-  auto split_sizes_vector_ = param->GetSizeSplits();
-  int i = 0;
-  for (auto iter = split_sizes_vector_.begin(); iter != split_sizes_vector_.end(); iter++) {
-    split_param->split_sizes_[i++] = *iter;
+  split_param->num_split_ = param->num_split();
+  if (split_param->num_split_ > std::numeric_limits<int>::max() / static_cast<int>(sizeof(int))) {
+    MS_LOG(ERROR) << "The value of split_param->num_split_ is too big";
+    free(split_param);
+    return nullptr;
   }
+
+  /* free split_sizes_ in split op base */
+  split_param->split_sizes_ = reinterpret_cast<int *>(malloc(split_param->num_split_ * sizeof(int)));
+  if (split_param->split_sizes_ == nullptr) {
+    MS_LOG(ERROR) << "malloc split_param split_sizes_ error";
+    free(split_param);
+    return nullptr;
+  }
+  memset(split_param->split_sizes_, 0, split_param->num_split_ * sizeof(int));
+
+  auto split_sizes_vector_ = param->size_splits();
+  for (size_t i = 0; i < split_sizes_vector_.size(); i++) {
+    split_param->split_sizes_[i] = split_sizes_vector_[i];
+  }
+
   split_param->split_dim_ = param->GetSplitDim();
-  split_param->num_split_ = param->GetNumberSplit();
   return reinterpret_cast<OpParameter *>(split_param);
 }
 Registry SplitParameterRegistry(schema::PrimitiveType_Split, PopulateSplitParameter);

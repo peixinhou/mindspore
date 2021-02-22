@@ -15,6 +15,7 @@
 """version and config check"""
 import os
 import sys
+import subprocess
 from pathlib import Path
 from abc import abstractmethod, ABCMeta
 from packaging import version
@@ -83,7 +84,7 @@ class GPUEnvChecker(EnvChecker):
 
     def check_version(self):
         if not Path(self.cuda_version).is_file():
-            logger.warning("Using custom cuda path, cuda version checking is skiped, please make sure "
+            logger.warning("Using custom cuda path, cuda version checking is skipped, please make sure "
                            "cuda version is supported, you can reference to the installation guidelines "
                            "https://www.mindspore.cn/install")
             return
@@ -121,7 +122,7 @@ class AscendEnvChecker(EnvChecker):
     """ascend environment check"""
 
     def __init__(self):
-        self.version = ["1.76.T10.0.B100"]
+        self.version = ["1.77.T11.0.B110"]
         atlas_nnae_version = "/usr/local/Ascend/nnae/latest/fwkacllib/version.info"
         atlas_toolkit_version = "/usr/local/Ascend/ascend-toolkit/latest/fwkacllib/version.info"
         hisi_fwk_version = "/usr/local/Ascend/fwkacllib/version.info"
@@ -148,7 +149,7 @@ class AscendEnvChecker(EnvChecker):
             self.tbe_path = self.fwk_path + "/lib64"
             self.cce_path = self.fwk_path + "/ccec_compiler/bin"
             self.fwk_version = hisi_fwk_version
-            self.op_path = ""
+            self.op_path = "/usr/local/Ascend/opp"
         else:
             # custom or unknown environment
             self.fwk_path = ""
@@ -165,10 +166,10 @@ class AscendEnvChecker(EnvChecker):
         self.ascend_opp_path = os.getenv("ASCEND_OPP_PATH")
 
         # check content
-        self.path_check = "/fwkacllib/ccec_compiler/bin/"
-        self.python_path_check = "opp/op_impl/built-in/ai_core/tbe/"
-        self.ld_lib_path_check_fwk = "/fwkacllib/lib64/"
-        self.ld_lib_path_check_addons = "/add-ons/"
+        self.path_check = "/fwkacllib/ccec_compiler/bin"
+        self.python_path_check = "opp/op_impl/built-in/ai_core/tbe"
+        self.ld_lib_path_check_fwk = "/fwkacllib/lib64"
+        self.ld_lib_path_check_addons = "/add-ons"
         self.ascend_opp_path_check = "/op"
         self.v = ""
 
@@ -178,15 +179,34 @@ class AscendEnvChecker(EnvChecker):
 
     def check_version(self):
         if not Path(self.fwk_version).is_file():
-            logger.warning("Using custom Ascend 910 AI software package path, package version checking is skiped, "
+            logger.warning("Using custom Ascend 910 AI software package path, package version checking is skipped, "
                            "please make sure Ascend 910 AI software package version is supported, you can reference to "
                            "the installation guidelines https://www.mindspore.cn/install")
             return
 
         v = self._read_version(self.fwk_version)
         if v not in self.version:
+            v_list = str([x for x in self.version])
             logger.warning(f"MindSpore version {__version__} and Ascend 910 AI software package version {v} does not "
-                           "match, reference to the match info on: https://www.mindspore.cn/install")
+                           f"match, the version of software package expect one of {v_list}, "
+                           "please reference to the match info on: https://www.mindspore.cn/install")
+
+    def check_deps_version(self):
+        """
+            te, topi, hccl wheel package version check
+            in order to update the change of 'LD_LIBRARY_PATH' env, run a sub process
+        """
+        input_args = ["--mindspore_version=" + __version__]
+        for v in self.version:
+            input_args.append("--supported_version=" + v)
+        deps_version_checker = os.path.join(os.path.split(os.path.realpath(__file__))[0], "_check_deps_version.py")
+        call_cmd = [sys.executable, deps_version_checker] + input_args
+        try:
+            process = subprocess.run(call_cmd, timeout=3, text=True, capture_output=True, check=False)
+            if process.stdout.strip() != "":
+                logger.warning(process.stdout.strip())
+        except subprocess.TimeoutExpired:
+            logger.info("Package te, topi, hccl version check timed out, skip.")
 
     def set_env(self):
         if not self.tbe_path:
@@ -196,16 +216,31 @@ class AscendEnvChecker(EnvChecker):
         try:
             # pylint: disable=unused-import
             import te
-        except RuntimeError:
+        # pylint: disable=broad-except
+        except Exception:
             if Path(self.tbe_path).is_dir():
-                os.environ['LD_LIBRARY_PATH'] = self.tbe_path
+                if os.getenv('LD_LIBRARY_PATH'):
+                    os.environ['LD_LIBRARY_PATH'] = self.tbe_path + ":" + os.environ['LD_LIBRARY_PATH']
+                else:
+                    os.environ['LD_LIBRARY_PATH'] = self.tbe_path
             else:
                 raise EnvironmentError(
                     f"No such directory: {self.tbe_path}, Please check if Ascend 910 AI software package is "
                     "installed correctly.")
 
+        # check te version after set te env
+        self.check_deps_version()
+
         if Path(self.op_impl_path).is_dir():
+            # python path for sub process
+            if os.getenv('PYTHONPATH'):
+                os.environ['PYTHONPATH'] = self.op_impl_path + ":" + os.environ['PYTHONPATH']
+            else:
+                os.environ['PYTHONPATH'] = self.op_impl_path
+            # sys path for this process
             sys.path.append(self.op_impl_path)
+
+            os.environ['TBE_IMPL_PATH'] = self.op_impl_path
         else:
             raise EnvironmentError(
                 f"No such directory: {self.op_impl_path}, Please check if Ascend 910 AI software package is "
@@ -284,13 +319,13 @@ def check_version_and_env_config():
 def _set_pb_env():
     """Set env variable `PROTOCOL_BUFFERS` to prevent memory overflow."""
     if os.getenv("PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION") == "cpp":
-        logger.warning("Current env variable `PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=cpp`. "
-                       "When the checkpoint file is too large, "
-                       "it may cause memory limit error durning load checkpoint file. "
-                       "This can be solved by set env `PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python`.")
+        logger.info("Current env variable `PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=cpp`. "
+                    "When the checkpoint file is too large, "
+                    "it may cause memory limit error during load checkpoint file. "
+                    "This can be solved by set env `PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python`.")
     elif os.getenv("PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION") is None:
-        logger.warning("Setting the env `PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python` to prevent memory overflow "
-                       "during save or load checkpoint file.")
+        logger.info("Setting the env `PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python` to prevent memory overflow "
+                    "during save or load checkpoint file.")
         os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
 
 

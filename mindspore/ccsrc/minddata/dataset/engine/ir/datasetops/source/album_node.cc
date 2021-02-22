@@ -1,5 +1,5 @@
 /**
- * Copyright 2020 Huawei Technologies Co., Ltd
+ * Copyright 2020-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,14 +32,25 @@ namespace dataset {
 AlbumNode::AlbumNode(const std::string &dataset_dir, const std::string &data_schema,
                      const std::vector<std::string> &column_names, bool decode,
                      const std::shared_ptr<SamplerObj> &sampler, const std::shared_ptr<DatasetCache> &cache)
-    : DatasetNode(std::move(cache)),
+    : MappableSourceNode(std::move(cache)),
       dataset_dir_(dataset_dir),
       schema_path_(data_schema),
       column_names_(column_names),
       decode_(decode),
       sampler_(sampler) {}
 
+std::shared_ptr<DatasetNode> AlbumNode::Copy() {
+  std::shared_ptr<SamplerObj> sampler = (sampler_ == nullptr) ? nullptr : sampler_->SamplerCopy();
+  auto node = std::make_shared<AlbumNode>(dataset_dir_, schema_path_, column_names_, decode_, sampler, cache_);
+  return node;
+}
+
+void AlbumNode::Print(std::ostream &out) const {
+  out << Name() + "(cache:" + ((cache_ != nullptr) ? "true" : "false") + ")";
+}
+
 Status AlbumNode::ValidateParams() {
+  RETURN_IF_NOT_OK(DatasetNode::ValidateParams());
   RETURN_IF_NOT_OK(ValidateDatasetDirParam("AlbumNode", dataset_dir_));
 
   RETURN_IF_NOT_OK(ValidateDatasetFilesParam("AlbumNode", {schema_path_}));
@@ -54,21 +65,21 @@ Status AlbumNode::ValidateParams() {
 }
 
 // Function to build AlbumNode
-std::vector<std::shared_ptr<DatasetOp>> AlbumNode::Build() {
-  // A vector containing shared pointer to the Dataset Ops that this object will create
-  std::vector<std::shared_ptr<DatasetOp>> node_ops;
-
+Status AlbumNode::Build(std::vector<std::shared_ptr<DatasetOp>> *const node_ops) {
   auto schema = std::make_unique<DataSchema>();
-  RETURN_EMPTY_IF_ERROR(schema->LoadSchemaFile(schema_path_, column_names_));
+  RETURN_IF_NOT_OK(schema->LoadSchemaFile(schema_path_, column_names_));
 
   // Argument that is not exposed to user in the API.
   std::set<std::string> extensions = {};
+  std::shared_ptr<SamplerRT> sampler_rt = nullptr;
+  RETURN_IF_NOT_OK(sampler_->SamplerBuild(&sampler_rt));
 
-  RETURN_EMPTY_IF_ERROR(AddCacheOp(&node_ops));
-
-  node_ops.push_back(std::make_shared<AlbumOp>(num_workers_, rows_per_buffer_, dataset_dir_, connector_que_size_,
-                                               decode_, extensions, std::move(schema), std::move(sampler_->Build())));
-  return node_ops;
+  auto album_op = std::make_shared<AlbumOp>(num_workers_, rows_per_buffer_, dataset_dir_, connector_que_size_, decode_,
+                                            extensions, std::move(schema), std::move(sampler_rt));
+  album_op->set_total_repeats(GetTotalRepeats());
+  album_op->set_num_repeats_per_epoch(GetNumRepeatsPerEpoch());
+  node_ops->push_back(album_op);
+  return Status::OK();
 }
 
 // Get the shard id of node

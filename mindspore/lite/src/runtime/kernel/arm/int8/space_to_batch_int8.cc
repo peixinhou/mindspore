@@ -15,7 +15,7 @@
  */
 #include "src/runtime/kernel/arm/int8/space_to_batch_int8.h"
 #include "src/kernel_registry.h"
-#include "nnacl/fp32/space_to_batch.h"
+#include "nnacl/fp32/space_to_batch_fp32.h"
 #include "nnacl/int8/space_to_batch_int8.h"
 
 using mindspore::lite::KernelRegistrar;
@@ -43,47 +43,13 @@ int SpaceToBatchInt8CPUKernel::Run() {
   auto quant_arg = output_tensor->quant_params().front();
 
   if (param->need_paddings_) {
-    padded_input_ = context_->allocator->Malloc(param->padded_input_element_num * sizeof(int8_t));
-    if (padded_input_ == nullptr) {
-      MS_LOG(ERROR) << "Memory allocation failed";
-      return RET_ERROR;
-    }
-    auto padded_input = reinterpret_cast<int8_t *>(padded_input_);
-    DoSpaceToBatchPaddingNHWCInt8(input_ptr, padded_input, param->input_shape_, param->paddings_,
-                                  param->padded_in_shape_, quant_arg.zeroPoint);
-    DoSpaceToBatchNHWCInt8(padded_input, output_ptr, param->block_sizes_, param->padded_in_shape_,
-                           param->output_shape_);
-    FreeTmpBuffer();
+    DoSpaceToBatchPaddingNHWCInt8(input_ptr, output_ptr, param, quant_arg.zeroPoint);
   } else {
     DoSpaceToBatchNHWCInt8(input_ptr, output_ptr, param->block_sizes_, param->input_shape_, param->output_shape_);
   }
   return RET_OK;
 }
 
-kernel::LiteKernel *CpuSpaceToBatchInt8KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                                     const std::vector<lite::Tensor *> &outputs, OpParameter *param,
-                                                     const lite::InnerContext *ctx, const kernel::KernelKey &desc,
-                                                     const mindspore::lite::PrimitiveC *primitive) {
-  if (param == nullptr) {
-    MS_LOG(ERROR) << "Input param is nullptr!";
-    return nullptr;
-  }
-  auto *kernel = new (std::nothrow) SpaceToBatchInt8CPUKernel(param, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "new SpaceToBatchInt8CPUKernel fail!";
-    free(param);
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed, name: " << param->name_
-                  << ", type: " << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(param->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
-}
-
-REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_SpaceToBatch, CpuSpaceToBatchInt8KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_SpaceToBatchND, CpuSpaceToBatchInt8KernelCreator)
+REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_SpaceToBatch, LiteKernelCreator<SpaceToBatchInt8CPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_SpaceToBatchND, LiteKernelCreator<SpaceToBatchInt8CPUKernel>)
 }  // namespace mindspore::kernel

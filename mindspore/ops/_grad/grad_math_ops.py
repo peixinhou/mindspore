@@ -1,4 +1,4 @@
-# Copyright 2020 Huawei Technologies Co., Ltd
+# Copyright 2020-2021 Huawei Technologies Co., Ltd
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -22,7 +22,6 @@ from mindspore.ops import _selected_grad_ops as SG
 from .. import functional as F
 from .. import operations as P
 from ..operations import _grad_ops as G
-from ..operations import _inner_ops as inner
 from ..composite.multitype_ops.zeros_like_impl import zeros_like
 from ..functional import broadcast_gradient_args, reduced_shape, tuple_div
 from .grad_base import bprop_getters
@@ -156,54 +155,38 @@ def bprop_batchmatmul(self):
     return bprop
 
 
-@bprop_getters.register(P.TensorDot)
-def bprop_tensordot(self):
-    """Grad definition for `TensorDot` operation."""
-    mul_op_x1 = P.MatMul(transpose_a=False, transpose_b=True)
-    mul_op_x2 = P.MatMul(transpose_a=True, transpose_b=False)
-    invert_permutation_op = P.InvertPermutation()
-    transpose_op = P.Transpose()
-    reshape_op = P.Reshape()
+@bprop_getters.register(P.Add)
+def get_bprop_add(self):
+    """Grad definition for `Add` operation."""
 
-    # pull transformation specifics from P.TensorDot class
-    x1_transpose_fwd = tuple(self.x1_transpose_fwd)
-    x2_transpose_fwd = tuple(self.x2_transpose_fwd)
-    x1_reshape_fwd = tuple(self.x1_reshape_fwd)
-    x2_reshape_fwd = tuple(self.x2_reshape_fwd)
-    dout_reshape = (self.x1_reshape_fwd[0], self.x2_reshape_fwd[1])
+    def bprop(x, y, out, dout):
+        return binop_grad_common(x, y, dout, dout)
 
-    # precalculated in fwd pass due to easier computation
-    x1_reshape_back = tuple(self.x1_reshape_back)
-    x2_reshape_back = tuple(self.x2_reshape_back)
-
-    def bprop(x1, x2, out, dout):
-        # reshape dy values to 2D for MatMul
-        dout_reshaped = reshape_op(dout, dout_reshape)
-        # transform inputs to forward pass equivalents
-        x1_transpose = transpose_op(x1, x1_transpose_fwd)
-        x2_transpose = transpose_op(x2, x2_transpose_fwd)
-        x1_reshape = reshape_op(x1_transpose, x1_reshape_fwd)
-        x2_reshape = reshape_op(x2_transpose, x2_reshape_fwd)
-        # calculate dx values for x1 and x2
-        dx1_interim = mul_op_x1(dout_reshaped, x2_reshape)
-        dx2_interim = mul_op_x2(x1_reshape, dout_reshaped)
-        # reverse transformations on dx values for both inputs
-        dx1_reshape = reshape_op(dx1_interim, x1_reshape_back)
-        dx2_reshape = reshape_op(dx2_interim, x2_reshape_back)
-        dx1_retranspose_axes = invert_permutation_op(x1_transpose_fwd)
-        dx2_retranspose_axes = invert_permutation_op(x2_transpose_fwd)
-        dx1_transpose = transpose_op(dx1_reshape, dx1_retranspose_axes)
-        dx2_transpose = transpose_op(dx2_reshape, dx2_retranspose_axes)
-        return dx1_transpose, dx2_transpose
     return bprop
 
 
 @bprop_getters.register(P.TensorAdd)
 def get_bprop_tensor_add(self):
-    """Grad definition for `TensorAdd` operation."""
+    """Grad definition for `Add` operation."""
 
     def bprop(x, y, out, dout):
         return binop_grad_common(x, y, dout, dout)
+
+    return bprop
+
+
+@bprop_getters.register(P.MatrixInverse)
+def get_bprop_matrix_inverse(self):
+    """Grad definition for `MatrixInverse` operation."""
+    batchmatmul_a = P.math_ops.BatchMatMul(transpose_a=True)
+    batchmatmul_b = P.math_ops.BatchMatMul(transpose_b=True)
+    neg = P.Neg()
+
+    def bprop(x, out, dout):
+        dx = batchmatmul_b(dout, out)
+        dx = batchmatmul_a(out, dx)
+        dx = neg(dx)
+        return dx
 
     return bprop
 
@@ -463,6 +446,19 @@ def get_bprop_sqrt(self):
     return bprop
 
 
+@bprop_getters.register(G.SqrtGrad)
+def get_bprop_sqrt_grad(self):
+    """Grad definition for `SqrtGrad` operation."""
+
+    def bprop(y, grad, out, dout):
+        gy = dout / y
+        dy = -gy * out
+        dgrad = 0.5 * gy
+        return dy, dgrad
+
+    return bprop
+
+
 @bprop_getters.register(P.Rsqrt)
 def get_bprop_rsqrt(self):
     """Grad definition for `Rsqrt` operation."""
@@ -478,22 +474,11 @@ def get_bprop_rsqrt(self):
 @bprop_getters.register(P.Reciprocal)
 def get_bprop_reciprocal(self):
     """Grad definition for `Reciprocal` operation."""
-    if self.target == "GPU":
-        neg = P.Neg()
-        mul = P.Mul()
-        square = P.Square()
-        reciprocal = P.Reciprocal()
+    reciprocal_grad = G.ReciprocalGrad()
 
-        def bprop(x, out, dout):
-            g = neg(reciprocal(square(x)))
-            dx = mul(dout, g)
-            return (dx,)
-    else:
-        reciprocal_grad = G.ReciprocalGrad()
-
-        def bprop(x, out, dout):
-            dx = reciprocal_grad(out, dout)
-            return (dx,)
+    def bprop(x, out, dout):
+        dx = reciprocal_grad(out, dout)
+        return (dx,)
 
     return bprop
 
@@ -808,6 +793,16 @@ def get_bprop_reduce_mean(self):
     return bprop
 
 
+@bprop_getters.register(P.IsFinite)
+def get_bprop_isfinite(self):
+    """Grad definition for `IsFinite` operation."""
+
+    def bprop(x, out, dout):
+        return (zeros_like(x),)
+
+    return bprop
+
+
 @bprop_getters.register(P.Equal)
 def get_bprop_equal(self):
     """Grad definition for `Equal` operation."""
@@ -981,6 +976,19 @@ def get_bprop_asin(self):
     return bprop
 
 
+@bprop_getters.register(G.AsinGrad)
+def get_bprop_asin_grad(self):
+    """Grad definition for `AsinGrad` operation."""
+    input_grad = G.AsinGrad()
+    p_pow = P.Pow()
+
+    def bprop(x, grad, out, dout):
+        d2x = dout * grad * x * p_pow((1 - x * x), - 1.5)
+        ddy = input_grad(x, dout)
+        return (d2x, ddy)
+    return bprop
+
+
 @bprop_getters.register(P.Asinh)
 def get_bprop_asinh(self):
     """Grad definition for `Asinh` operation."""
@@ -989,6 +997,19 @@ def get_bprop_asinh(self):
     def bprop(x, out, dout):
         dx = input_grad(out, dout)
         return (dx,)
+    return bprop
+
+
+@bprop_getters.register(G.AsinhGrad)
+def get_bprop_asinh_grad(self):
+    """Grad definition for `AsinhGrad` operation."""
+    input_grad = G.AsinhGrad()
+    tanh = P.Tanh()
+
+    def bprop(y, grad, out, dout):
+        dy = dout * out * -1.0 * tanh(y)
+        dgrad = input_grad(y, dout)
+        return dy, dgrad
     return bprop
 
 
@@ -1029,6 +1050,21 @@ def get_bprop_acos(self):
     return bprop
 
 
+@bprop_getters.register(G.ACosGrad)
+def get_bprop_acos_grad(self):
+    """Grad definition for `ACosGrad` operation."""
+    input_grad = G.ACosGrad()
+    p_pow = P.Pow()
+
+    def bprop(x, grad, out, dout):
+        d2x = -dout * grad * x * p_pow((1 - x * x), - 1.5)
+        ddy = input_grad(x, dout)
+        return (d2x, ddy)
+
+    return bprop
+
+
+
 @bprop_getters.register(P.Acosh)
 def get_bprop_acosh(self):
     """Grad definition for `Acosh` operation."""
@@ -1037,6 +1073,20 @@ def get_bprop_acosh(self):
     def bprop(x, out, dout):
         dx = input_grad(out, dout)
         return (dx,)
+
+    return bprop
+
+
+@bprop_getters.register(G.AcoshGrad)
+def get_bprop_acosh_grad(self):
+    """Grad definition for `AcoshGrad` operation."""
+    input_grad = G.AcoshGrad()
+    tanh = P.Tanh()
+
+    def bprop(y, grad, out, dout):
+        dy = dout * out * -1.0 / tanh(y)
+        dgrad = input_grad(y, dout)
+        return dy, dgrad
 
     return bprop
 
@@ -1165,6 +1215,18 @@ def get_bprop_atan(self):
     return bprop
 
 
+@bprop_getters.register(G.AtanGrad)
+def get_bprop_atan_grad(self):
+    """Grad definition for `AtanGrad` operation."""
+    input_grad = G.AtanGrad()
+
+    def bprop(x, grad, out, dout):
+        dgrad = input_grad(x, dout)
+        dx = out * dgrad * -2.0 * x
+        return dx, dgrad
+    return bprop
+
+
 @bprop_getters.register(P.Tan)
 def get_bprop_tan(self):
     """Grad definition for `Tan` operation."""
@@ -1230,11 +1292,11 @@ def get_bprop_inv(self):
     return bprop
 
 
-@bprop_getters.register(inner.LinSpace)
+@bprop_getters.register(P.LinSpace)
 def get_bprop_lin_space(self):
     """Grad definition for `LinSpace` operation."""
 
-    def bprop(assist, start, stop, num, out, dout):
-        return zeros_like(assist), zeros_like(start), zeros_like(stop), zeros_like(num)
+    def bprop(start, stop, num, out, dout):
+        return zeros_like(start), zeros_like(stop), zeros_like(num)
 
     return bprop

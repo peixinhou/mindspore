@@ -132,7 +132,7 @@ constexpr int kPriorBoxW = 1;
 constexpr int kPriorBoxC = 2;
 }  // namespace
 int PriorBox::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> outputs_) {
-  MS_ASSERT(param != nullptr);
+  MS_ASSERT(this->primitive_ != nullptr);
   auto input = inputs_.at(0);
   MS_ASSERT(input != nullptr);
   auto output = outputs_.at(0);
@@ -140,11 +140,10 @@ int PriorBox::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> ou
   output->set_data_type(kNumberTypeFloat32);
   output->set_format(input->format());
   if (!infer_flag()) {
-    return RET_OK;
+    return RET_INFER_INVALID;
   }
   std::vector<float> different_aspect_ratios{1.0f};
   auto aspect_ratios = GetAspectRatios();
-  MS_ASSERT(aspect_ratios != nullptr);
   for (size_t i = 0; i < aspect_ratios.size(); i++) {
     float ratio = aspect_ratios[i];
     bool exist = std::any_of(different_aspect_ratios.begin(), different_aspect_ratios.end(),

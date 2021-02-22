@@ -69,17 +69,6 @@ int SoftmaxFp16CPUKernel::MallocTmpBuffer() {
     return RET_ERROR;
   }
   memset(sum_data_, 0, out_plane_size * in_plane_size * sizeof(float16_t));
-
-  input_fp16_ = ConvertInputFp32toFp16(in_tensors_.at(kInputIndex), context_);
-  if (input_fp16_ == nullptr) {
-    MS_LOG(ERROR) << "malloc data failed";
-    return RET_ERROR;
-  }
-  output_fp16_ = MallocOutputFp16(out_tensors_.at(kOutputIndex), context_);
-  if (output_fp16_ == nullptr) {
-    MS_LOG(ERROR) << "malloc data failed";
-    return RET_ERROR;
-  }
   return RET_OK;
 }
 
@@ -87,19 +76,6 @@ void SoftmaxFp16CPUKernel::FreeTmpBuffer() {
   if (sum_data_ != nullptr) {
     context_->allocator->Free(sum_data_);
     sum_data_ = nullptr;
-  }
-  if (in_tensors_.at(kInputIndex)->data_type() == kNumberTypeFloat32) {
-    if (input_fp16_ != nullptr) {
-      context_->allocator->Free(input_fp16_);
-      input_fp16_ = nullptr;
-    }
-  }
-
-  if (out_tensors_.at(kOutputIndex)->data_type() == kNumberTypeFloat32) {
-    if (output_fp16_ != nullptr) {
-      context_->allocator->Free(output_fp16_);
-      output_fp16_ = nullptr;
-    }
   }
 }
 
@@ -110,40 +86,18 @@ int SoftmaxFp16CPUKernel::Run() {
     MS_LOG(ERROR) << "MallocTmpBuffer failed";
     return RET_ERROR;
   }
+
+  auto input_tensor = in_tensors_.at(0);
+  auto output_tensor = out_tensors_.at(0);
+
+  input_fp16_ = reinterpret_cast<float16_t *>(input_tensor->data_c());
+  output_fp16_ = reinterpret_cast<float16_t *>(output_tensor->data_c());
+
   SoftmaxFp16(input_fp16_, output_fp16_, sum_data_, softmax_param_);
-  auto out_tensor = out_tensors_.at(kOutputIndex);
-  if (out_tensor->data_type() == kNumberTypeFloat32) {
-    Float16ToFloat32(output_fp16_, reinterpret_cast<float *>(out_tensor->MutableData()), out_tensor->ElementsNum());
-  }
+
   FreeTmpBuffer();
   return RET_OK;
 }
 
-kernel::LiteKernel *CpuSoftmaxFp16KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                                const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter,
-                                                const lite::InnerContext *ctx, const kernel::KernelKey &desc,
-                                                const mindspore::lite::PrimitiveC *primitive) {
-  if (opParameter == nullptr) {
-    MS_LOG(ERROR) << "Input opParameter is nullptr!";
-    return nullptr;
-  }
-  MS_ASSERT(desc.type == schema::PrimitiveType_SoftMax);
-  auto *kernel = new (std::nothrow) SoftmaxFp16CPUKernel(opParameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "new SoftmaxFp16CPUKernel fail!";
-    free(opParameter);
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
-}
-
-REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_SoftMax, CpuSoftmaxFp16KernelCreator)
-
+REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_SoftMax, LiteKernelCreator<SoftmaxFp16CPUKernel>)
 }  // namespace mindspore::kernel

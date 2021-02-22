@@ -24,20 +24,21 @@
 #include "minddata/dataset/engine/datasetops/cache_op.h"
 #include "minddata/dataset/engine/ir/cache/dataset_cache.h"
 
-namespace mindspore::dataset {
-
+namespace mindspore {
+namespace dataset {
 /// DatasetCache is the IR of CacheClient
 class DatasetCacheImpl : public DatasetCache {
  public:
   ///
   /// \brief Constructor
-  /// \param id A user assigned session id for the current pipeline
-  /// \param mem_sz Size of the memory set aside for the row caching. 0 for unlimited
-  /// \param spill Spill to disk if out of memory
-  /// \param hostname optional host name
-  /// \param port optional port
-  /// \param num_connections optional number of connections
-  /// \param prefetch_sz optional prefetch size
+  /// \param id A user assigned session id for the current pipeline.
+  /// \param mem_sz Size of the memory set aside for the row caching (default=0 which means unlimited,
+  ///     note that it might bring in the risk of running out of memory on the machine).
+  /// \param spill Spill to disk if out of memory (default=False).
+  /// \param hostname optional host name (default="127.0.0.1").
+  /// \param port optional port (default=50052).
+  /// \param num_connections optional number of connections (default=12).
+  /// \param prefetch_sz optional prefetch size (default=20).
   DatasetCacheImpl(session_id_type id, uint64_t mem_sz, bool spill, std::optional<std::string> hostname,
                    std::optional<int32_t> port, std::optional<int32_t> num_connections,
                    std::optional<int32_t> prefetch_sz)
@@ -55,7 +56,14 @@ class DatasetCacheImpl : public DatasetCache {
 
   Status CreateCacheOp(int32_t num_workers, std::shared_ptr<DatasetOp> *ds) override;
 
+  Status CreateCacheLookupOp(int32_t num_workers, std::shared_ptr<DatasetOp> *ds,
+                             std::shared_ptr<SamplerObj> sampler) override;
+
+  Status CreateCacheMergeOp(int32_t num_workers, std::shared_ptr<DatasetOp> *ds) override;
+
   Status ValidateParams() override { return Status::OK(); }
+
+  ~DatasetCacheImpl() = default;
 
  private:
   std::shared_ptr<CacheClient> cache_client_;
@@ -67,6 +75,6 @@ class DatasetCacheImpl : public DatasetCache {
   std::optional<int32_t> num_connections_;
   std::optional<int32_t> prefetch_sz_;
 };
-}  // namespace mindspore::dataset
-
+}  // namespace dataset
+}  // namespace mindspore
 #endif  // MINDSPORE_CCSRC_MINDDATA_DATASET_ENGINE_IR_CACHE_DATASET_CACHE_IMPL_H_

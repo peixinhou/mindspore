@@ -30,8 +30,11 @@
 #include "schema/model_generated.h"
 #include "src/executor.h"
 #include "src/tensor.h"
-#if SUPPORT_GPU
-#include "src/runtime/opencl/opencl_runtime.h"
+#include "src/tensorlist.h"
+#if GPU_OPENCL
+#include "src/runtime/gpu/opencl/opencl_runtime.h"
+#elif GPU_VULKAN
+#include "src/runtime/gpu/vulkan/vulkan_runtime.h"
 #endif
 
 namespace mindspore {
@@ -65,11 +68,15 @@ class LiteSession : public session::LiteSession {
   int Resize(const std::vector<mindspore::tensor::MSTensor *> &inputs,
              const std::vector<std::vector<int>> &dims) override;
 
+  void set_model(Model *model) { this->model_ = model; }
+
  protected:
   static void ConvertTensorsQuantParam(const schema::Tensor *src_tensor, lite::Tensor *dst_tensor);
 
   int ConvertTensorsData(const lite::Model *model, size_t tensor_index, const schema::Tensor *src_tensor,
                          lite::Tensor *dst_tensor);
+
+  lite::Tensor *ConvertTensor(const schema::Tensor &src_tensor);
 
   int ConvertTensors(const lite::Model *model);
 
@@ -85,16 +92,20 @@ class LiteSession : public session::LiteSession {
 
   void InitGraphOutputNodeMap(const lite::Model *model);
 
-  void InitGraphOutputTensorNames(const lite::Model *model);
-
   void InitGraphOutputTensorMap(const lite::Model *model);
+
+  void AdjustModelOutputTensorInitRefCount(const lite::Model *model);
 
   int ResizeInputs(const std::vector<mindspore::tensor::MSTensor *> &inputs, const std::vector<std::vector<int>> &dims);
 
-  int PrepareKernels();
+  int PrepareKernels(Model *model);
+
+  static int ReSizeKernels(const std::vector<kernel::LiteKernel *> &kernels);
 
  private:
   void ResetInputsShape(const std::vector<std::vector<int>> &dims);
+
+  int InitGPURuntime();
 
  protected:
   InnerContext *context_ = nullptr;
@@ -116,9 +127,12 @@ class LiteSession : public session::LiteSession {
   // graph output tensor name -- output tensor
   std::unordered_map<std::string, mindspore::tensor::MSTensor *> output_tensor_map_;
   Executor *executor_ = nullptr;
+  Model *model_ = nullptr;
   std::atomic<bool> is_running_ = false;
-#if SUPPORT_GPU
-  opencl::OpenCLRuntimeWrapper ocl_runtime_wrap_;
+#if GPU_OPENCL && !SUPPORT_TRAIN
+  opencl::OpenCLRuntimeWrapper *opencl_runtime_wrapper_{nullptr};
+#elif GPU_VULKAN && !SUPPORT_TRAIN
+  gpu::GpuRuntimeWrapper<vulkan::VulkanRuntime> *vk_runtime_wrap_{nullptr};
 #endif
 };
 }  // namespace lite

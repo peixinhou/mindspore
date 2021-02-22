@@ -23,6 +23,7 @@
 #include "minddata/dataset/engine/execution_tree.h"
 #include "minddata/dataset/util/status.h"
 #include "minddata/dataset/engine/datasetops/dataset_op.h"
+#include "minddata/dataset/engine/perf/profiling.h"
 
 namespace mindspore {
 namespace dataset {
@@ -60,7 +61,7 @@ Status IteratorBase::GetNextAsMap(TensorMap *out_map) {
   }
 
   // Populate the out map from the row and return it
-  for (auto colMap : col_name_id_map_) {
+  for (const auto colMap : col_name_id_map_) {
     (*out_map)[colMap.first] = std::move(curr_row[colMap.second]);
   }
 
@@ -185,7 +186,8 @@ Status DatasetIterator::FetchNextTensorRow(TensorRow *out_row) {
   RETURN_IF_NOT_OK(curr_buffer_->PopRow(out_row));
   if (tracing_ != nullptr) {
     cur_batch_num_++;
-    tracing_->Record(CONNECTOR_DEPTH, cur_connector_capacity_, cur_batch_num_, cur_connector_size_);
+    tracing_->Record(CONNECTOR_DEPTH, cur_connector_capacity_, cur_batch_num_, cur_connector_size_,
+                     ProfilingTime::GetCurMilliSecond());
   }
   return Status::OK();
 }
@@ -197,7 +199,7 @@ Status DatasetIterator::GetOutputShapes(std::vector<TensorShape> *out_shapes) {
   if (device_queue_row_.empty()) {
     RETURN_IF_NOT_OK(FetchNextTensorRow(&device_queue_row_));
   }
-  for (auto ts : device_queue_row_) {
+  for (const auto ts : device_queue_row_) {
     out_shapes->push_back(ts->shape());
   }
 
@@ -211,7 +213,7 @@ Status DatasetIterator::GetOutputTypes(std::vector<DataType> *out_types) {
   if (device_queue_row_.empty()) {
     RETURN_IF_NOT_OK(FetchNextTensorRow(&device_queue_row_));
   }
-  for (auto ts : device_queue_row_) {
+  for (const auto ts : device_queue_row_) {
     out_types->push_back(ts->type());
   }
   return Status::OK();
@@ -288,7 +290,7 @@ Status ChildIterator::Drain() {
     RETURN_IF_NOT_OK(current_op_->GetNextInput(&curr_buffer_, worker_id_, child_idx_));
   }
   if (curr_buffer_->eof()) {
-    return Status(StatusCode::kUnexpectedError, __LINE__, __FILE__, "Child iterator picked up EOF in drain.");
+    return Status(StatusCode::kMDUnexpectedError, __LINE__, __FILE__, "Child iterator picked up EOF in drain.");
   }
   return Status::OK();
 }

@@ -41,7 +41,7 @@ def test_sparse_apply_proximal_ada_grad():
         def __init__(self):
             super(NetWrapper, self).__init__()
             self.unq = P.Unique()
-            self.add = P.TensorAdd()
+            self.add = P.Add()
             self.expand_dims = P.ExpandDims()
             self.cast = P.Cast()
             self.net = Net()
@@ -75,7 +75,7 @@ def test_sparse_apply_ftrl():
         def __init__(self):
             super(NetWrapper, self).__init__()
             self.unq = P.Unique()
-            self.add = P.TensorAdd()
+            self.add = P.Add()
             self.expand_dims = P.ExpandDims()
             self.cast = P.Cast()
             self.net = SparseApplyFtrlNet()
@@ -97,14 +97,54 @@ def test_gatherv2():
         def __init__(self):
             super(Net, self).__init__()
             self.unq = P.Unique()
-            self.gather = P.GatherV2()
+            self.gather = P.Gather()
+            self.yy = Tensor(np.ones([8], dtype=np.int32))
 
         def construct(self, x, y):
+            shp = P.Shape()(self.yy)
+            y = P.Reshape()(y, shp)
             u, _ = self.unq(y)
+            u_shp = P.DynamicShape()(u)
             z = self.gather(x, u, 0)
-            return z
+            return z, u_shp
 
     x = Tensor(np.ones([20, 12], dtype=np.float32))
-    y = Tensor(np.ones([8], dtype=np.int32))
+    y = Tensor(np.ones([2, 4], dtype=np.int32))
     net = Net()
     net(x, y)
+
+
+def test_segmentsum():
+    class Net(nn.Cell):
+        def __init__(self):
+            super(Net, self).__init__()
+            self.unq = P.Unique()
+            self.segment_ids = Tensor([0, 0, 1, 2, 1, 1, 1, 1], mstype.int32)
+            self.sum = P.UnsortedSegmentSum()
+        def construct(self, x):
+            u, _ = self.unq(x)
+            shp = P.DynamicShape()(u)
+            z = self.sum(x, self.segment_ids, shp[0])
+            return z, shp[0]
+
+    x = Tensor(np.ones([8], dtype=np.int32))
+    net = Net()
+    net(x)
+
+
+def test_addn():
+    class Net(nn.Cell):
+        def __init__(self):
+            super(Net, self).__init__()
+            self.unq = P.Unique()
+            self.addn = P.AddN()
+
+        def construct(self, x):
+            u, _ = self.unq(x)
+            u = self.addn((u, u, u))
+            z = self.addn([u, u])
+            return z
+
+    y = Tensor(np.ones([8], dtype=np.int32))
+    net = Net()
+    net(y)

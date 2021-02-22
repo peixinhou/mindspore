@@ -1,5 +1,5 @@
 /**
- * Copyright 2020 Huawei Technologies Co., Ltd
+ * Copyright 2020-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -49,6 +49,14 @@ constexpr auto kJsonKeyPtrAddress = "ptr_address";
 constexpr auto kJsonKeyCompositeGraph = "composite_graph";
 constexpr auto kJsonKeyPlatform = "platform";
 constexpr auto kJsonKeyOpFullName = "op_full_name";
+constexpr auto kJsonKeyFusion = "fusion";
+constexpr auto kJsonKeyParallelFusion = "parallel_fusion";
+constexpr auto kJsonKeyFusionType = "fusion_type";
+constexpr auto kJsonKeySubGraph = "sub_graph";
+constexpr auto kJsonKeyCoreNum = "core_num";
+constexpr auto kJsonKeyBufferStitch = "buffer_stitch";
+constexpr auto kJsonKeyStitchOp = "stitch_op";
+constexpr auto kJsonKeyStitchAtomicOp = "stitch_atomic_op";
 
 constexpr auto kAttrInputNames = "input_names";
 
@@ -81,6 +89,8 @@ class AkgKernelJsonGenerator {
     input_tensor_idx_.clear();
     address_node_map_.clear();
     output_tensor_idx_ = 0;
+    sub_graphs_.clear();
+    dim_infos_.clear();
   }
   void set_dump_option(DumpOption dump_option) { dump_option_ = dump_option; }
   std::map<std::string, AnfNodePtr> address_node_map() { return address_node_map_; }
@@ -91,6 +101,8 @@ class AkgKernelJsonGenerator {
   void GetAttrJson(const AnfNodePtr &anf_node, const std::vector<int> &dyn_input_sizes, const OpAttrPtr &op_attr,
                    nlohmann::json *attr_json, const ValuePtr &attr_value);
   bool CreateAttrDescJson(const AnfNodePtr &anf_node, const OpInfoPtr &op_info, nlohmann::json *attrs_json);
+  void GenStitchJson(const std::vector<AnfNodePtr> &anf_nodes, std::map<AnfNodePtr, nlohmann::json> *node_json_map,
+                     nlohmann::json *kernel_json);
   bool GetIOSize(const nlohmann::json &node_json, std::vector<size_t> *input_size, std::vector<size_t> *output_size);
   bool GenSingleJsons(const std::vector<AnfNodePtr> &anf_nodes, std::map<AnfNodePtr, nlohmann::json> *node_json_map);
   void UpdateTensorName(const std::vector<AnfNodePtr> &anf_nodes, std::map<AnfNodePtr, nlohmann::json> *node_json_map);
@@ -115,6 +127,9 @@ class AkgKernelJsonGenerator {
   std::string GetOutputFormat(const AnfNodePtr &anf_node, size_t index);
   void SaveNodeAddress(const AnfNodePtr &anf_node, nlohmann::json *node_json);
   OpInfoPtr ExtractOpInfo(const AnfNodePtr &anf_node);
+  void SetParallelValueToJson(const std::string &processor, const std::map<size_t, size_t> &dim_infos,
+                              nlohmann::json *sub_fusion_json);
+  void AddParalleFusionJsonInfo(const std::string &processor, nlohmann::json *kernel_json);
 
   DumpOption dump_option_;
   static int op_cnt_;
@@ -127,6 +142,9 @@ class AkgKernelJsonGenerator {
   std::vector<size_t> input_size_list_;
   std::vector<size_t> output_size_list_;
   std::map<std::string, AnfNodePtr> address_node_map_;
+  std::map<size_t, std::vector<std::string>> sub_graphs_;
+  std::map<size_t, size_t> dim_infos_;
+  bool is_basic_op_{false};
 };
 }  // namespace kernel
 }  // namespace mindspore

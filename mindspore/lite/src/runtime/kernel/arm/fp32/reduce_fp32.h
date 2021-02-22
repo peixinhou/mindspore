@@ -20,7 +20,7 @@
 #include <vector>
 #include "src/lite_kernel.h"
 
-#include "nnacl/fp32/reduce.h"
+#include "nnacl/fp32/reduce_fp32.h"
 #include "src/runtime/kernel/arm/base/reduce_base.h"
 
 using mindspore::schema::ReduceMode;
@@ -31,6 +31,8 @@ class ReduceCPUKernel : public ReduceBaseCPUKernel {
                          float *dst_data, const int tid, const int thread_num);
   typedef int (*IntReducer)(const int outer_size, const int inner_size, const int axis_size, const int *src_data,
                             int *dst_data, const int tid, const int thread_num);
+  typedef int (*BoolReducer)(const int outer_size, const int inner_size, const int axis_size, const bool *src_data,
+                             bool *dst_data, const int tid, const int thread_num);
 
  public:
   ReduceCPUKernel(OpParameter *param, const std::vector<lite::Tensor *> &inputs,
@@ -54,6 +56,7 @@ class ReduceCPUKernel : public ReduceBaseCPUKernel {
  private:
   ReduceParameter *reduce_param_;
   Reducer reducer_ = nullptr;
+  BoolReducer bool_reducer_ = nullptr;
   IntReducer int_reducer_ = nullptr;
   std::vector<void *> data_buffers_;
   LiteDataType data_type_;

@@ -44,23 +44,24 @@ void TbeUtils::SaveJsonInfo(const std::string &json_name, const std::string &inf
   char real_path[PATH_MAX] = {0};
   std::string path = kCceKernelMeta + json_name + kInfoSuffix;
   if (path.size() > PATH_MAX) {
-    MS_LOG(ERROR) << "file path: " << path << "is too long.";
+    MS_LOG(ERROR) << "File path: " << path << "is too long.";
     return;
   }
   std::ifstream fin(path);
   if (fin) {
-    MS_LOG(INFO) << "json file exist, no need to create.";
+    MS_LOG(INFO) << "Json file exist(" << path << "), no need to create.";
     return;
   }
   std::ofstream file_write;
   file_write.open(path);
   if (!file_write.is_open()) {
+    MS_LOG(WARNING) << "Create info file failed(" << path << ").";
     return;
   }
   file_write << info << std::endl;
   file_write.close();
   if (realpath(path.c_str(), real_path) == nullptr) {
-    MS_LOG(INFO) << "dir: " << path << "does not exit.";
+    MS_LOG(WARNING) << "Get realpath failed(" << path << ").";
     return;
   }
   MS_LOG(INFO) << "real path is: " << real_path;
@@ -75,8 +76,6 @@ void TbeUtils::LoadCache() {
     KernelMeta *bin_map = KernelMeta::GetInstance();
     if (bin_map != nullptr && !bin_map->ReadIndex(kCceKernelMeta)) {
       MS_LOG(INFO) << "Cache initialize failed[" << kCceKernelMeta << "]";
-    } else {
-      MS_LOG(INFO) << "Cache initialize to " << kCceKernelMeta;
     }
     has_load = true;
   }
@@ -213,7 +212,6 @@ bool KernelMeta::ReadIndex(const std::string &bin_dir) {
   }
   (void)closedir(dir);
 
-  MS_LOG(INFO) << "Cache kernel initialized, kernel size: " << kernel_index_map_.size();
   return true;
 }
 
@@ -222,7 +220,6 @@ KernelPackPtr KernelMeta::GetKernelPack(const std::string &kernel_name, const st
   // 1. pack has been created
   auto kernel_pack_iter = kernel_pack_map_.find(kernel_name);
   if (kernel_pack_iter != kernel_pack_map_.end()) {
-    MS_LOG(INFO) << "kernel pack [" << kernel_name << "]has been created.";
     ret = kernel_pack_iter->second;
   } else {
     // 2. kernel file has been create, but pack does not been created.
@@ -236,7 +233,7 @@ KernelPackPtr KernelMeta::GetKernelPack(const std::string &kernel_name, const st
     kernel_pack_map_[kernel_name] = ret;
     auto iter = kernel_index_map_.find(kernel_name);
     if (iter == kernel_index_map_.end()) {
-      MS_LOG(INFO) << "kernel name [" << kernel_name << "] has been ceated first.";
+      MS_LOG(INFO) << "kernel name [" << kernel_name << "] has been created first.";
       kernel_index_map_[kernel_name] = cce_json;
     }
   }

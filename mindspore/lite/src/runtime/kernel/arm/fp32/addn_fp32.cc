@@ -44,7 +44,7 @@ int AddNCPUKernel::ReSize() { return RET_OK; }
 
 int AddNCPUKernel::AddNParallelRun(int thread_id) {
   int count_per_thread = UP_DIV(elements_num_, op_parameter_->thread_num_);
-  int count = MSMIN(count_per_thread, static_cast<int>(elements_num_ - thread_id * count_per_thread));
+  int count = MSMIN(count_per_thread, elements_num_ - thread_id * count_per_thread);
   auto stride = count_per_thread * thread_id;
   auto ret = ElementAdd(in1_addr_ + stride, in2_addr_ + stride, out_addr_ + stride, count);
   if (ret != NNACL_OK) {
@@ -106,36 +106,5 @@ int AddNCPUKernel::Run() {
   return RET_OK;
 }
 
-kernel::LiteKernel *CpuAddNFp32KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                             const std::vector<lite::Tensor *> &outputs, OpParameter *op_parameter,
-                                             const lite::InnerContext *ctx, const kernel::KernelKey &desc,
-                                             const mindspore::lite::PrimitiveC *primitive) {
-  if (op_parameter == nullptr) {
-    MS_LOG(ERROR) << "Input op_parameter is nullptr!";
-    return nullptr;
-  }
-  if (ctx == nullptr) {
-    MS_LOG(ERROR) << "Input context is nullptr!";
-    free(op_parameter);
-    return nullptr;
-  }
-  MS_ASSERT(desc.type == schema::PrimitiveType_AddN);
-  op_parameter->thread_num_ = ctx->thread_num_;
-  auto *kernel = new (std::nothrow) AddNCPUKernel(op_parameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "new AddNCPUKernel fail!";
-    free(op_parameter);
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed! name: " << op_parameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(op_parameter->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
-}
-
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_AddN, CpuAddNFp32KernelCreator)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_AddN, LiteKernelCreator<AddNCPUKernel>)
 }  // namespace mindspore::kernel

@@ -161,7 +161,7 @@ def test_random_resized_crop_with_bbox_op_invalid_c():
 
     except ValueError as err:
         logger.info("Got an exception in DE: {}".format(str(err)))
-        assert "Input is not within the required interval of (0 to 16777216)." in str(err)
+        assert "scale should be in (min,max) format. Got (max,min)." in str(err)
 
 
 def test_random_resized_crop_with_bbox_op_invalid2_c():
@@ -186,7 +186,7 @@ def test_random_resized_crop_with_bbox_op_invalid2_c():
 
     except ValueError as err:
         logger.info("Got an exception in DE: {}".format(str(err)))
-        assert "Input is not within the required interval of (0 to 16777216)." in str(err)
+        assert "ratio should be in (min,max) format. Got (max,min)." in str(err)
 
 
 def test_random_resized_crop_with_bbox_op_bad_c():
@@ -201,7 +201,7 @@ def test_random_resized_crop_with_bbox_op_bad_c():
     data_voc2 = ds.VOCDataset(DATA_DIR_VOC, task="Detection", usage="train", shuffle=False, decode=True)
     check_bad_bbox(data_voc2, test_op, InvalidBBoxType.HeightOverflow, "bounding boxes is out of bounds of the image")
     data_voc2 = ds.VOCDataset(DATA_DIR_VOC, task="Detection", usage="train", shuffle=False, decode=True)
-    check_bad_bbox(data_voc2, test_op, InvalidBBoxType.NegativeXY, "min_x")
+    check_bad_bbox(data_voc2, test_op, InvalidBBoxType.NegativeXY, "negative value")
     data_voc2 = ds.VOCDataset(DATA_DIR_VOC, task="Detection", usage="train", shuffle=False, decode=True)
     check_bad_bbox(data_voc2, test_op, InvalidBBoxType.WrongShape, "4 features")
 

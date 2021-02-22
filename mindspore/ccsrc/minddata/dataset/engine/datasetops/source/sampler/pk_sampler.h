@@ -32,15 +32,15 @@ class PKSamplerRT : public SamplerRT {  // NOT YET FINISHED
   // @param int64_t val
   // @param bool shuffle - shuffle all classIds or not, if true, classes may be 5,1,4,3,2
   // @param int64_t samplesPerBuffer - Num of Sampler Ids to fetch via 1 GetNextBuffer call
-  explicit PKSamplerRT(int64_t num_samples, int64_t val, bool shuffle,
-                       int64_t samples_per_buffer = std::numeric_limits<int64_t>::max());
+  PKSamplerRT(int64_t num_samples, int64_t val, bool shuffle,
+              int64_t samples_per_buffer = std::numeric_limits<int64_t>::max());
 
   // default destructor
   ~PKSamplerRT() = default;
 
   // @param std::unique_ptr<DataBuffer pBuffer
   // @param int32_t workerId
-  // @return - The error code return
+  // @return Status The status code returned
   Status GetNextSample(std::unique_ptr<DataBuffer> *out_buffer) override;
 
   // first handshake between leaf source op and Sampler. This func will determine the amount of data
@@ -53,13 +53,18 @@ class PKSamplerRT : public SamplerRT {  // NOT YET FINISHED
   Status InitSampler() override;
 
   // for next epoch of sampleIds
-  // @return - The error code return
+  // @return Status The status code returned
   Status ResetSampler() override;
 
   // Printer for debugging purposes.
   // @param out - output stream to write to
   // @param show_all - bool to show detailed vs summary
-  void Print(std::ostream &out, bool show_all) const override;
+  void SamplerPrint(std::ostream &out, bool show_all) const override;
+
+  /// \brief Get the arguments of node
+  /// \param[out] out_json JSON string of all attributes
+  /// \return Status of the function
+  Status to_json(nlohmann::json *out_json) override;
 
  private:
   bool shuffle_;

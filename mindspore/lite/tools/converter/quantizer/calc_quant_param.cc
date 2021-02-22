@@ -520,12 +520,9 @@ QuantParamCalcRegister::QuantParamCalcRegister() {
     _registerMap[schema::PrimitiveType_RealDiv] = std::make_shared<CalcRealDiv>();
     _registerMap[schema::PrimitiveType_Reduce] = commonCalcer;
     _registerMap[schema::PrimitiveType_BiasAdd] = std::make_shared<BiasAddCalcer>();
-    _registerMap[schema::PrimitiveType_Mean] = linearCalcer;
     _registerMap[schema::PrimitiveType_Transpose] = linearCalcer;
     _registerMap[schema::PrimitiveType_MatMul] = std::make_shared<ConvCalcer>();
     _registerMap[schema::PrimitiveType_FullConnection] = std::make_shared<ConvCalcer>();
-    _registerMap[schema::PrimitiveType_Nchw2Nhwc] = linearCalcer;
-    _registerMap[schema::PrimitiveType_Nhwc2Nchw] = linearCalcer;
     // detection_postprocess op's quant param will not infer only fetch from preNode or postNode
     // because we will not insert quantTransNode after this node in tflite_graph_8bit model if input data is float.
     // if quantTransNode is inserted after detection_postprocess node, there will be some errors

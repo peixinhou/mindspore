@@ -1,4 +1,4 @@
-# Copyright 2020 Huawei Technologies Co., Ltd
+# Copyright 2020-2021 Huawei Technologies Co., Ltd
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -39,6 +39,12 @@ def gathernd0(nptype):
     output = gathernd(x, indices)
 
     assert np.array_equal(output.asnumpy(), expect)
+
+@pytest.mark.level0
+@pytest.mark.platform_x86_gpu_training
+@pytest.mark.env_onecard
+def test_gathernd0_float64():
+    gathernd0(np.float64)
 
 @pytest.mark.level0
 @pytest.mark.platform_x86_gpu_training
@@ -113,6 +119,12 @@ def gathernd1(nptype):
 @pytest.mark.level0
 @pytest.mark.platform_x86_gpu_training
 @pytest.mark.env_onecard
+def test_gathernd1_float64():
+    gathernd1(np.float64)
+
+@pytest.mark.level0
+@pytest.mark.platform_x86_gpu_training
+@pytest.mark.env_onecard
 def test_gathernd1_float32():
     gathernd1(np.float32)
 
@@ -166,6 +178,12 @@ def gathernd2(nptype):
 @pytest.mark.level0
 @pytest.mark.platform_x86_gpu_training
 @pytest.mark.env_onecard
+def test_gathernd2_float64():
+    gathernd2(np.float64)
+
+@pytest.mark.level0
+@pytest.mark.platform_x86_gpu_training
+@pytest.mark.env_onecard
 def test_gathernd2_float32():
     gathernd2(np.float32)
 
@@ -199,6 +217,20 @@ def test_gathernd2_uint8():
 def test_gathernd_bool():
     x = Tensor(np.array([[True, False], [False, False]]).astype(np.bool))
     indices = Tensor(np.array([[0, 0], [0, 1], [1, 0], [1, 1]]).astype(np.int32))
+    expect = np.array([True, False, False, False]).astype(np.bool)
+
+    context.set_context(mode=context.GRAPH_MODE, device_target="GPU")
+    gathernd = GatherNdNet()
+    output = gathernd(x, indices)
+
+    assert np.array_equal(output.asnumpy(), expect)
+
+@pytest.mark.level0
+@pytest.mark.platform_x86_gpu_training
+@pytest.mark.env_onecard
+def test_gathernd_indices_int64():
+    x = Tensor(np.array([[True, False], [False, False]]).astype(np.bool))
+    indices = Tensor(np.array([[0, 0], [0, 1], [1, 0], [1, 1]]).astype(np.int64))
     expect = np.array([True, False, False, False]).astype(np.bool)
 
     context.set_context(mode=context.GRAPH_MODE, device_target="GPU")

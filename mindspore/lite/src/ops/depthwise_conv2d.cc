@@ -19,7 +19,7 @@
 #include <memory>
 #include <string>
 #ifdef PRIMITIVE_WRITEABLE
-#include "tools/converter/quantizer/quantize_util.h"
+#include "src/param_value_lite.h"
 #endif
 #ifndef PRIMITIVE_WRITEABLE
 #include "src/ops/ops_register.h"
@@ -44,7 +44,6 @@ int DepthwiseConv2D::GetPadLeft() const { return this->primitive_->value.AsDepth
 int DepthwiseConv2D::GetPadRight() const { return this->primitive_->value.AsDepthwiseConv2D()->padRight; }
 int DepthwiseConv2D::GetDilateW() const { return this->primitive_->value.AsDepthwiseConv2D()->dilateW; }
 int DepthwiseConv2D::GetDilateH() const { return this->primitive_->value.AsDepthwiseConv2D()->dilateH; }
-bool DepthwiseConv2D::GetHasBias() const { return this->primitive_->value.AsDepthwiseConv2D()->hasBias; }
 int DepthwiseConv2D::GetActivationType() const { return this->primitive_->value.AsDepthwiseConv2D()->activationType; }
 
 void DepthwiseConv2D::SetFormat(int format) {
@@ -69,7 +68,6 @@ void DepthwiseConv2D::SetPadLeft(int pad_left) { this->primitive_->value.AsDepth
 void DepthwiseConv2D::SetPadRight(int pad_right) { this->primitive_->value.AsDepthwiseConv2D()->padRight = pad_right; }
 void DepthwiseConv2D::SetDilateW(int dilate_w) { this->primitive_->value.AsDepthwiseConv2D()->dilateW = dilate_w; }
 void DepthwiseConv2D::SetDilateH(int dilate_h) { this->primitive_->value.AsDepthwiseConv2D()->dilateH = dilate_h; }
-void DepthwiseConv2D::SetHasBias(bool has_bias) { this->primitive_->value.AsDepthwiseConv2D()->hasBias = has_bias; }
 void DepthwiseConv2D::SetActivationType(int activation_type) {
   this->primitive_->value.AsDepthwiseConv2D()->activationType = static_cast<schema::ActivationType>(activation_type);
 }
@@ -86,27 +84,27 @@ int DepthwiseConv2D::UnPackAttr(const Primitive &prim, const std::vector<AnfNode
   } else {
     attr->format = schema::Format::Format_NUM_OF_FORMAT;
   }
-  auto pad_list = GetValue<std::vector<int>>(prim.GetAttr("pads"));
+  auto pad_list = CastToInt(prim.GetAttr("pads"));
   attr->padUp = pad_list.at(0);
   attr->padDown = pad_list.at(1);
   attr->padLeft = pad_list.at(2);
   attr->padRight = pad_list.at(3);
 
-  auto dilation = GetValue<std::vector<int>>(prim.GetAttr("dilation"));
+  auto dilation = CastToInt(prim.GetAttr("dilation"));
   attr->dilateH = dilation.at(0);
   attr->dilateW = dilation.at(1);
 
   if (utils::isa<ValueSequeue>(prim.GetAttr("kernel_size"))) {
-    auto kernel_size = GetValue<std::vector<int>>(prim.GetAttr("kernel_size"));
+    auto kernel_size = CastToInt(prim.GetAttr("kernel_size"));
     attr->kernelH = kernel_size.at(0);
     attr->kernelW = kernel_size.at(1);
   } else {
-    auto kernel_size = GetValue<int>(prim.GetAttr("kernel_size"));
+    auto kernel_size = CastToInt(prim.GetAttr("kernel_size")).front();
     attr->kernelH = kernel_size;
     attr->kernelW = kernel_size;
   }
 
-  auto stride = GetValue<std::vector<int>>(prim.GetAttr("stride"));
+  auto stride = CastToInt(prim.GetAttr("stride"));
   attr->strideH = stride.at(2);
   attr->strideW = stride.at(3);
 
@@ -124,7 +122,7 @@ int DepthwiseConv2D::UnPackAttr(const Primitive &prim, const std::vector<AnfNode
   } else {
     attr->activationType = schema::ActivationType_NO_ACTIVATION;
   }
-  auto channel_multiplier = GetValue<int>(prim.GetAttr("channel_multiplier"));
+  auto channel_multiplier = CastToInt(prim.GetAttr("channel_multiplier")).front();
   attr->channelMultiplier = channel_multiplier;
 
   MS_ASSERT(inputs.size() == kAnfPopulaterInputNumTwo);
@@ -183,7 +181,6 @@ int DepthwiseConv2D::GetPadLeft() const { return this->primitive_->value_as_Dept
 int DepthwiseConv2D::GetPadRight() const { return this->primitive_->value_as_DepthwiseConv2D()->padRight(); }
 int DepthwiseConv2D::GetDilateW() const { return this->primitive_->value_as_DepthwiseConv2D()->dilateW(); }
 int DepthwiseConv2D::GetDilateH() const { return this->primitive_->value_as_DepthwiseConv2D()->dilateH(); }
-bool DepthwiseConv2D::GetHasBias() const { return this->primitive_->value_as_DepthwiseConv2D()->hasBias(); }
 int DepthwiseConv2D::GetActivationType() const {
   return this->primitive_->value_as_DepthwiseConv2D()->activationType();
 }
@@ -196,7 +193,7 @@ Registry DepthWiseConv2DRegistry(schema::PrimitiveType_DepthwiseConv2D, DepthWis
 #endif
 
 int DepthwiseConv2D::InferShape(std::vector<lite::Tensor *> inputs_, std::vector<lite::Tensor *> outputs_) {
-  if (inputs_.size() != kDoubleNum && inputs_.size() != kMultiNum) {
+  if (inputs_.size() != kDoubleNum && inputs_.size() != kTripleNum) {
     MS_LOG(ERROR) << "inputs number is invalid";
     return 1;
   }
@@ -219,7 +216,7 @@ int DepthwiseConv2D::InferShape(std::vector<lite::Tensor *> inputs_, std::vector
   pad_r_ = GetPadRight();
 
   if (!infer_flag()) {
-    return RET_OK;
+    return RET_INFER_INVALID;
   }
   auto in_shape = input->shape();
   int input_h = in_shape.at(1);

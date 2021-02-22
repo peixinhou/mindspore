@@ -1,5 +1,7 @@
 #pragma OPENCL EXTENSION cl_khr_fp16 : enable
 __constant sampler_t smp_none = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_NONE | CLK_FILTER_NEAREST;
+#define UP_DIV(x, y) (((x) + (y) - (1)) / (y))
+#define C4NUM 4
 #define CHECK_IDX                                                                                                  \
   int X = get_global_id(0);                                                                                        \
   int Y = get_global_id(1);                                                                                        \
@@ -30,9 +32,11 @@ __kernel void power(__read_only image2d_t input0, __read_only image2d_t input1, 
   FLT4 result;
   FLT4 result0 = READ_IMAGE(input0, smp_none, (int2)((Y)*output_shape.w + Z, (n * output_shape.y + h)));
   FLT4 result1 = READ_IMAGE(input1, smp_none, (int2)((Y)*output_shape.w + Z, (n * output_shape.y + h)));
+
   FLT tmp_result[4];
   FLT tmp_result0[4] = {result0.x, result0.y, result0.z, result0.w};
   FLT tmp_result1[4] = {result1.x, result1.y, result1.z, result1.w};
+
   for (int i = 0; i < 4; ++i) {
     tmp_result0[i] = tmp_result0[i] * parameter.z + parameter.y;
     if (floor(tmp_result1[i]) == tmp_result1[i]) {

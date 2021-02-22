@@ -17,7 +17,6 @@ import argparse
 import math
 import os
 import random
-import time
 
 import numpy as np
 import mindspore
@@ -93,7 +92,7 @@ parser.add_argument('--resume', default='', type=str, metavar='PATH',
 
 def main():
     args, _ = parser.parse_known_args()
-    devid, rank_id, rank_size = 0, 0, 1
+    rank_id, rank_size = 0, 1
 
     context.set_context(mode=context.GRAPH_MODE)
 
@@ -102,10 +101,7 @@ def main():
             init("nccl")
             context.set_context(device_target='GPU')
         else:
-            init()
-            devid = int(os.getenv('DEVICE_ID'))
-            context.set_context(
-                device_target='Ascend', device_id=devid, reserve_class_name_in_scope=False)
+            raise ValueError("Only supported GPU training.")
         context.reset_auto_parallel_context()
         rank_id = get_rank()
         rank_size = get_group_size()
@@ -114,8 +110,8 @@ def main():
     else:
         if args.GPU:
             context.set_context(device_target='GPU')
-
-    is_master = not args.distributed or (rank_id == 0)
+        else:
+            raise ValueError("Only supported GPU training.")
 
     net = efficientnet_b0(num_classes=cfg.num_classes,
                           drop_rate=cfg.drop,
@@ -124,18 +120,7 @@ def main():
                           bn_tf=cfg.bn_tf,
                           )
 
-    cur_time = args.cur_time
-    output_base = './output'
-
-    exp_name = '-'.join([
-        cur_time,
-        cfg.model,
-        str(224)
-    ])
-    time.sleep(rank_id)
-    output_dir = get_outdir(output_base, exp_name)
-
-    train_data_url = os.path.join(args.data_path, 'train')
+    train_data_url = args.data_path
     train_dataset = create_dataset(
         cfg.batch_size, train_data_url, workers=cfg.workers, distributed=args.distributed)
     batches_per_epoch = train_dataset.get_dataset_size()
@@ -152,7 +137,7 @@ def main():
         config_ck = CheckpointConfig(
             save_checkpoint_steps=batches_per_epoch, keep_checkpoint_max=cfg.keep_checkpoint_max)
         ckpoint_cb = ModelCheckpoint(
-            prefix=cfg.model, directory=output_dir, config=config_ck)
+            prefix=cfg.model, directory='./ckpt_' + str(rank_id) + '/', config=config_ck)
         callbacks += [ckpoint_cb]
 
     lr = Tensor(get_lr(base_lr=cfg.lr, total_epochs=cfg.epochs, steps_per_epoch=batches_per_epoch,
@@ -180,7 +165,7 @@ def main():
                   amp_level=cfg.amp_level
                   )
 
-    callbacks = callbacks if is_master else []
+#    callbacks = callbacks if is_master else []
 
     if args.resume:
         real_epoch = cfg.epochs - cfg.resume_start_epoch

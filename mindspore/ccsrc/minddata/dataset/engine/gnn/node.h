@@ -28,6 +28,7 @@ namespace dataset {
 namespace gnn {
 using NodeType = int8_t;
 using NodeIdType = int32_t;
+using WeightType = float;
 
 constexpr NodeIdType kDefaultNodeId = -1;
 
@@ -36,7 +37,8 @@ class Node {
   // Constructor
   // @param NodeIdType id - node id
   // @param NodeType type - node type
-  Node(NodeIdType id, NodeType type) : id_(id), type_(type) {}
+  // @param WeightType type - node weight
+  Node(NodeIdType id, NodeType type, WeightType weight) : id_(id), type_(type), weight_(weight) {}
 
   virtual ~Node() = default;
 
@@ -46,40 +48,45 @@ class Node {
   // @return NodeIdType - Returned node type
   NodeType type() const { return type_; }
 
+  // @return WeightType - Returned node weight
+  WeightType weight() const { return weight_; }
+
   // Get the feature of a node
   // @param FeatureType feature_type - type of feature
   // @param std::shared_ptr<Feature> *out_feature - Returned feature
-  // @return Status - The error code return
+  // @return Status The status code returned
   virtual Status GetFeatures(FeatureType feature_type, std::shared_ptr<Feature> *out_feature) = 0;
 
   // Get the all neighbors of a node
   // @param NodeType neighbor_type - type of neighbor
   // @param std::vector<NodeIdType> *out_neighbors - Returned neighbors id
-  // @return Status - The error code return
+  // @return Status The status code returned
   virtual Status GetAllNeighbors(NodeType neighbor_type, std::vector<NodeIdType> *out_neighbors,
                                  bool exclude_itself = false) = 0;
 
   // Get the sampled neighbors of a node
   // @param NodeType neighbor_type - type of neighbor
   // @param int32_t samples_num - Number of neighbors to be acquired
+  // @param SamplingStrategy strategy - Sampling strategy
   // @param std::vector<NodeIdType> *out_neighbors - Returned neighbors id
-  // @return Status - The error code return
-  virtual Status GetSampledNeighbors(NodeType neighbor_type, int32_t samples_num,
+  // @return Status The status code returned
+  virtual Status GetSampledNeighbors(NodeType neighbor_type, int32_t samples_num, SamplingStrategy strategy,
                                      std::vector<NodeIdType> *out_neighbors) = 0;
 
   // Add neighbor of node
   // @param std::shared_ptr<Node> node -
-  // @return Status - The error code return
-  virtual Status AddNeighbor(const std::shared_ptr<Node> &node) = 0;
+  // @return Status The status code returned
+  virtual Status AddNeighbor(const std::shared_ptr<Node> &node, const WeightType &weight) = 0;
 
   // Update feature of node
   // @param std::shared_ptr<Feature> feature -
-  // @return Status - The error code return
+  // @return Status The status code returned
   virtual Status UpdateFeature(const std::shared_ptr<Feature> &feature) = 0;
 
  protected:
   NodeIdType id_;
   NodeType type_;
+  WeightType weight_;
 };
 }  // namespace gnn
 }  // namespace dataset

@@ -35,21 +35,33 @@ int LayerNormCPUKernel::Init() {
 
 int LayerNormCPUKernel::ReSize() {
   auto shape = in_tensors_.front()->shape();
-  outer_size_ = 1;
-  inner_size_ = 1;
-  for (size_t i = 0; i < shape.size(); ++i) {
-    if (i + param_->normalized_dims_ < shape.size()) {
-      outer_size_ *= shape.at(i);
-    } else {
-      inner_size_ *= shape.at(i);
-    }
+  param_->begin_norm_axis_ =
+    param_->begin_norm_axis_ > 0 ? param_->begin_norm_axis_ : param_->begin_norm_axis_ + shape.size();
+  param_->begin_params_axis_ =
+    param_->begin_params_axis_ > 0 ? param_->begin_params_axis_ : param_->begin_params_axis_ + shape.size();
+
+  param_->norm_outer_size_ = 1;
+  for (int i = 0; i < param_->begin_norm_axis_; ++i) {
+    param_->norm_outer_size_ *= shape.at(i);
   }
+  param_->norm_inner_size_ = 1;
+  for (size_t i = param_->begin_norm_axis_; i < shape.size(); ++i) {
+    param_->norm_inner_size_ *= shape.at(i);
+  }
+  param_->params_outer_size_ = 1;
+  for (int i = 0; i < param_->begin_params_axis_; ++i) {
+    param_->params_outer_size_ *= shape.at(i);
+  }
+  param_->params_inner_size_ = 1;
+  for (size_t i = param_->begin_params_axis_; i < shape.size(); ++i) {
+    param_->params_inner_size_ *= shape.at(i);
+  }
+  param_->op_parameter_.thread_num_ = MSMIN(param_->norm_outer_size_, context_->thread_num_);
   return RET_OK;
 }
 
 int LayerNormCPUKernel::DoLayerNorm(int thread_id) {
-  int ret = LayerNorm(outer_size_, inner_size_, src_data_, gamma_data_, beta_data_, param_->elementwise_affine_,
-                      param_->epsilon_, dst_data_, thread_id, op_parameter_->thread_num_);
+  int ret = LayerNorm(src_data_, gamma_data_, beta_data_, dst_data_, param_, thread_id);
   if (ret != RET_OK) {
     MS_LOG(ERROR) << "DoLayerNorm error error_code[" << ret << "]";
     return ret;
@@ -68,12 +80,11 @@ int LayerNormRun(void *cdata, int task_id) {
 }
 
 int LayerNormCPUKernel::Run() {
-  src_data_ = reinterpret_cast<float *>(in_tensors_.at(0)->MutableData());
-  if (param_->elementwise_affine_) {
-    gamma_data_ = reinterpret_cast<float *>(in_tensors_.at(1)->MutableData());
-    beta_data_ = reinterpret_cast<float *>(in_tensors_.at(2)->MutableData());
-  }
-  dst_data_ = reinterpret_cast<float *>(out_tensors_.at(0)->MutableData());
+  src_data_ = reinterpret_cast<float *>(in_tensors_.at(0)->data_c());
+  gamma_data_ = reinterpret_cast<float *>(in_tensors_.at(1)->data_c());
+  beta_data_ = reinterpret_cast<float *>(in_tensors_.at(2)->data_c());
+  dst_data_ = reinterpret_cast<float *>(out_tensors_.at(0)->data_c());
+
   auto ret = ParallelLaunch(this->context_->thread_pool_, LayerNormRun, this, op_parameter_->thread_num_);
   if (ret != RET_OK) {
     MS_LOG(ERROR) << "LayerNormRun error error_code[" << ret << "]";
@@ -82,30 +93,5 @@ int LayerNormCPUKernel::Run() {
   return RET_OK;
 }
 
-kernel::LiteKernel *CpuLayerNormFp32KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                                  const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter,
-                                                  const lite::InnerContext *ctx, const kernel::KernelKey &desc,
-                                                  const mindspore::lite::PrimitiveC *primitive) {
-  if (opParameter == nullptr) {
-    MS_LOG(ERROR) << "Create kernel failed, opParameter is nullptr, type: PrimitiveType_LayerNorm. ";
-    return nullptr;
-  }
-  MS_ASSERT(desc.type == schema::PrimitiveType_LayerNorm);
-  auto *kernel = new (std::nothrow) LayerNormCPUKernel(opParameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "new LayerNormCPUKernel fail!";
-    free(opParameter);
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
-}
-
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_LayerNorm, CpuLayerNormFp32KernelCreator)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_LayerNorm, LiteKernelCreator<LayerNormCPUKernel>)
 }  // namespace mindspore::kernel

@@ -1,5 +1,5 @@
 /**
- * Copyright 2020 Huawei Technologies Co., Ltd
+ * Copyright 2020-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,13 +22,7 @@
 #include "minddata/dataset/engine/datasetops/skip_op.h"
 #include "minddata/dataset/engine/db_connector.h"
 #include "minddata/dataset/engine/execution_tree.h"
-#include "minddata/dataset/engine/opt/pass.h"
-
-#ifndef ENABLE_ANDROID
-#include "utils/log_adapter.h"
-#else
-#include "mindspore/lite/src/common/log_adapter.h"
-#endif
+#include "minddata/dataset/util/log_adapter.h"
 
 namespace mindspore {
 namespace dataset {
@@ -129,26 +123,5 @@ Status SkipOp::EofReceived(int32_t worker_id) {
   return Status::OK();
 }
 
-// Visitor accept method for NodePass
-Status SkipOp::Accept(NodePass *p, bool *modified) {
-  // Downcast shared pointer then call visitor
-  return p->RunOnNode(shared_from_base<SkipOp>(), modified);
-}
-
-// Get Dataset size
-Status SkipOp::GetDatasetSize(int64_t *dataset_size) {
-  if (dataset_size_ > 0) {
-    *dataset_size = dataset_size_;
-    return Status::OK();
-  }
-  int64_t num_rows;
-  RETURN_IF_NOT_OK(child_[0]->GetDatasetSize(&num_rows));
-  *dataset_size = 0;
-  if (max_skips_ >= 0 && max_skips_ < num_rows) {
-    *dataset_size = num_rows - max_skips_;
-  }
-  dataset_size_ = *dataset_size;
-  return Status::OK();
-}
 }  // namespace dataset
 }  // namespace mindspore

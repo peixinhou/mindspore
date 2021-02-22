@@ -33,11 +33,11 @@ Status OneHotInfo::GetAttrs() {
   auto iter = attrs_.find(AXIS);
   if (iter != attrs_.end()) {
     MS_EXCEPTION_IF_NULL(iter->second);
-    if (iter->second->isa<Int32Imm>()) {
+    if (iter->second->isa<Int64Imm>()) {
       axis_value_ptr_ = iter->second;
-      axis_ = iter->second->cast<Int32ImmPtr>()->value();
+      axis_ = iter->second->cast<Int64ImmPtr>()->value();
     } else {
-      MS_LOG(ERROR) << name_ << ": The value of axis is not int.";
+      MS_LOG(ERROR) << name_ << ": The value of axis is not int64_t.";
       return FAILED;
     }
   }
@@ -134,7 +134,7 @@ Status OneHotInfo::InferTensorInfo() {
 
 Status OneHotInfo::ExtractInputInfo() {
   CheckGlobalDeviceManager();
-  rank_ = g_device_manager->global_rank();
+  rank_ = g_device_manager->rank_index_in_stage();
   mod_rank_ = rank_ % old_dev_matrix_back_;
   if (!cnode_) {
     MS_LOG(ERROR) << "Failure:OneHot cnode_ is nullptr";
@@ -157,10 +157,10 @@ Status OneHotInfo::ExtractInputInfo() {
     return FAILED;
   }
 
-  if (value_ptr->isa<Int32Imm>()) {
-    total_class_number_ = value_ptr->cast<Int32ImmPtr>()->value();
+  if (value_ptr->isa<Int64Imm>()) {
+    total_class_number_ = value_ptr->cast<Int64ImmPtr>()->value();
   } else {
-    MS_LOG(ERROR) << "OneHot Primitive depth type must be int";
+    MS_LOG(ERROR) << "OneHot Primitive depth type must be int64_t";
     return FAILED;
   }
   classes_each_device_ = total_class_number_ / old_dev_matrix_back_;
@@ -191,15 +191,15 @@ Status OneHotInfo::ComputeReplaceGraph(const CNodePtr &cnode) {
   auto equal = gen_g.PushBack({gen_g.NewOpInst(EQUAL), floor_div, CreateInt32Tensor(mod_rank_)});
   auto cast = gen_g.PushBack({gen_g.NewOpInst(CAST), equal, CreatTypeInt(32)});
   auto mul2 = gen_g.PushBack({gen_g.NewOpInst(MUL), sub1, cast});
-  auto tensor_add = gen_g.PushBack({gen_g.NewOpInst(TENSOR_ADD), mul2, CreateInt32Tensor(1)});
+  auto tensor_add = gen_g.PushBack({gen_g.NewOpInst(ADD), mul2, CreateInt32Tensor(1)});
   auto mul3 = gen_g.PushBack({gen_g.NewOpInst(MUL), cast, tensor_add});
   auto sub2 = gen_g.PushBack({gen_g.NewOpInst(SUB), mul3, CreateInt32Tensor(1)});
   Attr attr_onehot_axis = std::make_pair(AXIS, axis_value_ptr_);
   OperatorAttrs attrs_onehot = {attr_onehot_axis};
-  auto onehot = gen_g.PushBack({gen_g.NewOpInst(ONEHOT, attrs_onehot), sub2, CreatInt32Imm(classes_each_device_),
+  auto onehot = gen_g.PushBack({gen_g.NewOpInst(ONEHOT, attrs_onehot), sub2, CreatInt64Imm(classes_each_device_),
                                 cnode->input(3), cnode->input(4)});
-  std::vector<std::pair<AnfNodePtr, int>> input_nodes = {std::make_pair(floor_div, 1), std::make_pair(sub1, 1)};
-  replace_graph_ = std::make_shared<std::pair<std::vector<std::pair<AnfNodePtr, int>>, AnfNodePtr>>(
+  std::vector<std::pair<AnfNodePtr, int64_t>> input_nodes = {std::make_pair(floor_div, 1), std::make_pair(sub1, 1)};
+  replace_graph_ = std::make_shared<std::pair<std::vector<std::pair<AnfNodePtr, int64_t>>, AnfNodePtr>>(
     std::make_pair(input_nodes, onehot));
 
   return SUCCESS;
@@ -236,7 +236,7 @@ Status OneHotInfo::InitForCostModel(const StrategyPtr &strategy) {
   return SUCCESS;
 }
 
-Status OneHotInfo::GenerateStrategies(int32_t stage_id) {
+Status OneHotInfo::GenerateStrategies(int64_t stage_id) {
   Shapes splittable_inputs = {{1, 1}, {}, {}};
   std::vector<StrategyPtr> sp_vector;
   if (inputs_shape_.size() != 3) {
@@ -268,9 +268,7 @@ Status OneHotInfo::GenerateStrategies(int32_t stage_id) {
 Status OneHotInfo::SetCostUnderStrategy(const StrategyPtr &strategy) { return SetCostUnderStrategyBase(strategy); }
 
 std::shared_ptr<Strategys> OneHotInfo::GenerateBatchStrategies() {
-  CheckGlobalDeviceManager();
-  size_t dev_num = g_device_manager->GetDeviceListByStageId(0).size();
-  Dimensions strategy = {SizeToInt(dev_num), 1};
+  Dimensions strategy = {stage_device_size_, 1};
   Dimensions empty_strategy;
   Strategys strategy_v = {strategy, empty_strategy, empty_strategy};
   return std::make_shared<Strategys>(strategy_v);

@@ -28,6 +28,7 @@
 #include "utils/log_adapter.h"
 #include "utils/hashing.h"
 #include "utils/any.h"
+#include "utils/flags.h"
 #include "base/base.h"
 #include "ir/dtype.h"
 #include "ir/value.h"
@@ -102,6 +103,7 @@ class AbstractScalar : public AbstractBase {
   explicit AbstractScalar(const ValuePtr &value, const TypePtr &type) : AbstractBase(value, type) {}
   explicit AbstractScalar(const ValuePtr &value) : AbstractBase(value, value->type()) {}
   explicit AbstractScalar(int value) : AbstractBase(MakeValue(value), kInt32) {}
+  explicit AbstractScalar(int64_t value) : AbstractBase(MakeValue(value), kInt64) {}
   explicit AbstractScalar(float value) : AbstractBase(MakeValue(value), kFloat32) {}
   explicit AbstractScalar(double value) : AbstractBase(MakeValue(value), kFloat64) {}
   explicit AbstractScalar(bool value) : AbstractBase(MakeValue(value), kBool) {}
@@ -205,6 +207,8 @@ class AbstractFunction : public AbstractBase {
   virtual AnfNodePtr tracking_id() const { return nullptr; }
   virtual void set_tracking_id(AnfNodePtr) {}
   virtual AnalysisContextPtr context() const { return nullptr; }
+  // Function which itself has IsolateNodes, not include used function or HOF.
+  virtual bool HasIsolateNodesFlag() const { return false; }
 };
 using AbstractFunctionPtrList = std::vector<AbstractFunctionPtr>;
 
@@ -258,6 +262,13 @@ class AbstractUndetermined : public AbstractBase {
     }
     set_shape(std::make_shared<Shape>(shape));
   }
+  explicit AbstractUndetermined(const TypePtr &element_type, const BaseShapePtr &shape = std::make_shared<Shape>())
+      : AbstractBase(kAnyValue), element_(std::make_shared<AbstractScalar>(kAnyValue, element_type)) {
+    if (element_type == nullptr) {
+      MS_LOG(EXCEPTION) << "element_type is nullptr";
+    }
+    set_shape(shape);
+  }
   ~AbstractUndetermined() override = default;
   MS_DECLARE_PARENT(AbstractUndetermined, AbstractBase)
   TypePtr BuildType() const override { return std::make_shared<UndeterminedType>(); }
@@ -276,8 +287,17 @@ class AbstractTensor : public AbstractUndetermined {
       : AbstractUndetermined(element, shape) {}
   AbstractTensor(const TypePtr &element_type, const ShapeVector &shape) : AbstractUndetermined(element_type, shape) {}
   explicit AbstractTensor(const tensor::TensorPtr &tensor) : AbstractUndetermined(tensor->Dtype(), tensor->shape()) {}
+  explicit AbstractTensor(const TypePtr &element_type, const BaseShapePtr &shape = std::make_shared<Shape>())
+      : AbstractUndetermined(element_type, shape) {}
   ~AbstractTensor() override = default;
   MS_DECLARE_PARENT(AbstractTensor, AbstractUndetermined)
+
+  void set_value_range(const ValuePtr &min_value, const ValuePtr &max_value) {
+    min_value_ = min_value;
+    max_value_ = max_value;
+  }
+  const ValuePtr &get_min_value() const { return min_value_; }
+  const ValuePtr &get_max_value() const { return max_value_; }
 
   TypePtr BuildType() const override;
   BaseShapePtr BuildShape() const override;
@@ -294,7 +314,7 @@ class AbstractTensor : public AbstractUndetermined {
     if (value != nullptr) {
       auto tensor = value->cast<tensor::TensorPtr>();
       if (tensor != nullptr) {
-        hash_sum = hash_combine(hash_sum, IntToSize(tensor->DataSize()));
+        hash_sum = hash_combine(hash_sum, LongToSize(tensor->DataSize()));
       }
     }
     return hash_sum;
@@ -302,6 +322,8 @@ class AbstractTensor : public AbstractUndetermined {
 
  protected:
   bool equal_to(const AbstractTensor &other) const;
+  ValuePtr min_value_ = nullptr;
+  ValuePtr max_value_ = nullptr;
 };
 using AbstractTensorPtr = std::shared_ptr<AbstractTensor>;
 using AbstractTensorPtrList = std::vector<AbstractTensorPtr>;
@@ -595,6 +617,7 @@ class AbstractRef : public AbstractTensor {
     }
     return std::make_shared<AbstractRef>(ref_key_->Clone(), abs_tensor);
   }
+  AbstractBasePtr CloneAsTensor() const { return AbstractTensor::Clone(); }
   std::string ToString() const override;
   inline AbstractTensorPtr ref() { return shared_from_base<AbstractTensor>(); }
   inline AbstractBasePtr ref_key() const { return ref_key_; }
@@ -687,6 +710,53 @@ class AbstractSparseTensor : public AbstractUndetermined {
   AbstractTensorPtr values_;
   AbstractTuplePtr dense_shape_;
 };
+
+class AbstractMonad : public AbstractBase {
+ public:
+  ~AbstractMonad() override = default;
+  MS_DECLARE_PARENT(AbstractMonad, AbstractBase)
+
+  std::size_t hash() const override { return hash_combine({tid()}); }
+  TypePtr BuildType() const override { return GetTypeTrack(); }
+  AbstractBasePtr Broaden(uint8_t config) const override { return AbstractBase::Broaden(config); }
+  AbstractBasePtr Join(const AbstractBasePtr &other) override = 0;
+  std::string ToString() const override {
+    std::ostringstream buffer;
+    buffer << type_name() << "(" << GetValueTrack()->ToString() << ")";
+    return buffer.str();
+  }
+
+ protected:
+  AbstractMonad(const ValuePtr &value, const TypePtr &type) : AbstractBase(value, type) {}
+};
+using AbstractMonadPtr = std::shared_ptr<AbstractMonad>;
+
+class AbstractUMonad : public AbstractMonad {
+ public:
+  explicit AbstractUMonad(const ValuePtr &value = kUMonad) : AbstractMonad(value, kUMonadType) {}
+  ~AbstractUMonad() override = default;
+  MS_DECLARE_PARENT(AbstractUMonad, AbstractMonad)
+
+  AbstractBasePtr Clone() const override { return std::make_shared<AbstractUMonad>(GetValueTrack()); }
+  AbstractBasePtr Join(const AbstractBasePtr &other) override;
+  bool operator==(const AbstractUMonad &other) const;
+  bool operator==(const AbstractBase &other) const override;
+};
+using AbstractUMonadPtr = std::shared_ptr<AbstractUMonad>;
+
+class AbstractIOMonad : public AbstractMonad {
+ public:
+  explicit AbstractIOMonad(const ValuePtr &value = kIOMonad) : AbstractMonad(value, kIOMonadType) {}
+  ~AbstractIOMonad() override = default;
+  MS_DECLARE_PARENT(AbstractIOMonad, AbstractMonad)
+
+  AbstractBasePtr Clone() const override { return std::make_shared<AbstractIOMonad>(GetValueTrack()); }
+  AbstractBasePtr Join(const AbstractBasePtr &other) override;
+  bool operator==(const AbstractIOMonad &other) const;
+  bool operator==(const AbstractBase &other) const override;
+};
+using AbstractIOMonadPtr = std::shared_ptr<AbstractIOMonad>;
+
 }  // namespace abstract
 }  // namespace mindspore
 #endif  // MINDSPORE_CORE_ABSTRACT_ABSTRACT_VALUE_H_

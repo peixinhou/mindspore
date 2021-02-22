@@ -1,5 +1,5 @@
 /**
- * Copyright 2020 Huawei Technologies Co., Ltd
+ * Copyright 2020-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -38,10 +38,10 @@ class ResizeBaseCPUKernel : public LiteKernel {
 
  protected:
   int method_ = 0;
-  int64_t new_height_ = 0;
-  int64_t new_width_ = 0;
-  bool align_corners_ = false;
-  bool preserve_aspect_ratio = false;
+  int new_height_ = 0;
+  int new_width_ = 0;
+  int coordinate_transform_mode_;
+  bool preserve_aspect_ratio_ = false;
   bool const_shape_ = false;
 
  private:

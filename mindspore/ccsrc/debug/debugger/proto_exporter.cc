@@ -113,6 +113,10 @@ void DebuggerProtoExporter::SetNodeOutputType(const TypePtr &type, const BaseSha
     type_proto->set_data_type(debugger::DT_STRING);
   } else if (type->isa<SymbolicKeyType>()) {
     // Do Nothing.
+  } else if (type->isa<UMonadType>()) {
+    type_proto->set_data_type(debugger::DT_UMONAD);
+  } else if (type->isa<IOMonadType>()) {
+    type_proto->set_data_type(debugger::DT_IOMONAD);
   } else {
     MS_LOG(EXCEPTION) << "Unknown type: " << type->type_name();
   }
@@ -354,6 +358,8 @@ void DebuggerProtoExporter::ExportFuncGraph(const FuncGraphPtr &func_graph, debu
   // set graph name
   graph_proto->set_name(func_graph->ToString());
 
+  MS_LOG(INFO) << "graph names: " << func_graph->ToString();
+
   ExportParameters(func_graph, graph_proto);
 
   ExportCNodes(func_graph, graph_proto, &const_map);
@@ -433,6 +439,7 @@ void DebuggerProtoExporter::ExportCNode(const FuncGraphPtr &func_graph, const CN
 
     // add full_name for debugger
     node_proto->set_full_name(node->fullname_with_scope());
+    MS_LOG(INFO) << "full_name: " << node->fullname_with_scope();
 
     // process OP inputs
     for (size_t i = 1; i < inputs.size(); ++i) {

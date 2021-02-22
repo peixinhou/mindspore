@@ -56,19 +56,19 @@ int Power::UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &inpu
     }
 
     if (prim.GetAttr("scale") == nullptr) {
-      MS_LOG(WARNING) << "get scale failed";
+      MS_LOG(INFO) << "Power's attr scale is set to default";
       attr->scale = 1.0f;
     } else {
       attr->scale = GetValue<float>(prim.GetAttr("scale"));
     }
     if (prim.GetAttr("power") == nullptr) {
-      MS_LOG(WARNING) << "get power failed";
+      MS_LOG(INFO) << "Power's attr power is set to default";
       attr->power = 1.0f;
     } else {
       attr->power = GetValue<float>(prim.GetAttr("power"));
     }
     if (prim.GetAttr("shift") == nullptr) {
-      MS_LOG(WARNING) << "get shift failed";
+      MS_LOG(INFO) << "Power's attr shift is set to default";
       attr->shift = 0;
     } else {
       attr->shift = GetValue<float>(prim.GetAttr("shift"));
@@ -115,7 +115,7 @@ int Power::InferShape(std::vector<Tensor *> inputs, std::vector<Tensor *> output
   output_tensor->set_data_type(x_tensor->data_type());
   output_tensor->set_format(x_tensor->format());
   if (!infer_flag()) {
-    return RET_OK;
+    return RET_INFER_INVALID;
   }
   if (exp_tensor != nullptr) {
     if ((exp_tensor->shape().size() > 1 && exp_tensor->shape() != x_tensor->shape()) ||

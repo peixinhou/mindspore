@@ -59,7 +59,7 @@ class YoloBlock(nn.Cell):
 
     Args:
         in_channels: Integer. Input channel.
-        out_chls: Interger. Middle channel.
+        out_chls: Integer. Middle channel.
         out_channels: Integer. Output channel.
 
     Returns:
@@ -108,7 +108,7 @@ class YOLOv3(nn.Cell):
      Args:
          backbone_shape: List. Darknet output channels shape.
          backbone: Cell. Backbone Network.
-         out_channel: Interger. Output channel.
+         out_channel: Integer. Output channel.
 
      Returns:
          Tensor, output tensor.
@@ -146,12 +146,12 @@ class YOLOv3(nn.Cell):
         con1, big_object_output = self.backblock0(feature_map3)
 
         con1 = self.conv1(con1)
-        ups1 = P.ResizeNearestNeighbor((img_hight / 16, img_width / 16))(con1)
+        ups1 = P.ResizeNearestNeighbor((img_hight // 16, img_width // 16))(con1)
         con1 = self.concat((ups1, feature_map2))
         con2, medium_object_output = self.backblock1(con1)
 
         con2 = self.conv2(con2)
-        ups2 = P.ResizeNearestNeighbor((img_hight / 8, img_width / 8))(con2)
+        ups2 = P.ResizeNearestNeighbor((img_hight // 8, img_width // 8))(con2)
         con3 = self.concat((ups2, feature_map1))
         _, small_object_output = self.backblock2(con3)
 
@@ -365,6 +365,7 @@ class YOLOV3DarkNet53(nn.Cell):
     def __init__(self, is_training):
         super(YOLOV3DarkNet53, self).__init__()
         self.config = ConfigYOLOV3DarkNet53()
+        self.tenser_to_array = P.TupleToArray()
 
         # YOLOv3 network
         self.feature_map = YOLOv3(backbone=DarkNet(ResidualBlock, self.config.backbone_layers,
@@ -379,7 +380,9 @@ class YOLOV3DarkNet53(nn.Cell):
         self.detect_2 = DetectionBlock('m', is_training=is_training)
         self.detect_3 = DetectionBlock('s', is_training=is_training)
 
-    def construct(self, x, input_shape):
+    def construct(self, x):
+        input_shape = F.shape(x)[2:4]
+        input_shape = F.cast(self.tenser_to_array(input_shape), ms.float32)
         big_object_output, medium_object_output, small_object_output = self.feature_map(x)
         output_big = self.detect_1(big_object_output, input_shape)
         output_me = self.detect_2(medium_object_output, input_shape)
@@ -394,12 +397,15 @@ class YoloWithLossCell(nn.Cell):
         super(YoloWithLossCell, self).__init__()
         self.yolo_network = network
         self.config = ConfigYOLOV3DarkNet53()
+        self.tenser_to_array = P.TupleToArray()
         self.loss_big = YoloLossBlock('l', self.config)
         self.loss_me = YoloLossBlock('m', self.config)
         self.loss_small = YoloLossBlock('s', self.config)
 
-    def construct(self, x, y_true_0, y_true_1, y_true_2, gt_0, gt_1, gt_2, input_shape):
-        yolo_out = self.yolo_network(x, input_shape)
+    def construct(self, x, y_true_0, y_true_1, y_true_2, gt_0, gt_1, gt_2):
+        input_shape = F.shape(x)[2:4]
+        input_shape = F.cast(self.tenser_to_array(input_shape), ms.float32)
+        yolo_out = self.yolo_network(x)
         loss_l = self.loss_big(*yolo_out[0], y_true_0, gt_0, input_shape)
         loss_m = self.loss_me(*yolo_out[1], y_true_1, gt_1, input_shape)
         loss_s = self.loss_small(*yolo_out[2], y_true_2, gt_2, input_shape)

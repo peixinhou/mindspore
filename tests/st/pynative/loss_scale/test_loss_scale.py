@@ -60,7 +60,7 @@ class MindData:
     def output_shapes(self):
         return self._output_shapes
 
-    def create_tuple_iterator(self, num_epochs=-1):
+    def create_tuple_iterator(self, num_epochs=-1, do_copy=True):
         return self
 
     @property
@@ -118,7 +118,7 @@ class NetFP16(nn.Cell):
         self.weight = Parameter(Tensor(np.ones([out_features, in_features]).astype(np.float32)), name="weight")
         self.bias = Parameter(Tensor(np.ones([out_features]).astype(np.float32)), name="bias")
         self.matmul = P.MatMul()
-        self.add = P.TensorAdd()
+        self.add = P.Add()
         self.cast = P.Cast()
 
     def construct(self, x):

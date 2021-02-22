@@ -17,9 +17,9 @@ mobilenetv3 export mindir.
 """
 import argparse
 import numpy as np
-from mindspore import context, Tensor
-from mindspore.train.serialization import load_checkpoint, load_param_into_net, export
+from mindspore import context, Tensor, load_checkpoint, load_param_into_net, export
 from src.config import config_gpu
+from src.config import config_cpu
 from src.mobilenetV3 import mobilenet_v3_large
 
 
@@ -33,6 +33,9 @@ if __name__ == '__main__':
     if args_opt.device_target == "GPU":
         cfg = config_gpu
         context.set_context(mode=context.GRAPH_MODE, device_target="GPU")
+    elif args_opt.device_target == "CPU":
+        cfg = config_cpu
+        context.set_context(mode=context.GRAPH_MODE, device_target="CPU")
     else:
         raise ValueError("Unsupported device_target.")
 

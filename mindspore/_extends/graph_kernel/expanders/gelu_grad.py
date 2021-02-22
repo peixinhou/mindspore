@@ -1,4 +1,4 @@
-# Copyright 2020 Huawei Technologies Co., Ltd
+# Copyright 2020-2021 Huawei Technologies Co., Ltd
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -23,12 +23,12 @@ HALF = 0.5
 
 
 def expand_gelugrad(expand_info):
-    """GeluGrad expander"""
+    """GeLUGrad expander"""
     # cal formula are:
-    # gelu_grad(dy, x) = dy * y'
-    # y' = 0.5 * (1.0 + tanh(tanh_para)) + 0.5 * x * (1.0 - tanh(tanh_para) * tanh(para)) * mul_right
-    # tanh_para = sqrt(2.0 / pi) * (x + 0.044715 * x * x * x)
-    # mul_right = sqrt(2.0 / pi) * (1 + 3 * 0.044715 * x * x)
+    # gelu_grad(dy, x) is dy * y'
+    # y' is 0.5 * (1.0 + tanh(tanh_para)) + 0.5 * x * (1.0 - tanh(tanh_para) * tanh(para)) * mul_right
+    # tanh_para is sqrt(2.0 / pi) * (x + 0.044715 * x * x * x)
+    # mul_right is sqrt(2.0 / pi) * (1 + 3 * 0.044715 * x * x)
 
     # get op info.
     input_desc_0 = expand_info['input_desc'][0]
@@ -43,33 +43,29 @@ def expand_gelugrad(expand_info):
         input_x = graph_builder.tensor(input_desc_1['shape'], input_desc_1['data_type'], input_desc_1['format'])
         input_y = graph_builder.tensor(input_desc_2['shape'], input_desc_2['data_type'], input_desc_2['format'])
         graph_scope.set_input(input_dy, input_x, input_y)
-        dtype = input_dy.dtype
-        if dtype == 'float16':
-            input_dy = graph_builder.emit('Cast', [input_dy], attrs={'dst_type': 'float32'})
 
         # create some const var
-        const_csvalue = graph_builder.value(input_dy.dtype, CSVALUE, input_desc_0['format'])
-        const_csvalue_sqrt_two_div_pi = graph_builder.value(
-            input_dy.dtype, CSVALUE_SQRT_TWO_DIV_PI, input_desc_0['format'])
-        const_csvalue_tri = graph_builder.value(input_dy.dtype, CSVALUE_TRI, input_desc_0['format'])
-        const_one = graph_builder.value(input_dy.dtype, ONE, input_desc_0['format'])
-        const_half = graph_builder.value(input_dy.dtype, HALF, input_desc_0['format'])
+        const_csvalue = graph_builder.value(input_dy.dtype, CSVALUE)
+        const_csvalue_sqrt_two_div_pi = graph_builder.value(input_dy.dtype, CSVALUE_SQRT_TWO_DIV_PI)
+        const_csvalue_tri = graph_builder.value(input_dy.dtype, CSVALUE_TRI)
+        const_one = graph_builder.value(input_dy.dtype, ONE)
+        const_half = graph_builder.value(input_dy.dtype, HALF)
 
         # cal mul_right
         mul_double = graph_builder.emit('Mul', [input_x, input_x])
         mul_double_mul_tri = graph_builder.emit('Mul', [const_csvalue_tri, mul_double])
-        mul_add_one = graph_builder.emit('TensorAdd', [const_one, mul_double_mul_tri])
+        mul_add_one = graph_builder.emit('Add', [const_one, mul_double_mul_tri])
         mul_right = graph_builder.emit('Mul', [const_csvalue_sqrt_two_div_pi, mul_add_one])
 
         # cal tanh_para
         mul_triple = graph_builder.emit('Mul', [input_x, mul_double])
         mul_triple_mul_csvalue = graph_builder.emit('Mul', [const_csvalue, mul_triple])
-        mul_add_x = graph_builder.emit('TensorAdd', [input_x, mul_triple_mul_csvalue])
+        mul_add_x = graph_builder.emit('Add', [input_x, mul_triple_mul_csvalue])
         tanh_para = graph_builder.emit('Mul', [const_csvalue_sqrt_two_div_pi, mul_add_x])
 
         # cal 0.5 * (1.0 + tanh(tahn_para))
         tanh_res = graph_builder.emit('Tanh', [tanh_para])
-        tanh_res_add_one = graph_builder.emit('TensorAdd', [const_one, tanh_res])
+        tanh_res_add_one = graph_builder.emit('Add', [const_one, tanh_res])
         half_mul_tanh_res_add_one = graph_builder.emit('Mul', [const_half, tanh_res_add_one])
 
         # cal 0.5 * x * (1.0 - tanh(tanh_para) * tanh(tanh_para)) * mul_right
@@ -80,11 +76,9 @@ def expand_gelugrad(expand_info):
         mul_final = graph_builder.emit('Mul', [mul_tmp, mul_right])
 
         # cal result
-        result_tmp = graph_builder.emit('TensorAdd', [half_mul_tanh_res_add_one, mul_final])
+        result_tmp = graph_builder.emit('Add', [half_mul_tanh_res_add_one, mul_final])
         result = graph_builder.emit('Mul', [input_dy, result_tmp])
 
-        if dtype == 'float16':
-            result = graph_builder.emit('Cast', [result], attrs={'dst_type': 'float16'})
         # set graph output.
         graph_scope.set_output(result)
 

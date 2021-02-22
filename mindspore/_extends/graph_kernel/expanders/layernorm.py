@@ -1,4 +1,4 @@
-# Copyright 2020 Huawei Technologies Co., Ltd
+# Copyright 2020-2021 Huawei Technologies Co., Ltd
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,22 +18,15 @@ from mindspore._extends.graph_kernel.model import model_builder as builder
 
 def expand_layernorm(expand_info):
     """LayerNorm expander"""
-
     # get op info.
     input_desc_0 = expand_info['input_desc'][0]
     input_desc_1 = expand_info['input_desc'][1]
     input_desc_2 = expand_info['input_desc'][2]
     attrs = expand_info['attr']
-    begin_norm_axis = None
-    epsilon = None
-    for item in attrs:
-        if 'begin_norm_axis' in item:
-            begin_norm_axis = item['begin_norm_axis']
-        if 'epsilon' in item:
-            epsilon = item['epsilon']
-    graph_builder = builder.GraphBuilder()
+    begin_norm_axis = attrs['begin_norm_axis']
+    epsilon = attrs['epsilon']
 
-    # generate a graph.
+    graph_builder = builder.GraphBuilder()
     with graph_builder.graph_scope('main') as graph_scope:
         # create tensor input.
         input_x = graph_builder.tensor(input_desc_0['shape'], input_desc_0['data_type'], input_desc_0['format'])
@@ -53,7 +46,7 @@ def expand_layernorm(expand_info):
         for i in reduce_axis:
             reduce_elts *= shape_x[i]
         mean_cof = 1.0 / reduce_elts
-        mean_cof_v = graph_builder.value(input_x.dtype, mean_cof, input_x.data_format)
+        mean_cof_v = graph_builder.value(input_x.dtype, mean_cof)
 
         # Calculate mean
         mean_red = graph_builder.emit('ReduceSum', [input_x], attrs={'reduce_axis': reduce_axis, 'keep_dims': True})
@@ -68,17 +61,14 @@ def expand_layernorm(expand_info):
 
         # Calculate normalize
         normalize_sub = graph_builder.emit('Sub', [input_x, mean])
-        epsilon_v = graph_builder.value(input_x.dtype, epsilon, input_x.data_format)
-        normalize_add = graph_builder.emit('TensorAdd', [variance, epsilon_v])
-        normalize_log = graph_builder.emit('Log', [normalize_add])
-        input_y = graph_builder.value(input_x.dtype, -0.5, input_x.data_format)
-        normalize_log_mul = graph_builder.emit('Mul', [normalize_log, input_y])
-        normalize_exp = graph_builder.emit('Exp', [normalize_log_mul])
-        normalize_mul = graph_builder.emit('Mul', [normalize_sub, normalize_exp])
+        epsilon_v = graph_builder.value(input_x.dtype, epsilon)
+        normalize_add = graph_builder.emit('Add', [variance, epsilon_v])
+        normlize_rsqrt = graph_builder.emit('Rsqrt', [normalize_add])
+        normalize_mul = graph_builder.emit('Mul', [normalize_sub, normlize_rsqrt])
 
         # Calculate scale and translate
         scale_mul = graph_builder.emit('Mul', [input_gamma, normalize_mul])
-        res = graph_builder.emit('TensorAdd', [scale_mul, input_beta])
+        res = graph_builder.emit('Add', [scale_mul, input_beta])
 
         # set graph output.
         graph_scope.set_output(res, mean, variance)

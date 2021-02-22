@@ -1,5 +1,5 @@
 /**
- * Copyright 2020 Huawei Technologies Co., Ltd
+ * Copyright 2020-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@
 
 #include <memory>
 #include <vector>
+#include <string>
 #include "src/ops/primitive_c.h"
 #include "ir/anf.h"
 #include "ir/func_graph.h"
@@ -34,9 +35,13 @@ using mindspore::lite::RET_OK;
 using mindspore::lite::STATUS;
 namespace mindspore {
 namespace opt {
+bool CheckPrimitiveType(const AnfNodePtr &node, const PrimitivePtr &primitive_type);
+
 bool IsRealCNodeKernel(const AnfNodePtr &node);
 
 bool IsGraphKernel(const AnfNodePtr &node);
+
+bool CheckInputs(const CNodePtr &cnode);
 
 int CheckIfFuncGraphIsNull(const FuncGraphPtr &graph);
 
@@ -77,6 +82,8 @@ size_t GetTupleGetItemOutIndex(const CNodePtr &tuple_get_item);
 
 ParamValueLitePtr GetLiteParamValue(const AnfNodePtr &node);
 
+AbstractBasePtr GetCNodeInputAbstract(const CNodePtr &cnode, size_t index);
+
 enum kTransFilterType {
   kKCHW2HWCK,  // 0
   kKCHW2KHWC,
@@ -98,7 +105,9 @@ enum kTransFilterType {
   kKHWC2KCHW,
   kCKHW2KCHW,
   kCHWK2KCHW,
-  kKCHW2CKHW  // 20
+  kKCHW2CKHW,  // 20
+  kHWCK2KHWC,
+  kHWKC2KHWC
 };
 
 STATUS GetFilterDim(const std::vector<int32_t> &oriDims, kTransFilterType type, int32_t *filterK, int32_t *filterC,
@@ -115,6 +124,19 @@ template <typename T>
 static lite::STATUS TransFilterFormat(const ParamValueLitePtr &tensor, kTransFilterType type);
 
 STATUS TransFilterFormat(const ParamValueLitePtr &tensor, schema::Format dst_format);
+
+ParameterPtr BuildIntValueParameterNode(const FuncGraphPtr &func_graph, const int32_t &data,
+                                        const std::string &node_name);
+
+ParameterPtr BuildIntVecParameterNode(const FuncGraphPtr &func_graph, const std::vector<int32_t> &data,
+                                      const std::string &node_name);
+
+ParameterPtr BuildIntVec2DParameterNode(const FuncGraphPtr &func_graph, const std::vector<std::vector<int32_t>> &data,
+                                        const std::string &node_name);
+
+ParameterPtr BuildFloatValueParameterNode(const FuncGraphPtr &func_graph, const float &data,
+                                          const std::string &node_name);
+
 }  // namespace opt
 }  // namespace mindspore
 #endif  // MINDSPORE_LITE_SRC_PASS_COMMON_GLLO_UTILS_H_

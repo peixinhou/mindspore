@@ -17,6 +17,7 @@
 #include <memory>
 #include <vector>
 #include <utility>
+#include <set>
 #include "minddata/dataset/engine/datasetops/map_op/cpu_map_job.h"
 
 namespace mindspore {
@@ -26,7 +27,7 @@ namespace dataset {
 CpuMapJob::CpuMapJob() = default;
 
 // Constructor
-CpuMapJob::CpuMapJob(std::vector<std::shared_ptr<TensorOp>> operations) : MapJob(operations) {}
+CpuMapJob::CpuMapJob(std::vector<std::shared_ptr<TensorOp>> operations) : MapJob(std::move(operations)) {}
 
 // Destructor
 CpuMapJob::~CpuMapJob() = default;
@@ -39,7 +40,34 @@ Status CpuMapJob::Run(std::vector<TensorRow> in, std::vector<TensorRow> *out) {
     TensorRow result_row;
     for (size_t i = 0; i < ops_.size(); i++) {
       // Call compute function for cpu
-      RETURN_IF_NOT_OK(ops_[i]->Compute(input_row, &result_row));
+      Status rc = ops_[i]->Compute(input_row, &result_row);
+      if (rc.IsError()) {
+        std::string err_msg = "";
+        std::string op_name = ops_[i]->Name();
+        std::string abbr_op_name = op_name.substr(0, op_name.length() - 2);
+        err_msg += "map operation: [" + abbr_op_name + "] failed. ";
+        if (input_row.getPath().size() > 0 && !input_row.getPath()[0].empty()) {
+          err_msg += "The corresponding data files: " + input_row.getPath()[0];
+          if (input_row.getPath().size() > 1) {
+            std::set<std::string> path_set;
+            path_set.insert(input_row.getPath()[0]);
+            for (auto j = 1; j < input_row.getPath().size(); j++) {
+              if (!input_row.getPath()[j].empty() && path_set.find(input_row.getPath()[j]) == path_set.end()) {
+                err_msg += ", " + input_row.getPath()[j];
+                path_set.insert(input_row.getPath()[j]);
+              }
+            }
+          }
+          err_msg += ". ";
+        }
+        std::string tensor_err_msg = rc.GetErrDescription();
+        if (rc.GetLineOfCode() < 0) {
+          err_msg += "Error description:\n";
+        }
+        err_msg += tensor_err_msg;
+        rc.SetErrDescription(err_msg);
+        RETURN_IF_NOT_OK(rc);
+      }
 
       // Assign result_row to to_process for the next TensorOp processing, except for the last TensorOp in the list.
       if (i + 1 < ops_.size()) {
@@ -48,7 +76,6 @@ Status CpuMapJob::Run(std::vector<TensorRow> in, std::vector<TensorRow> *out) {
     }
     out->push_back(std::move(result_row));
   }
-
   return Status::OK();
 }
 

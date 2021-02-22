@@ -51,7 +51,7 @@ def _check_param_value(accum, l1, l2, use_locking, prim_name=None):
 
 class ProximalAdagrad(Optimizer):
     """
-    Implement the ProximalAdagrad algorithm with ApplyProximalAdagrad Operator.
+    Implements the ProximalAdagrad algorithm with ApplyProximalAdagrad Operator.
 
     ProximalAdagrad is an online Learning and Stochastic Optimization.
     Refer to paper `Efficient Learning using Forward-Backward Splitting
@@ -107,6 +107,9 @@ class ProximalAdagrad(Optimizer):
     Outputs:
         Tensor[bool], the value is True.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> net = Net()
         >>> #1) All parameters use the same learning rate and weight decay
@@ -116,8 +119,8 @@ class ProximalAdagrad(Optimizer):
         >>> conv_params = list(filter(lambda x: 'conv' in x.name, net.trainable_params()))
         >>> no_conv_params = list(filter(lambda x: 'conv' not in x.name, net.trainable_params()))
         >>> group_params = [{'params': conv_params, 'weight_decay': 0.01},
-        >>>                 {'params': no_conv_params, 'lr': 0.01},
-        >>>                 {'order_params': net.trainable_params()}]
+        ...                 {'params': no_conv_params, 'lr': 0.01},
+        ...                 {'order_params': net.trainable_params()}]
         >>> optim = nn.ProximalAdagrad(group_params, learning_rate=0.1, weight_decay=0.0)
         >>> # The conv_params's parameters will use default learning rate of 0.1 and weight decay of 0.01.
         >>> # The no_conv_params's parameters will use learning rate of 0.01 and default weight decay of 0.0.
@@ -159,10 +162,10 @@ class ProximalAdagrad(Optimizer):
         """If the input value is set to "CPU", the parameters will be updated on the host using the Fused
            optimizer operation."""
         if not isinstance(value, str):
-            raise ValueError("The value must be str type, but got value type is {}".format(type(value)))
+            raise TypeError("The value must be str type, but got value type is {}".format(type(value)))
 
-        if value not in ('CPU', 'Ascend'):
-            raise ValueError("The value must be 'CPU' or 'Ascend', but got value {}".format(value))
+        if value not in ('CPU', 'Ascend', 'GPU'):
+            raise ValueError("The value must be 'CPU', 'Ascend' or 'GPU', but got value {}".format(value))
 
         if value == 'CPU':
             self.sparse_opt = P.FusedSparseProximalAdagrad(self.use_locking).add_prim_attr("primitive_target", "CPU")

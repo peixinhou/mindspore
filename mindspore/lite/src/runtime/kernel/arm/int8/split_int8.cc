@@ -44,7 +44,7 @@ int SplitInt8CPUKernel::Init() {
   auto in_quant_args = in_tensor->quant_params();
   param->quant_arg_.in_args_.scale_ = in_quant_args.front().scale;
   param->quant_arg_.in_args_.zp_ = in_quant_args.front().zeroPoint;
-  MS_ASSERT(param->num_split_ == outputs_.size());
+  MS_ASSERT(param->num_split_ == this->out_tensors_.size());
   for (int i = 0; i < param->num_split_; i++) {
     auto *out_tensor = out_tensors_.at(i);
     auto out_quant_args = out_tensor->quant_params();
@@ -93,7 +93,7 @@ int SplitInt8Run(void *cdata, int task_id) {
 int SplitInt8CPUKernel::Run() {
   auto in_tensor = in_tensors_.at(kInputIndex);
   input_ptr_ = reinterpret_cast<int8_t *>(in_tensor->MutableData());
-  MS_ASSERT(param->num_split_ == outputs_.size());
+  MS_ASSERT(param->num_split_ == this->out_tensors_.size());
   for (int i = 0; i < param->num_split_; i++) {
     output_ptr_[i] = reinterpret_cast<int8_t *>(out_tensors_.at(i)->data_c());
   }
@@ -106,30 +106,6 @@ int SplitInt8CPUKernel::Run() {
 
   return RET_OK;
 }
-kernel::LiteKernel *CpuSplitInt8KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                              const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter,
-                                              const InnerContext *ctx, const kernel::KernelKey &desc,
-                                              const mindspore::lite::PrimitiveC *primitive) {
-  if (opParameter == nullptr) {
-    MS_LOG(ERROR) << "Input opParameter is nullptr!";
-    return nullptr;
-  }
-  MS_ASSERT(desc.type == schema::PrimitiveType_Split);
-  auto *kernel = new (std::nothrow) SplitInt8CPUKernel(opParameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "new SplitCPUKernel fail!";
-    free(opParameter);
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
-}
-REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Split, CpuSplitInt8KernelCreator)
 
+REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Split, LiteKernelCreator<SplitInt8CPUKernel>)
 }  // namespace mindspore::kernel

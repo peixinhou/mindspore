@@ -37,6 +37,10 @@ namespace dataset {
 /// For too small amount, we won't get any benefit using shared memory method because we need
 /// two rpc requests to use shared memory method.
 constexpr static int32_t kLocalByPassThreshold = 64 * 1024;
+/// \brief Default size (in GB) of shared memory we are going to create
+constexpr static int32_t kDefaultSharedMemorySize = 4;
+/// \brief Memory Cap ratio used by the server
+constexpr static float kDefaultMemoryCapRatio = 0.8;
 /// \brief A flag used by the BatchFetch request (client side) if it can support local bypass
 constexpr static uint32_t kLocalClientSupport = 1;
 /// \brief A flag used by CacheRow request (client side) and BatchFetch (server side) reply to indicate if the data is
@@ -44,21 +48,33 @@ constexpr static uint32_t kLocalClientSupport = 1;
 constexpr static uint32_t kDataIsInSharedMemory = 2;
 /// \brief Size of each message used in message queue.
 constexpr static int32_t kSharedMessageSize = 2048;
+/// \brief Prefix for default cache spilling path and log path
+const char kDefaultPathPrefix[] = "/tmp/mindspore/cache";
 
 /// \brief State of CacheService at the server.
-enum class CacheServiceState : uint8_t { kNone = 0, kBuildPhase, kFetchPhase, kNoLocking };
+enum class CacheServiceState : int8_t {
+  kNone = 0,
+  kBuildPhase = 1,
+  kFetchPhase = 2,
+  kNoLocking = 3,
+  kOutOfMemory = 4,
+  kNoSpace = 5,
+  kError = 127
+};
 
 /// \brief Convert a Status object into a protobuf
 /// \param rc[in] Status object
 /// \param reply[in/out] pointer to pre-allocated protobuf object
 inline void Status2CacheReply(const Status &rc, CacheReply *reply) {
-  reply->set_rc(static_cast<int32_t>(rc.get_code()));
+  reply->set_rc(static_cast<int32_t>(rc.StatusCode()));
   reply->set_msg(rc.ToString());
 }
 /// \brief Generate the unix socket file we use on both client/server side given a tcp/ip port number
 /// \param port
 /// \return unix socket url
-inline std::string PortToUnixSocketPath(int port) { return "/tmp/cache_server_p" + std::to_string(port); }
+inline std::string PortToUnixSocketPath(int port) {
+  return kDefaultPathPrefix + std::string("/cache_server_p") + std::to_string(port);
+}
 
 /// \brief Round up to the next 4k
 inline int64_t round_up_4K(int64_t sz) {
@@ -74,6 +90,9 @@ enum CachePoolPolicy : int8_t { kOnNode, kPreferred, kLocal, kInterleave, kNone 
 using worker_id_t = int32_t;
 using numa_id_t = int32_t;
 using cpu_id_t = int32_t;
+
+/// Return the default log dir for cache
+inline std::string DefaultLogDir() { return kDefaultPathPrefix + std::string("/log"); }
 
 }  // namespace dataset
 }  // namespace mindspore

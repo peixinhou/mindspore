@@ -156,6 +156,10 @@ void ProtoExporter::SetNodeOutputType(const TypePtr &type, const BaseShapePtr &s
     type_proto->set_data_type(irpb::DT_STRING);
   } else if (type->isa<SymbolicKeyType>()) {
     // Do Nothing.
+  } else if (type->isa<MonadType>()) {
+    // Do Nothing.
+  } else if (type->isa<Problem>()) {
+    MS_LOG(WARNING) << "The type: " << type->type_name();
   } else {
     MS_LOG(EXCEPTION) << "Unknown type: " << type->type_name();
   }
@@ -218,6 +222,8 @@ void ProtoExporter::SetValueToProto(const ValuePtr &val, irpb::ValueProto *value
     type_proto->set_data_type(irpb::DT_TENSOR);
     TypePtr elem_type = dyn_cast<TensorType>(val)->element();
     type_proto->mutable_tensor_type()->set_elem_type(GetNumberDataType(elem_type));
+  } else if (val->isa<MonadType>()) {
+    value_proto->set_str_val(val->ToString());
   } else {
     MS_LOG(WARNING) << "Unsupported type " << val->type_name();
   }
@@ -480,6 +486,9 @@ void ProtoExporter::ExportFuncGraphOutput(const FuncGraphPtr &func_graph, const 
                                           std::map<AnfNodePtr, size_t> *const_map_ptr, irpb::GraphProto *graph_proto) {
   if (ret_node == nullptr || !ret_node->isa<CNode>()) {
     MS_LOG(EXCEPTION) << "Graph return node is illegal";
+  }
+  if (ret_node->inputs().size() != 2) {
+    return;
   }
   AnfNodePtr arg = ret_node->input(1);
   if (graph_proto == nullptr) {

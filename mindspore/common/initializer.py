@@ -21,7 +21,7 @@ import numpy as np
 from scipy.stats import truncnorm
 from .seed import get_seed, _get_graph_seed
 from . import dtype as mstype
-from .tensor import Tensor, MetaTensor
+from .tensor import Tensor
 from .._c_expression import random_normal
 
 _INITIALIZER_ALIAS = dict()
@@ -45,16 +45,13 @@ class Initializer:
     @property
     def seed(self):
         if self._seed is None:
-            seed_ = get_seed() if get_seed() is not None else 1
-            _, seed = _get_graph_seed(seed_, "init")
+            seed, seed2 = _get_graph_seed(get_seed(), "init")
         else:
-            seed = self._seed
-        return seed
+            seed, seed2 = self._seed + 1, 0
+        return seed, seed2
 
     @seed.setter
     def seed(self, value):
-        if not isinstance(value, int):
-            raise TypeError("'value' must be int type.")
         self._seed = value
 
     def _initialize(self, *kwargs):
@@ -248,7 +245,7 @@ class XavierUniform(Initializer):
         self.gain = gain
 
     def _initialize(self, arr):
-        n_in, n_out = _calculate_in_and_out(arr)
+        n_in, n_out = _calculate_fan_in_and_fan_out(arr.shape)
 
         boundary = self.gain * math.sqrt(6.0 / (n_in + n_out))
         data = np.random.uniform(-boundary, boundary, arr.shape)
@@ -262,21 +259,27 @@ class HeUniform(Initializer):
     Initialize the array with He kaiming uniform algorithm, and from a uniform distribution collect samples within
     U[-boundary, boundary] The boundary is defined as :
 
-                    where :math:`boundary = \sqrt{\frac{6}{n_{in}}}`.
-
-    where :math:`n_{in}` is the number of input units in the weight tensor.
+                    where :math:`boundary = \sqrt{\frac{6}{(1 + a^2) \times \text{fan_in}}}`.
 
     Args:
-        arr (Array): The array to be assigned.
+        negative_slope (int, float, bool): Default: 0, used when nonlinearity is 'leaky_relu'.
+        mode (str): Default: fan_in.
+        nonlinearity (str): Default: leaky_relu.
 
     Returns:
         Array, assigned array.
     """
+    def __init__(self, negative_slope=0, mode='fan_in', nonlinearity='leaky_relu'):
+        super(HeUniform, self).__init__(negative_slope=negative_slope, mode=mode, nonlinearity=nonlinearity)
+        self.negative_slope = negative_slope
+        self.mode = mode
+        self.nonlinearity = nonlinearity
 
     def _initialize(self, arr):
-        n_in, _ = _calculate_in_and_out(arr)
-
-        boundary = math.sqrt(6.0 / n_in)
+        fan = _calculate_correct_fan(arr.shape, self.mode)
+        gain = _calculate_gain(self.nonlinearity, self.negative_slope)
+        std = gain / math.sqrt(fan)
+        boundary = math.sqrt(3.0) * std
         data = np.random.uniform(-boundary, boundary, arr.shape)
 
         _assignment(arr, data)
@@ -367,9 +370,9 @@ class Normal(Initializer):
         self.sigma = sigma
 
     def _initialize(self, arr):
-        seed = self.seed
+        seed, seed2 = self.seed
         output_tensor = Tensor(np.zeros(arr.shape, dtype=np.float32))
-        random_normal(0, self.sigma, arr.shape, seed, output_tensor)
+        random_normal(0, self.sigma, arr.shape, seed, seed2, output_tensor)
         output_data = output_tensor.asnumpy()
         output_data *= self.sigma
         _assignment(arr, output_data)
@@ -413,10 +416,12 @@ def initializer(init, shape=None, dtype=mstype.float32):
         dtype (:class:`mindspore.dtype`): The type of data in initialized tensor. Default: mindspore.float32.
 
     Returns:
-        Union[Tensor, MetaTensor], When `init` is Tensor, the return is Tensor object,
-        otherwise the return is Initialize object.
+        Union[Tensor], return is Tensor object.
+
 
     Examples:
+        >>> import mindspore
+        >>> from mindspore.common.initializer import initializer, One
         >>> tensor = initializer('ones', [1, 2, 3], mindspore.float32)
         >>> tensor = initializer(One(), [1, 2, 3], mindspore.float32)
         >>> tensor = initializer(0, [1, 2, 3], mindspore.float32)
@@ -448,7 +453,7 @@ def initializer(init, shape=None, dtype=mstype.float32):
     elif isinstance(init, numbers.Number):
         init = Constant(init)
     shape = shape if shape is not None else init.shape
-    init_obj = MetaTensor(dtype, shape, init)
+    init_obj = Tensor(dtype=dtype, shape=shape, init=init)
     return init_obj
 
 __all__ = [

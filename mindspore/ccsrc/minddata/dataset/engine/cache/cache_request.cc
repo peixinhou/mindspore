@@ -1,5 +1,5 @@
 /**
- * Copyright 2020 Huawei Technologies Co., Ltd
+ * Copyright 2020-2021 Huawei Technologies Co., Ltd
 
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,12 +14,13 @@
  * limitations under the License.
 */
 #include "minddata/dataset/engine/cache/cache_request.h"
-#if !defined(_WIN32) && !defined(_WIN64) && !defined(__ANDROID__) && !defined(ANDROID)
+#if !defined(_WIN32) && !defined(_WIN64) && !defined(__ANDROID__) && !defined(ANDROID) && !defined(__APPLE__)
 #include <sched.h>
 #include <sys/types.h>
 #include <unistd.h>
 #endif
 #include <cstdlib>
+#include <cstring>
 #include <thread>
 #include "minddata/dataset/core/constants.h"
 #include "minddata/dataset/engine/cache/cache_client.h"
@@ -57,7 +58,7 @@ Status CacheRowRequest::SerializeCacheRowRequest(const CacheClient *cc, const Te
   if (sent_using_local_bypass) {
     MS_LOG(DEBUG) << "Requesting " << sz_ << " bytes of shared memory data";
     // Allocate shared memory from the server
-    auto mem_rq = std::make_shared<AllocateSharedBlockRequest>(rq_.connection_id(), sz_);
+    auto mem_rq = std::make_shared<AllocateSharedBlockRequest>(rq_.connection_id(), cc->GetClientId(), sz_);
     RETURN_IF_NOT_OK(cc->PushRequest(mem_rq));
     RETURN_IF_NOT_OK(mem_rq->Wait());
     addr_ = mem_rq->GetAddr();
@@ -222,7 +223,7 @@ Status CreateCacheRequest::Prepare() {
     rq_.add_buf_data(fbb.GetBufferPointer(), fbb.GetSize());
     return Status::OK();
   } catch (const std::bad_alloc &e) {
-    return Status(StatusCode::kOutOfMemory, __LINE__, __FILE__);
+    return Status(StatusCode::kMDOutOfMemory, __LINE__, __FILE__);
   }
 }
 
@@ -234,7 +235,7 @@ Status CreateCacheRequest::PostReply() {
   // Next is a set of cpu id that we should re-adjust ourselves for better affinity.
   auto sz = p->cpu_id()->size();
   cc_->cpu_list_.reserve(sz);
-#if !defined(_WIN32) && !defined(_WIN64) && !defined(__ANDROID__) && !defined(ANDROID)
+#if !defined(_WIN32) && !defined(_WIN64) && !defined(__ANDROID__) && !defined(ANDROID) && !defined(__APPLE__)
   std::string c_list;
   cpu_set_t cpu_set;
   CPU_ZERO(&cpu_set);
@@ -242,19 +243,19 @@ Status CreateCacheRequest::PostReply() {
   for (auto i = 0; i < sz; ++i) {
     auto cpu_id = p->cpu_id()->Get(i);
     cc_->cpu_list_.push_back(cpu_id);
-#if !defined(_WIN32) && !defined(_WIN64) && !defined(__ANDROID__) && !defined(ANDROID)
+#if !defined(_WIN32) && !defined(_WIN64) && !defined(__ANDROID__) && !defined(ANDROID) && !defined(__APPLE__)
     c_list += std::to_string(cpu_id) + " ";
     CPU_SET(cpu_id, &cpu_set);
 #endif
   }
 
-#if !defined(_WIN32) && !defined(_WIN64) && !defined(__ANDROID__) && !defined(ANDROID)
+#if !defined(_WIN32) && !defined(_WIN64) && !defined(__ANDROID__) && !defined(ANDROID) && !defined(__APPLE__)
   if (sz > 0) {
     auto err = sched_setaffinity(getpid(), sizeof(cpu_set), &cpu_set);
     if (err == -1) {
       RETURN_STATUS_UNEXPECTED("Unable to set affinity. Errno = " + std::to_string(errno));
     }
-    MS_LOG(WARNING) << "Changing cpu affinity to the following list of cpu id: " + c_list;
+    MS_LOG(INFO) << "Changing cpu affinity to the following list of cpu id: " + c_list;
   }
 #endif
 
@@ -276,7 +277,7 @@ Status CacheSchemaRequest::SerializeCacheSchemaRequest(const std::unordered_map<
     rq_.add_buf_data(fbb.GetBufferPointer(), fbb.GetSize());
     return Status::OK();
   } catch (const std::bad_alloc &e) {
-    return Status(StatusCode::kOutOfMemory, __LINE__, __FILE__);
+    return Status(StatusCode::kMDOutOfMemory, __LINE__, __FILE__);
   }
 }
 
@@ -304,6 +305,15 @@ Status GetStatRequest::PostReply() {
   return Status::OK();
 }
 
+Status GetCacheStateRequest::PostReply() {
+  try {
+    cache_service_state_ = std::stoi(reply_.result());
+  } catch (const std::exception &e) {
+    RETURN_STATUS_UNEXPECTED(e.what());
+  }
+  return Status::OK();
+}
+
 Status ListSessionsRequest::PostReply() {
   auto *msg = flatbuffers::GetRoot<ListSessionsMsg>(reply_.result().data());
   auto session_vector = msg->sessions();
@@ -323,8 +333,24 @@ Status ListSessionsRequest::PostReply() {
     current_info.stats = stats;  // fixed length struct.  = operator is safe
     session_info_list_.push_back(current_info);
   }
-
+  server_cfg_.num_workers = msg->num_workers();
+  server_cfg_.log_level = msg->log_level();
+  server_cfg_.spill_dir = msg->spill_dir()->str();
   return Status::OK();
+}
+
+Status ServerStopRequest::PostReply() {
+  CHECK_FAIL_RETURN_UNEXPECTED(strcmp(reply_.result().data(), "OK") == 0, "Not the right response");
+  return Status::OK();
+}
+
+BatchCacheRowsRequest::BatchCacheRowsRequest(const CacheClient *cc, int64_t addr, int32_t num_ele)
+    : BaseRequest(RequestType::kBatchCacheRows) {
+  rq_.set_connection_id(cc->server_connection_id_);
+  rq_.set_client_id(cc->client_id_);
+  rq_.add_buf_data(cc->cookie());
+  rq_.add_buf_data(std::to_string(addr));
+  rq_.add_buf_data(std::to_string(num_ele));
 }
 }  // namespace dataset
 }  // namespace mindspore

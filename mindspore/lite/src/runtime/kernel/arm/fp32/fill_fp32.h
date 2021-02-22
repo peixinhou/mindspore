@@ -18,9 +18,8 @@
 
 #include <vector>
 #include "src/lite_kernel.h"
-
 #include "include/context.h"
-#include "nnacl/fp32/fill.h"
+#include "nnacl/base/fill_base.h"
 
 using mindspore::lite::InnerContext;
 
@@ -39,11 +38,13 @@ class FillCPUKernel : public LiteKernel {
   int DoFill(int task_id);
 
  private:
-  int thread_sz_count_;
-  int thread_sz_stride_;
+  int thread_sz_count_ = 0;
+  int thread_sz_stride_ = 0;
   int data_size_;
   float src_data_;
   float *out_ptr_;
+  int int32_src_data_;
+  int *int32_out_ptr_;
   int thread_count_;
 };
 }  // namespace mindspore::kernel

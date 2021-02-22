@@ -25,6 +25,7 @@ from .acosh_grad import _acosh_grad_tbe
 from .adam_apply_one_with_decay import _adam_apply_one_with_decay_tbe
 from .apply_centered_rms_prop import _apply_centered_rms_prop_tbe
 from .add_n import _add_n_tbe
+from .add_n_ds import _add_n_ds_tbe
 from .accumulate_n_v2 import _accumulate_n_v2_tbe
 from .apply_ftrl import _apply_ftrl_tbe
 from .apply_momentum import _apply_momentum_tbe
@@ -50,6 +51,7 @@ from .batchnorm_grad import _batch_norm_grad_tbe
 from .bias_add import _bias_add_tbe
 from .bias_add_grad import _bias_add_grad_tbe
 from .cast import _cast_tbe
+from .cast_ds import _cast_ds_tbe
 from .conv2d import _conv2d_tbe
 from .conv2d_backprop_filter import _conv2d_backprop_filter_tbe
 from .conv2d_backprop_input import _conv2d_backprop_input_tbe
@@ -57,6 +59,8 @@ from .confusion_mul_grad import _confusion_mul_grad_tbe
 from .dropout_do_mask import _dropout_do_mask_tbe
 from .gelu import _gelu_tbe
 from .gelu_grad import _gelu_grad_tbe
+from .fast_gelu import _fast_gelu_tbe
+from .fast_gelu_grad import _fast_gelu_grad_tbe
 from .max_pool import _max_pool_tbe
 from .max_pool_grad import _max_pool_grad_tbe
 from .max_pool_grad_with_argmax import _max_pool_grad_with_argmax_tbe
@@ -66,6 +70,7 @@ from .mul_ds import _mul_ds_tbe
 from .real_div import _real_div_tbe
 from .real_div_ds import _real_div_ds_tbe
 from .relu import _relu_tbe
+from .relu_ds import _relu_ds_tbe
 from .relu_grad import _relu_grad_tbe
 from .relu6 import _relu6_tbe
 from .relu6_grad import _relu6_grad_tbe
@@ -80,6 +85,7 @@ from .trans_data import _trans_data_tbe
 from .top_k import _top_k_tbe
 from .matmul import _matmul_tbe
 from .sub import _sub_tbe
+from .sub_ds import _sub_ds_tbe
 from .scatter_nd import _scatter_nd_tbe
 from .scatter_nd_d import _scatter_nd_d_tbe
 from .scatter_nd_add import _scatter_nd_add_tbe
@@ -121,6 +127,7 @@ from .npu_get_float_status import _npu_get_float_status_tbe
 from .npu_alloc_float_status import _npu_alloc_float_status_tbe
 from .one_hot import _one_hot_tbe
 from .equal import _equal_tbe
+from .equal_ds import _equal_ds_tbe
 from .less import _less_tbe
 from .less_equal import _less_equal_tbe
 from .logical_and import _logical_and_tbe
@@ -159,9 +166,11 @@ from .select import _select_tbe
 from .pow import _pow_tbe
 from .maximum import _maximum_tbe
 from .minimum import _minimum_tbe
+from .minimum_ds import _minimum_ds_tbe
 from .minimum_grad import _minimum_grad_tbe
 from .maximum_grad import _maximum_grad_tbe
 from .concat import _concat_tbe
+from .concat_ds import _concat_ds_tbe
 from .slice import _slice_tbe
 from .sign import _sign_tbe
 from .greater import _greater_tbe
@@ -188,6 +197,7 @@ from .sigmoid_grad import _sigmoid_grad_tbe
 from .resize_nearest_neighbor import _resize_nearest_neighbor_tbe
 from .resize_nearest_neighbor_grad import _resize_nearest_neighbor_grad_tbe
 from .pad_d import _pad_d_tbe
+from .pad_d_ds import _pad_d_ds_tbe
 from .arg_max_with_value import _arg_max_with_value_tbe
 from .arg_min_with_value import _arg_min_with_value_tbe
 from .smooth_l1_loss import _smooth_l1_loss_tbe
@@ -196,6 +206,7 @@ from .fused_mul_add import _fused_mul_add_tbe
 from .fused_mul_add_n import _fused_mul_add_n_tbe
 from .fused_mul_apply_momentum import _fused_mul_apply_momentum_tbe
 from .fill import _fill_op_tbe
+from .fill_ds import _fill_ds_op_tbe
 from .erf import _erf_op_tbe
 from .erfc import _erfc_op_tbe
 from .depthwise_conv2d import _depthwise_conv2d_tbe
@@ -243,6 +254,7 @@ from .prelu import _prelu_tbe
 from .prelu_grad import _prelu_grad_tbe
 from .binary_cross_entropy import _binary_cross_entropy_tbe
 from .binary_cross_entropy_grad import _binary_cross_entropy_grad_tbe
+from .bce_with_logits_loss import _bce_with_logits_loss_op_tbe
 from .sin import _sin_tbe
 from .cos import _cos_tbe
 from .tan import _tan_tbe
@@ -252,6 +264,7 @@ from .cumprod import _cumprop_tbe
 from .reduce_prod import _reduce_prod_tbe
 from .reciprocal_grad import _reciprocal_grad_tbe
 from .sqrt_grad import _sqrt_grad_tbe
+from .sqrt_grad_ds import _sqrt_grad_ds_tbe
 from .rsqrt_grad import _rsqrt_grad_tbe
 from .flatten_grad import _flatten_grad_tbe
 from .scatter_add import _scatter_add_tbe
@@ -268,6 +281,7 @@ from .reduce_all import _reduce_all_tbe
 from .reduce_any import _reduce_any_tbe
 from .sparse_apply_adagrad import _sparse_apply_adagrad_tbe
 from .unsorted_segment_min import _unsorted_segment_min_tbe
+from .unsorted_segment_max import _unsorted_segment_max_tbe
 from .asin import _asin_tbe
 from .asin_grad import _asin_grad_tbe
 from .asinh import _asinh_tbe
@@ -335,3 +349,15 @@ from .fake_quant_with_min_max_vars import _fake_quant_with_min_max_vars_tbe
 from .fake_quant_with_min_max_vars_gradient import _fake_quant_with_min_max_vars_gradient_tbe
 from .fake_quant_with_min_max_vars_per_channel import _fake_quant_with_min_max_vars_per_channel_tbe
 from .fake_quant_with_min_max_vars_per_channel_gradient import _fake_quant_with_min_max_vars_per_channel_gradient_tbe
+from .conv3d import _conv3d_tbe
+from .conv3d_backprop_input import _conv3d_backprop_input_tbe
+from .conv3d_backprop_filter import _conv3d_backprop_filter_tbe
+from .conv3d_transpose import _conv3d_transpose_tbe
+from .lamb_apply_optimizer_assign import _lamb_apply_optimizer_assign_tbe
+from .lamb_apply_weight_assign import _lamb_apply_weight_assign_tbe
+from .nll_loss import _nll_loss_tbe
+from .nll_loss_grad import _nll_loss_grad_tbe
+from .mish import _mish_tbe
+from .mul_no_nan import _mul_no_nan_tbe
+from .selu import _selu_tbe
+from .centralization import _centralization_tbe

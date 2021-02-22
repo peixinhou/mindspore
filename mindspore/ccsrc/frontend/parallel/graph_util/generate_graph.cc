@@ -31,15 +31,22 @@ std::string GetOpPythonPath(const OperatorName &op_name) {
   // almost all ops are defined in two main paths
   const std::string ops_module = OP_PATH;
   const std::string inner_ops_module = INNER_OP_PATH;
+  const std::string functional_op_module = FUNCTIONAL_OP_PATH;
   py::module mod = py::module::import(common::SafeCStr(ops_module));
   py::module inner_mod = py::module::import(common::SafeCStr(inner_ops_module));
-  if (!py::hasattr(inner_mod, common::SafeCStr(op_name))) {
-    if (!py::hasattr(mod, common::SafeCStr(op_name))) {
-      MS_LOG(EXCEPTION) << ops_module << " or " << inner_ops_module << " don't have op:" << op_name;
-    }
+  py::module functional_mod = py::module::import(common::SafeCStr(functional_op_module));
+
+  if (py::hasattr(inner_mod, common::SafeCStr(op_name))) {
+    return inner_ops_module;
+  }
+  if (py::hasattr(mod, common::SafeCStr(op_name))) {
     return ops_module;
   }
-  return inner_ops_module;
+  if (!py::hasattr(functional_mod, common::SafeCStr(op_name))) {
+    MS_LOG(EXCEPTION) << ops_module << " and " << inner_ops_module << " and " << functional_op_module
+                      << " don't have op:" << op_name;
+  }
+  return functional_op_module;
 }
 
 ValuePtr CreatOpInstance(const OperatorAttrs &attrs, const OperatorName &op_name, const std::string &instance_name) {
@@ -69,26 +76,26 @@ AnfNodePtr ValuePtrToAnfNodePtr(const ValuePtr &value_ptr) {
   return value_node->cast<AnfNodePtr>();
 }
 
-static std::unordered_map<int32_t, AnfNodePtr> int_tensor_map = {};
-AnfNodePtr CreateInt32Tensor(int32_t value) {
+static std::unordered_map<int64_t, AnfNodePtr> int_tensor_map = {};
+AnfNodePtr CreateInt32Tensor(int64_t value) {
   auto it = int_tensor_map.find(value);
   if (it != int_tensor_map.end()) {
     return it->second;
   }
-  mindspore::tensor::TensorPtr tensor_ptr = std::make_shared<tensor::Tensor>(py::int_(value), kInt32);
+  mindspore::tensor::TensorPtr tensor_ptr = std::make_shared<tensor::Tensor>(value, kInt32);
   ValuePtr value_ptr = MakeValue(tensor_ptr);
   auto anf_node_ptr = ValuePtrToAnfNodePtr(value_ptr);
   int_tensor_map[value] = anf_node_ptr;
   return anf_node_ptr;
 }
 
-AnfNodePtr CreatTypeInt(int32_t value) {
+AnfNodePtr CreatTypeInt(int64_t value) {
   ValuePtr value_ptr = MakeValue(std::make_shared<Int>(value));
   return ValuePtrToAnfNodePtr(value_ptr);
 }
 
-AnfNodePtr CreatInt32Imm(int32_t value) {
-  ValuePtr value_ptr = MakeValue(std::make_shared<Int32Imm>(value));
+AnfNodePtr CreatInt64Imm(int64_t value) {
+  ValuePtr value_ptr = MakeValue(std::make_shared<Int64Imm>(value));
   return ValuePtrToAnfNodePtr(value_ptr);
 }
 
@@ -141,7 +148,7 @@ Status GenerateGraph::Init(const CNodePtr &cnode) {
 }
 
 AnfNodePtr GenerateGraph::PushBack(const std::vector<AnfNodePtr> &inputs) {
-  CNodePtr cnode = func_graph_->NewCNode(inputs);  // using NewCNode to creat anfnode
+  CNodePtr cnode = func_graph_->NewCNode(inputs);  // using NewCNode to create anfnode
   MS_EXCEPTION_IF_NULL(cnode);
   cnode->set_scope(scope_);
   if (inputs.size() < 2) {

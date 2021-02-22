@@ -18,6 +18,7 @@
 #include <memory>
 #include <set>
 #include <vector>
+#include <algorithm>
 #include "tools/optimizer/common/gllo_utils.h"
 #include "tools/anf_exporter/anf_exporter.h"
 #include "src/kernel_registry.h"
@@ -79,9 +80,12 @@ ParameterPtr CreateNewParamter(const FuncGraphPtr &func_graph, Tensor *tensor) {
   MS_ASSERT(tensor != nullptr);
   auto parameter = func_graph->add_parameter();
   std::vector<int> shape(tensor->shape());
+  std::vector<int64_t> shape_vector;
+  (void)std::transform(shape.begin(), shape.end(), std::back_inserter(shape_vector),
+                       [](const int32_t &value) { return static_cast<int64_t>(value); });
   auto type_id = static_cast<TypeId>(tensor->data_type());
   auto type_ptr = TypeIdToType(type_id);
-  auto abstract_tensor = std::make_shared<abstract::AbstractTensor>(type_ptr, shape);
+  auto abstract_tensor = std::make_shared<abstract::AbstractTensor>(type_ptr, shape_vector);
   parameter->set_abstract(abstract_tensor);
 
   ParamValueLitePtr param_value = std::make_shared<ParamValueLite>();
@@ -102,8 +106,7 @@ ParameterPtr CreateNewParamter(const FuncGraphPtr &func_graph, Tensor *tensor) {
       MS_LOG(ERROR) << "memcpy error: " << ret;
       return nullptr;
     }
-    param_value->set_tensor_addr(tensor_data);
-    param_value->set_tensor_size(size);
+    param_value->SetTensorData(tensor_data, size);
   }
   parameter->set_default_param(param_value);
   return parameter;
@@ -130,6 +133,10 @@ lite::STATUS ReplaceCNode(const FuncGraphPtr &func_graph, const CNodePtr &any_no
   if (output_tensors.size() != 1) {
     for (size_t k = 0; k < output_tensors.size(); k++) {
       auto used_node_list = GetRealNodeUsedListByOutputIdx(func_graph, input_node, k);
+      if (used_node_list->empty()) {
+        MS_LOG(DEBUG) << "this output don't be used by other node.";
+        continue;
+      }
       if (used_node_list->size() != 1) {
         MS_LOG(ERROR) << " output must tuple_getitem";
         return lite::RET_ERROR;
@@ -154,8 +161,8 @@ lite::STATUS ReplaceCNode(const FuncGraphPtr &func_graph, const CNodePtr &any_no
       MS_LOG(ERROR) << "CreateNewParamter failed, name: " << input_node->fullname_with_scope();
       return lite::RET_ERROR;
     }
-    new_parameter->set_name(input_node->fullname_with_scope());
-    any_node->set_input(replace_index, new_parameter);
+    new_parameter->set_name("constfold_" + input_node->fullname_with_scope());
+    manager->Replace(input_node, new_parameter);
   }
   return lite::RET_OK;
 }
@@ -227,21 +234,21 @@ const AnfNodePtr ConstFoldPass::Process(const FuncGraphPtr &func_graph, const An
         output_tensors[m]->AddQuantParam(quant_arg);
       }
     }
-    // here, input_tensor's format need to be transposed nhwc according to fmkType,
-    // but for the time being, we only transpose the tensor with 0/1/2/3D.
-    // Others should be added in future.
-    for (auto &input_tensor : input_tensors) {
-      input_tensor->set_format(schema::Format::Format_NHWC);
-      if (input_tensor->shape().size() == 4) {
-        MS_LOG(INFO) << "init input_tensor format to nhwc";
-      }
-    }
     lite_primitive->InferShape(input_tensors, output_tensors);
     auto primitive = lite_primitive.get();
+    if (primitive->Type() == schema::PrimitiveType_RandomStandardNormal) {
+      return nullptr;
+    }
     MS_ASSERT(primitive != nullptr);
     MS_ASSERT(primitive->Type() != nullptr);
-    auto parameter =
-      lite::PopulateRegistry::GetInstance()->getParameterCreator(schema::PrimitiveType(primitive->Type()))(primitive);
+    auto func_pointer =
+      lite::PopulateRegistry::GetInstance()->GetParameterCreator(schema::PrimitiveType(primitive->Type()));
+    if (func_pointer == nullptr) {
+      MS_LOG(ERROR) << "ParameterCreator function pointer is nullptr, type: "
+                    << schema::EnumNamePrimitiveType((schema::PrimitiveType)primitive->Type());
+      return nullptr;
+    }
+    auto parameter = func_pointer(primitive);
 
     if (parameter == nullptr) {
       MS_LOG(ERROR) << "PopulateParameter return nullptr, type: "

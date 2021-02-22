@@ -24,7 +24,6 @@ using mindspore::lite::RET_OP_EXECUTE_FAILURE;
 using mindspore::schema::PrimitiveType_Transpose;
 
 namespace mindspore::kernel {
-
 int TransposeInt8CPUKernel::Init() {
   if (!InferShapeDone()) {
     return RET_OK;
@@ -94,7 +93,7 @@ int TransposeInt8CPUKernel::ReSize() {
     transpose_param_->out_strides_[i] = out_shape.at(i + 1) * transpose_param_->out_strides_[i + 1];
   }
 
-  extra_dims_ = out_shape.size() > MAX_TRANSPOSE_DIM_SIZE;
+  extra_dims_ = out_shape.size() > MAX_SHAPE_SIZE;
 
   num_unit_ = static_cast<int>(in_shape.at(transpose_param_->perm_[kNHWC_H]));
   thread_h_num_ = MSMIN(thread_num_, num_unit_);
@@ -137,11 +136,14 @@ int TransposeInt8CPUKernel::Run() {
   auto in_tensor = in_tensors_.front();
   auto out_tensor = out_tensors_.front();
 
+  auto in_dims = in_tensor->shape();
+  auto out_dims = out_tensor->shape();
+
   in_ptr_ = reinterpret_cast<int8_t *>(in_tensor->data_c());
   out_ptr_ = reinterpret_cast<int8_t *>(out_tensor->data_c());
 
-  in_shape_ = in_tensor->shape().data();
-  out_shape_ = out_tensor->shape().data();
+  memcpy(in_shape_, in_dims.data(), in_dims.size() * sizeof(int));
+  memcpy(out_shape_, out_dims.data(), out_dims.size() * sizeof(int));
 
   int ret = MallocTmpBuf();
   if (ret != RET_OK) {
@@ -154,36 +156,8 @@ int TransposeInt8CPUKernel::Run() {
   }
 
   FreeTmpBuf();
-  in_shape_ = nullptr;
-  out_shape_ = nullptr;
   return ret;
 }
 
-kernel::LiteKernel *CpuTransposeInt8KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                                  const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter,
-                                                  const lite::InnerContext *ctx, const kernel::KernelKey &desc,
-                                                  const mindspore::lite::PrimitiveC *primitive) {
-  MS_ASSERT(desc.type == schema::PrimitiveType_Transpose);
-  if (opParameter == nullptr) {
-    MS_LOG(ERROR) << "desc type is not Transpose";
-    return nullptr;
-  }
-  auto *kernel = new (std::nothrow) TransposeInt8CPUKernel(opParameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "New kernel fails.";
-    free(opParameter);
-    return nullptr;
-  }
-
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
-}
-
-REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Transpose, CpuTransposeInt8KernelCreator)
+REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Transpose, LiteKernelCreator<TransposeInt8CPUKernel>)
 }  // namespace mindspore::kernel

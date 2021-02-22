@@ -43,6 +43,8 @@ dnnl::eltwise_forward::desc EltWiseCPUKernel::GetForwardEltwiseDesc(const CNodeP
     return dnnl::eltwise_forward::desc(DnnlForward, dnnl::algorithm::eltwise_square, src_desc);
   } else if (kernel_name == "Tanh") {
     return dnnl::eltwise_forward::desc(DnnlForward, dnnl::algorithm::eltwise_tanh, src_desc);
+  } else if (kernel_name == "Elu") {
+    return dnnl::eltwise_forward::desc(DnnlForward, dnnl::algorithm::eltwise_elu, src_desc, 1.0);
   } else {
     MS_LOG(EXCEPTION) << "Eltwise operators don't support " << kernel_name;
   }
@@ -51,6 +53,9 @@ dnnl::eltwise_forward::desc EltWiseCPUKernel::GetForwardEltwiseDesc(const CNodeP
 void EltWiseCPUKernel::InitKernel(const CNodePtr &kernel_node) {
   MS_EXCEPTION_IF_NULL(kernel_node);
   std::vector<size_t> src_shape = AnfAlgo::GetInputDeviceShape(kernel_node, 0);
+  if (src_shape.size() == 0) {
+    src_shape.insert(src_shape.begin(), 1);
+  }
   dnnl::memory::desc src_desc = GetDefaultMemDesc(src_shape);
 
   auto desc = GetForwardEltwiseDesc(kernel_node, src_desc);

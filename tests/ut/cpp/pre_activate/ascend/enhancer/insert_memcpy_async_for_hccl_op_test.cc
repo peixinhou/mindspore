@@ -1,5 +1,5 @@
 /**
- * Copyright 2020 Huawei Technologies Co., Ltd
+ * Copyright 2020-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -48,7 +48,8 @@ class MockInsertMemcpyForHcclKernelQuery : public KernelQuery {
     if (!node->isa<CNode>()) {
       return false;
     }
-    return AnfAlgo::GetCNodeName(node->cast<CNodePtr>()) == "ApplyMomentum";
+    auto node_name = AnfAlgo::GetCNodeName(node->cast<CNodePtr>());
+    return node_name == "ApplyMomentum" || node_name == "AssignAdd";
   }
 };
 
@@ -56,7 +57,7 @@ TEST_F(TestHWInsertMemcpyForHccl, test_cond1_no_insert) {
   get_py_fun_.SetDoResolve(true);
   FuncGraphPtr g = get_py_fun_.CallAndParseRet("test_insert_memcpy_async_for_hccl_op_cond1", "before2");
   ASSERT_TRUE(g != nullptr);
-  std::vector<int> shp_x{1, 64, 112, 112};
+  std::vector<int64_t> shp_x{1, 64, 112, 112};
   auto x_abstract = std::make_shared<abstract::AbstractTensor>(kFloat32, shp_x);
   AbstractBasePtrList args_spec_list{x_abstract};
   auto kg = GetKernelGraph(g, args_spec_list);
@@ -77,7 +78,7 @@ TEST_F(TestHWInsertMemcpyForHccl, test_cond2) {
   get_py_fun_.SetDoResolve(true);
   FuncGraphPtr g = get_py_fun_.CallAndParseRet("test_insert_memcpy_async_for_hccl_op_cond2", "before");
   ASSERT_TRUE(g != nullptr);
-  std::vector<int> shp_x{1, 64, 112, 112};
+  std::vector<int64_t> shp_x{1, 64, 112, 112};
   auto x_abstract = std::make_shared<abstract::AbstractTensor>(kFloat32, shp_x);
   AbstractBasePtrList args_spec_list{x_abstract};
   auto kg = GetKernelGraph(g, args_spec_list);
@@ -103,9 +104,9 @@ TEST_F(TestHWInsertMemcpyForHccl, test_cond3) {
   get_py_fun_.SetDoResolve(true);
   FuncGraphPtr g = get_py_fun_.CallAndParseRet("test_insert_memcpy_async_for_hccl_op_cond3", "before");
   ASSERT_TRUE(g != nullptr);
-  std::vector<int> shp_x{1, 64, 112, 112};
+  std::vector<int64_t> shp_x{3, 2};
   auto x_abstract = std::make_shared<abstract::AbstractTensor>(kFloat32, shp_x);
-  AbstractBasePtrList args_spec_list{x_abstract, x_abstract, x_abstract, x_abstract, x_abstract};
+  AbstractBasePtrList args_spec_list{x_abstract, x_abstract};
   auto kg = GetKernelGraph(g, args_spec_list);
   EXPECT_NE(kg, nullptr);
 
@@ -125,7 +126,7 @@ TEST_F(TestHWInsertMemcpyForHccl, test_cond4) {
   get_py_fun_.SetDoResolve(true);
   FuncGraphPtr g = get_py_fun_.CallAndParseRet("test_insert_memcpy_async_for_hccl_op_cond4", "before");
   ASSERT_TRUE(g != nullptr);
-  std::vector<int> shp_x{1, 64, 112, 112};
+  std::vector<int64_t> shp_x{1, 64, 112, 112};
   auto x_abstract = std::make_shared<abstract::AbstractTensor>(kFloat32, shp_x);
   AbstractBasePtrList args_spec_list{x_abstract, x_abstract};
   auto kg = GetKernelGraph(g, args_spec_list);
@@ -152,7 +153,7 @@ TEST_F(TestHWInsertMemcpyForHccl, test_cond5) {
   get_py_fun_.SetDoResolve(true);
   FuncGraphPtr g = get_py_fun_.CallAndParseRet("test_insert_memcpy_async_for_hccl_op_cond5", "before");
   ASSERT_TRUE(g != nullptr);
-  std::vector<int> shp_x{1, 64, 112, 112};
+  std::vector<int64_t> shp_x{1, 64, 112, 112};
   auto x_abstract = std::make_shared<abstract::AbstractTensor>(kFloat32, shp_x);
   AbstractBasePtrList args_spec_list{x_abstract, x_abstract, x_abstract};
   auto kg = GetKernelGraph(g, args_spec_list);

@@ -1,5 +1,5 @@
 /**
- * Copyright 2019 Huawei Technologies Co., Ltd
+ * Copyright 2019-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,8 +34,10 @@ std::map<std::string, MsBackendPolicy> MsContext::policy_map_ = {{"ge", kMsBacke
 MsContext::MsContext(const std::string &policy, const std::string &target) {
   set_param<bool>(MS_CTX_SAVE_GRAPHS_FLAG, false);
   set_param<std::string>(MS_CTX_SAVE_GRAPHS_PATH, ".");
+  set_param<std::string>(MS_CTX_PYTHON_EXE_PATH, "python");
   set_param<bool>(MS_CTX_ENABLE_DUMP, false);
   set_param<std::string>(MS_CTX_SAVE_DUMP_PATH, ".");
+  set_param<std::string>(MS_CTX_ENV_CONFIG_PATH, "");
   set_param<uint32_t>(MS_CTX_TSD_REF, 0);
   set_param<uint32_t>(MS_CTX_GE_REF, 0);
   set_param<bool>(MS_CTX_IS_MULTI_GRAPH_SINK, false);
@@ -71,6 +73,7 @@ MsContext::MsContext(const std::string &policy, const std::string &target) {
   set_param<std::string>(MS_CTX_PRINT_FILE_PATH, "");
   set_param<bool>(MS_CTX_ENABLE_GRAPH_KERNEL, false);
   set_param<bool>(MS_CTX_ENABLE_SPARSE, false);
+  set_param<bool>(MS_CTX_ENABLE_PARALLEL_SPLIT, false);
 
   backend_policy_ = policy_map_[policy];
 }
@@ -103,5 +106,13 @@ std::string MsContext::backend_policy() const {
     return res->first;
   }
   return "unknown";
+}
+
+bool MsContext::enable_dump_ir() const {
+#ifdef ENABLE_DUMP_IR
+  return true;
+#else
+  return false;
+#endif
 }
 }  // namespace mindspore

@@ -17,6 +17,7 @@
 #ifndef MINDSPORE_DATA_SAVER_H
 #define MINDSPORE_DATA_SAVER_H
 #include <iostream>
+#include <algorithm>
 #include <unordered_map>
 #include <vector>
 #include <string>
@@ -124,9 +125,11 @@ class DataSaver {
 
   void ParseOpInfo(const OpInfoMap &op_info_maps);
 
+  void SetStepTraceOpName(ProfilingTraceInfo trace_op_name);
+
   void ParseEvent(const std::vector<Event> &events);
 
-  void WriteFile(std::string out_path);
+  void WriteFile(std::string out_path, const BaseTime &start_time);
 
  private:
   void AddOpDetailInfoForType(const OpDetailInfo &op_detail_info);
@@ -145,6 +148,10 @@ class DataSaver {
 
   void WriteOpTimestamp(const std::string &saver_base_dir);
 
+  void WriteStepTrace(const std::string &saver_base_dir);
+
+  void WriteStartTime(const std::string &saver_base_dir, const BaseTime &start_time);
+
   void ChangeFileMode(const std::string &file_path);
 
   std::string device_id_;
@@ -152,6 +159,7 @@ class DataSaver {
   OpTypeInfos op_type_infos_;
   OpDetailInfos op_detail_infos_;
   OpTimestampInfo op_timestamps_map_;
+  ProfilingTraceInfo step_trace_op_name;
 };
 }  // namespace gpu
 }  // namespace profiler

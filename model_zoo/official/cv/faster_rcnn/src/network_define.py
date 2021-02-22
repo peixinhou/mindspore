@@ -1,4 +1,4 @@
-# Copyright 2020 Huawei Technologies Co., Ltd
+# Copyright 2020-2021 Huawei Technologies Co., Ltd
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -26,6 +26,8 @@ from mindspore.nn.wrap.grad_reducer import DistributedGradReducer
 
 time_stamp_init = False
 time_stamp_first = 0
+
+
 class LossCallBack(Callback):
     """
     Monitor the loss in training.
@@ -109,10 +111,12 @@ class LossCallBack(Callback):
             self.rcnn_cls_loss_sum = 0
             self.rcnn_reg_loss_sum = 0
 
+
 class LossNet(nn.Cell):
     """FasterRcnn loss method"""
     def construct(self, x1, x2, x3, x4, x5, x6):
         return x1 + x2
+
 
 class WithLossCell(nn.Cell):
     """
@@ -167,7 +171,7 @@ class TrainOneStepCell(nn.Cell):
         self.optimizer = optimizer
         self.grad = C.GradOperation(get_by_list=True,
                                     sens_param=True)
-        self.sens = Tensor((np.ones((1,)) * sens).astype(np.float16))
+        self.sens = Tensor((np.ones((1,)) * sens).astype(np.float32))
         self.reduce_flag = reduce_flag
         if reduce_flag:
             self.grad_reducer = DistributedGradReducer(optimizer.parameters, mean, degree)

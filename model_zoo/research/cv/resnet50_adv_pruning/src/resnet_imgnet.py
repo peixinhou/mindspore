@@ -109,7 +109,7 @@ class ResidualBlock(nn.Cell):
         if self.down_sample:
             self.down_sample_layer = nn.SequentialCell([_conv1x1(in_channel, out_channel, stride),
                                                         _bn(out_channel)])
-        self.add = P.TensorAdd()
+        self.add = P.Add()
 
         self.op = P.ScatterNd()
         self.transpose = P.Transpose()
@@ -327,21 +327,21 @@ class ResNet(nn.Cell):
         for _, m in self.cells_and_names():
             if isinstance(m, (nn.Conv2d)):
                 n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
-                m.weight.set_parameter_data(Tensor(np.random.normal(0, np.sqrt(2. / n),
-                                                                    m.weight.data.shape).astype("float32")))
+                m.weight.set_data(Tensor(np.random.normal(0, np.sqrt(2. / n),
+                                                          m.weight.data.shape).astype("float32")))
                 if m.bias is not None:
-                    m.bias.set_parameter_data(
+                    m.bias.set_data(
                         Tensor(np.zeros(m.bias.data.shape, dtype="float32")))
             elif isinstance(m, nn.BatchNorm2d):
-                m.gamma.set_parameter_data(
+                m.gamma.set_data(
                     Tensor(np.ones(m.gamma.data.shape, dtype="float32")))
-                m.beta.set_parameter_data(
+                m.beta.set_data(
                     Tensor(np.zeros(m.beta.data.shape, dtype="float32")))
             elif isinstance(m, nn.Dense):
-                m.weight.set_parameter_data(Tensor(np.random.normal(
+                m.weight.set_data(Tensor(np.random.normal(
                     0, 0.01, m.weight.data.shape).astype("float32")))
                 if m.bias is not None:
-                    m.bias.set_parameter_data(
+                    m.bias.set_data(
                         Tensor(np.zeros(m.bias.data.shape, dtype="float32")))
 
 

@@ -26,7 +26,6 @@ using mindspore::lite::RET_OK;
 using mindspore::schema::PrimitiveType_DetectionPostProcess;
 
 namespace mindspore::kernel {
-
 void PartialArgSort(const float *scores, int *indexes, int num_to_sort, int num_values) {
   std::partial_sort(indexes, indexes + num_to_sort, indexes + num_values, [&scores](const int i, const int j) {
     if (scores[i] == scores[j]) {
@@ -49,7 +48,8 @@ int DetectionPostProcessBaseCPUKernel::Init() {
   auto anchor_tensor = in_tensors_.at(2);
   if (anchor_tensor->data_type() == kNumberTypeInt8) {
     auto quant_param = anchor_tensor->quant_params().front();
-    auto anchor_int8 = reinterpret_cast<int8_t *>(anchor_tensor->MutableData());
+    auto anchor_int8 = reinterpret_cast<int8_t *>(anchor_tensor->data_c());
+    MS_ASSERT(anchor_int8 != nullptr);
     auto anchor_fp32 = new (std::nothrow) float[anchor_tensor->ElementsNum()];
     if (anchor_fp32 == nullptr) {
       MS_LOG(ERROR) << "Malloc anchor failed";
@@ -58,13 +58,25 @@ int DetectionPostProcessBaseCPUKernel::Init() {
     DoDequantizeInt8ToFp32(anchor_int8, anchor_fp32, quant_param.scale, quant_param.zeroPoint,
                            anchor_tensor->ElementsNum());
     params_->anchors_ = anchor_fp32;
+  } else if (anchor_tensor->data_type() == kNumberTypeUInt8) {
+    auto quant_param = anchor_tensor->quant_params().front();
+    auto anchor_uint8 = reinterpret_cast<uint8_t *>(anchor_tensor->data_c());
+    MS_ASSERT(anchor_uint8 != nullptr);
+    auto anchor_fp32 = new (std::nothrow) float[anchor_tensor->ElementsNum()];
+    if (anchor_fp32 == nullptr) {
+      MS_LOG(ERROR) << "Malloc anchor failed";
+      return RET_ERROR;
+    }
+    DoDequantizeUInt8ToFp32(anchor_uint8, anchor_fp32, quant_param.scale, quant_param.zeroPoint,
+                            anchor_tensor->ElementsNum());
+    params_->anchors_ = anchor_fp32;
   } else if (anchor_tensor->data_type() == kNumberTypeFloat32 || anchor_tensor->data_type() == kNumberTypeFloat) {
     params_->anchors_ = new (std::nothrow) float[anchor_tensor->ElementsNum()];
     if (params_->anchors_ == nullptr) {
       MS_LOG(ERROR) << "Malloc anchor failed";
       return RET_ERROR;
     }
-    memcpy(params_->anchors_, anchor_tensor->MutableData(), anchor_tensor->Size());
+    memcpy(params_->anchors_, anchor_tensor->data_c(), anchor_tensor->Size());
   } else {
     MS_LOG(ERROR) << "unsupported anchor data type " << anchor_tensor->data_type();
     return RET_ERROR;
@@ -138,10 +150,10 @@ int DetectionPostProcessBaseCPUKernel::Run() {
   if (status != RET_OK) {
     return status;
   }
-  auto output_boxes = reinterpret_cast<float *>(out_tensors_.at(0)->MutableData());
-  auto output_classes = reinterpret_cast<float *>(out_tensors_.at(1)->MutableData());
-  auto output_scores = reinterpret_cast<float *>(out_tensors_.at(2)->MutableData());
-  auto output_num = reinterpret_cast<float *>(out_tensors_.at(3)->MutableData());
+  auto output_boxes = reinterpret_cast<float *>(out_tensors_.at(0)->data_c());
+  auto output_classes = reinterpret_cast<float *>(out_tensors_.at(1)->data_c());
+  auto output_scores = reinterpret_cast<float *>(out_tensors_.at(2)->data_c());
+  auto output_num = reinterpret_cast<float *>(out_tensors_.at(3)->data_c());
 
   num_boxes_ = in_tensors_.at(0)->shape().at(1);
   num_classes_with_bg_ = in_tensors_.at(1)->shape().at(2);
@@ -243,5 +255,5 @@ int DetectionPostProcessBaseCPUKernel::Run() {
   }
   FreeAllocatedBuffer();
   return RET_OK;
-}  // namespace mindspore::kernel
+}
 }  // namespace mindspore::kernel

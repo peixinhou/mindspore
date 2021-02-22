@@ -39,7 +39,6 @@ int DeDepthwiseConv2D::GetPadLeft() const { return this->primitive_->value.AsDeD
 int DeDepthwiseConv2D::GetPadRight() const { return this->primitive_->value.AsDeDepthwiseConv2D()->padRight; }
 int DeDepthwiseConv2D::GetDilateW() const { return this->primitive_->value.AsDeDepthwiseConv2D()->dilateW; }
 int DeDepthwiseConv2D::GetDilateH() const { return this->primitive_->value.AsDeDepthwiseConv2D()->dilateH; }
-bool DeDepthwiseConv2D::GetHasBias() const { return this->primitive_->value.AsDeDepthwiseConv2D()->hasBias; }
 int DeDepthwiseConv2D::GetActivationType() const {
   return this->primitive_->value.AsDeDepthwiseConv2D()->activationType;
 }
@@ -68,7 +67,6 @@ void DeDepthwiseConv2D::SetPadRight(int pad_right) {
 }
 void DeDepthwiseConv2D::SetDilateW(int dilate_w) { this->primitive_->value.AsDeDepthwiseConv2D()->dilateW = dilate_w; }
 void DeDepthwiseConv2D::SetDilateH(int dilate_h) { this->primitive_->value.AsDeDepthwiseConv2D()->dilateH = dilate_h; }
-void DeDepthwiseConv2D::SetHasBias(bool has_bias) { this->primitive_->value.AsDeDepthwiseConv2D()->hasBias = has_bias; }
 void DeDepthwiseConv2D::SetActivationType(int activation_type) {
   this->primitive_->value.AsDeDepthwiseConv2D()->activationType = static_cast<schema::ActivationType>(activation_type);
 }
@@ -108,7 +106,6 @@ int DeDepthwiseConv2D::GetPadLeft() const { return this->primitive_->value_as_De
 int DeDepthwiseConv2D::GetPadRight() const { return this->primitive_->value_as_DeDepthwiseConv2D()->padRight(); }
 int DeDepthwiseConv2D::GetDilateW() const { return this->primitive_->value_as_DeDepthwiseConv2D()->dilateW(); }
 int DeDepthwiseConv2D::GetDilateH() const { return this->primitive_->value_as_DeDepthwiseConv2D()->dilateH(); }
-bool DeDepthwiseConv2D::GetHasBias() const { return this->primitive_->value_as_DeDepthwiseConv2D()->hasBias(); }
 int DeDepthwiseConv2D::GetActivationType() const {
   return this->primitive_->value_as_DeDepthwiseConv2D()->activationType();
 }
@@ -120,7 +117,7 @@ Registry DeDepthwiseConv2DRegistry(schema::PrimitiveType_DeDepthwiseConv2D, DeDe
 #endif
 
 int DeDepthwiseConv2D::InferShape(std::vector<lite::Tensor *> inputs_, std::vector<lite::Tensor *> outputs_) {
-  if (inputs_.size() != kDoubleNum && inputs_.size() != kMultiNum) {
+  if (inputs_.size() != kDoubleNum && inputs_.size() != kTripleNum) {
     MS_LOG(ERROR) << "inputs number is invalid";
     return 1;
   }
@@ -138,7 +135,7 @@ int DeDepthwiseConv2D::InferShape(std::vector<lite::Tensor *> inputs_, std::vect
   output->set_format(input->format());
   output->set_data_type(input->data_type());
   if (!infer_flag()) {
-    return RET_OK;
+    return RET_INFER_INVALID;
   }
   auto in_shape = input->shape();
   int input_h = in_shape.at(1);

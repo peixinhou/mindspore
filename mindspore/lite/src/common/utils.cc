@@ -83,13 +83,13 @@ std::vector<std::string> StrSplit(const std::string &str, const std::string &pat
   }
   std::string::size_type pos;
   std::vector<std::string> result;
-  std::string tmp_str(str + pattern);
-  std::string::size_type size = tmp_str.size();
+  std::string tmpStr(str + pattern);
+  std::string::size_type size = tmpStr.size();
 
   for (std::string::size_type i = 0; i < size; i++) {
-    pos = tmp_str.find(pattern, i);
+    pos = tmpStr.find(pattern, i);
     if (pos < size) {
-      std::string s = tmp_str.substr(i, pos - i);
+      std::string s = tmpStr.substr(i, pos - i);
       result.push_back(s);
       i = pos + pattern.size() - 1;
     }
@@ -112,17 +112,17 @@ std::vector<std::string> Tokenize(const std::string &src, const std::string &del
   size_t offset = 0;
 
   while (true) {
-    size_t non_delimiter = src.find_first_not_of(delimiters, offset);
-    if (non_delimiter == std::string::npos) {
+    size_t nonDelimiter = src.find_first_not_of(delimiters, offset);
+    if (nonDelimiter == std::string::npos) {
       break;
     }
-    size_t delimiter = src.find_first_of(delimiters, non_delimiter);
+    size_t delimiter = src.find_first_of(delimiters, nonDelimiter);
     if (delimiter == std::string::npos || (max_token_num.IsSome() && tokens.size() == max_token_num.Get() - 1)) {
-      tokens.push_back(src.substr(non_delimiter));
+      tokens.push_back(src.substr(nonDelimiter));
       break;
     }
 
-    tokens.push_back(src.substr(non_delimiter, delimiter - non_delimiter));
+    tokens.push_back(src.substr(nonDelimiter, delimiter - nonDelimiter));
     offset = delimiter;
   }
   return tokens;
@@ -166,6 +166,5 @@ bool IsSupportFloat16() {
 #endif
   return status;
 }
-
 }  // namespace lite
 }  // namespace mindspore

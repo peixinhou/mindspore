@@ -110,11 +110,10 @@ class EmbeddingLookup(nn.Cell):
         self.use_one_hot_embeddings = use_one_hot_embeddings
         self.embedding_table = Parameter(initializer
                                          (TruncatedNormal(initializer_range),
-                                          [vocab_size, embedding_size]),
-                                         name='embedding_table')
+                                          [vocab_size, embedding_size]))
         self.expand = P.ExpandDims()
         self.shape_flat = (-1,)
-        self.gather = P.GatherV2()
+        self.gather = P.Gather()
         self.one_hot = P.OneHot()
         self.on_value = Tensor(1.0, mstype.float32)
         self.off_value = Tensor(0.0, mstype.float32)
@@ -167,12 +166,10 @@ class EmbeddingPostprocessor(nn.Cell):
         self.token_type_vocab_size = token_type_vocab_size
         self.use_one_hot_embeddings = use_one_hot_embeddings
         self.max_position_embeddings = max_position_embeddings
-        self.embedding_table = Parameter(initializer
-                                         (TruncatedNormal(initializer_range),
-                                          [token_type_vocab_size,
-                                           embedding_size]),
-                                         name='embedding_table')
-
+        self.token_type_embedding = nn.Embedding(
+            vocab_size=token_type_vocab_size,
+            embedding_size=embedding_size,
+            use_one_hot=use_one_hot_embeddings)
         self.shape_flat = (-1,)
         self.one_hot = P.OneHot()
         self.on_value = Tensor(1.0, mstype.float32)
@@ -180,36 +177,28 @@ class EmbeddingPostprocessor(nn.Cell):
         self.array_mul = P.MatMul()
         self.reshape = P.Reshape()
         self.shape = tuple(embedding_shape)
-        self.layernorm = nn.LayerNorm((embedding_size,))
         self.dropout = nn.Dropout(1 - dropout_prob)
-        self.gather = P.GatherV2()
+        self.gather = P.Gather()
         self.use_relative_positions = use_relative_positions
         self.slice = P.StridedSlice()
-        self.full_position_embeddings = Parameter(initializer
-                                                  (TruncatedNormal(initializer_range),
-                                                   [max_position_embeddings,
-                                                    embedding_size]),
-                                                  name='full_position_embeddings')
+        _, seq, _ = self.shape
+        self.full_position_embedding = nn.Embedding(
+            vocab_size=max_position_embeddings,
+            embedding_size=embedding_size,
+            use_one_hot=False)
+        self.layernorm = nn.LayerNorm((embedding_size,))
+        self.position_ids = Tensor(np.arange(seq).reshape(-1, seq).astype(np.int32))
+        self.add = P.Add()
 
     def construct(self, token_type_ids, word_embeddings):
         """Postprocessors apply positional and token type embeddings to word embeddings."""
         output = word_embeddings
         if self.use_token_type:
-            flat_ids = self.reshape(token_type_ids, self.shape_flat)
-            if self.use_one_hot_embeddings:
-                one_hot_ids = self.one_hot(flat_ids,
-                                           self.token_type_vocab_size, self.on_value, self.off_value)
-                token_type_embeddings = self.array_mul(one_hot_ids,
-                                                       self.embedding_table)
-            else:
-                token_type_embeddings = self.gather(self.embedding_table, flat_ids, 0)
-            token_type_embeddings = self.reshape(token_type_embeddings, self.shape)
-            output += token_type_embeddings
+            token_type_embeddings = self.token_type_embedding(token_type_ids)
+            output = self.add(output, token_type_embeddings)
         if not self.use_relative_positions:
-            _, seq, width = self.shape
-            position_embeddings = self.slice(self.full_position_embeddings, (0, 0), (seq, width), (1, 1))
-            position_embeddings = self.reshape(position_embeddings, (1, seq, width))
-            output += position_embeddings
+            position_embeddings = self.full_position_embedding(self.position_ids)
+            output = self.add(output, position_embeddings)
         output = self.layernorm(output)
         output = self.dropout(output)
         return output
@@ -237,7 +226,7 @@ class BertOutput(nn.Cell):
                               weight_init=TruncatedNormal(initializer_range)).to_float(compute_type)
         self.dropout = nn.Dropout(1 - dropout_prob)
         self.dropout_prob = dropout_prob
-        self.add = P.TensorAdd()
+        self.add = P.Add()
         self.layernorm = nn.LayerNorm((out_channels,)).to_float(compute_type)
         self.cast = P.Cast()
 
@@ -314,15 +303,14 @@ class RelaPosEmbeddingsGenerator(nn.Cell):
 
         self.embeddings_table = Parameter(
             initializer(TruncatedNormal(initializer_range),
-                        [self.vocab_size, self.depth]),
-            name='embeddings_for_position')
+                        [self.vocab_size, self.depth]))
 
         self.relative_positions_matrix = RelaPosMatrixGenerator(length=length,
                                                                 max_relative_position=max_relative_position)
         self.reshape = P.Reshape()
         self.one_hot = nn.OneHot(depth=self.vocab_size)
         self.shape = P.Shape()
-        self.gather = P.GatherV2()  # index_select
+        self.gather = P.Gather()  # index_select
         self.matmul = P.BatchMatMul()
 
     def construct(self):
@@ -456,7 +444,7 @@ class BertAttention(nn.Cell):
         if self.has_attention_mask:
             self.expand_dims = P.ExpandDims()
             self.sub = P.Sub()
-            self.add = P.TensorAdd()
+            self.add = P.Add()
             self.cast = P.Cast()
             self.get_dtype = P.DType()
         if do_return_2d_tensor:
@@ -775,6 +763,7 @@ class CreateAttentionMaskFromInputMask(nn.Cell):
     def __init__(self, config):
         super(CreateAttentionMaskFromInputMask, self).__init__()
         self.input_mask = None
+
         self.cast = P.Cast()
         self.reshape = P.Reshape()
         self.shape = (-1, 1, config.seq_length)
@@ -812,12 +801,10 @@ class BertModel(nn.Cell):
         self.last_idx = self.num_hidden_layers - 1
         output_embedding_shape = [-1, self.seq_length, self.embedding_size]
 
-        self.bert_embedding_lookup = EmbeddingLookup(
+        self.bert_embedding_lookup = nn.Embedding(
             vocab_size=config.vocab_size,
             embedding_size=self.embedding_size,
-            embedding_shape=output_embedding_shape,
-            use_one_hot_embeddings=use_one_hot_embeddings,
-            initializer_range=config.initializer_range)
+            use_one_hot=use_one_hot_embeddings)
 
         self.bert_embedding_postprocessor = EmbeddingPostprocessor(
             embedding_size=self.embedding_size,
@@ -859,7 +846,8 @@ class BertModel(nn.Cell):
     def construct(self, input_ids, token_type_ids, input_mask):
         """Bidirectional Encoder Representations from Transformers."""
         # embedding
-        word_embeddings, embedding_tables = self.bert_embedding_lookup(input_ids)
+        embedding_tables = self.bert_embedding_lookup.embedding_table
+        word_embeddings = self.bert_embedding_lookup(input_ids)
         embedding_output = self.bert_embedding_postprocessor(token_type_ids,
                                                              word_embeddings)
 

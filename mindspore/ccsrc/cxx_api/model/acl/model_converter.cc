@@ -16,18 +16,14 @@
 
 #include "cxx_api/model/acl/model_converter.h"
 #include <memory>
-#include "pybind11/pybind11.h"
-#include "utils/load_onnx/anf_converter.h"
 #include "transform/graph_ir/convert.h"
 #include "transform/graph_ir/graph_runner.h"
 #include "mindspore/core/utils/ms_context.h"
-#include "backend/kernel_compiler/oplib/oplib.h"
-
+#include "include/api/serialization.h"
 #include "graph/model.h"
+#include "cxx_api/model/model_converter_utils/multi_process.h"
 
-namespace py = pybind11;
-
-namespace mindspore::api {
+namespace mindspore {
 namespace {
 transform::TensorOrderMap GetParams(const FuncGraphPtr &anf_graph) {
   transform::TensorOrderMap res;
@@ -73,19 +69,7 @@ bool CreateSessionAndGraphRunner() {
 
   return true;
 }
-
 }  // namespace
-
-std::shared_ptr<FuncGraph> ModelConverter::ConvertMindIrToFuncGraph(const Buffer &model_data) {
-  try {
-    auto anf_graph =
-      lite::AnfConverter::RunAnfConverter(reinterpret_cast<const char *>(model_data.Data()), model_data.DataSize());
-    return anf_graph;
-  } catch (std::exception &e) {
-    MS_LOG(ERROR) << "Load MindIR failed.";
-    return nullptr;
-  }
-}
 
 transform::DfGraphPtr ModelConverter::ConvertFuncGraphToAIR(const FuncGraphPtr &anf_graph) {
   for (auto &anf_node : anf_graph->parameters()) {
@@ -101,25 +85,25 @@ transform::DfGraphPtr ModelConverter::ConvertFuncGraphToAIR(const FuncGraphPtr &
     para->set_name(name);
   }
 
-  transform::DfGraphConvertor convertor(anf_graph);
+  transform::DfGraphConvertor converter(anf_graph);
   std::string net_id = "0";
   std::string init_graph = "init_subgraph." + net_id;
   std::string checkpoint_name = "save." + net_id;
 
-  convertor.set_training(false);
-  (void)convertor.ConvertAllNode().InitParam(GetParams(anf_graph)).BuildGraph();
-  (void)convertor.GenerateCheckpointGraph();
-  if (convertor.ErrCode() != 0) {
+  converter.set_training(false);
+  (void)converter.ConvertAllNode().InitParam(GetParams(anf_graph)).BuildGraph();
+  (void)converter.GenerateCheckpointGraph();
+  if (converter.ErrCode() != 0) {
     transform::DfGraphManager::GetInstance().ClearGraph();
-    MS_LOG(ERROR) << "Convert df graph failed, err:" << convertor.ErrCode();
+    MS_LOG(ERROR) << "Convert df graph failed, err:" << converter.ErrCode();
     return nullptr;
   }
-  (void)transform::DfGraphManager::GetInstance().AddGraph(anf_graph->ToString(), convertor.GetComputeGraph());
-  (void)transform::DfGraphManager::GetInstance().AddGraph(init_graph, convertor.GetInitGraph());
-  (void)transform::DfGraphManager::GetInstance().AddGraph(BROADCAST_GRAPH_NAME, convertor.GetBroadcastGraph());
+  (void)transform::DfGraphManager::GetInstance().AddGraph(anf_graph->ToString(), converter.GetComputeGraph());
+  (void)transform::DfGraphManager::GetInstance().AddGraph(init_graph, converter.GetInitGraph());
+  (void)transform::DfGraphManager::GetInstance().AddGraph(BROADCAST_GRAPH_NAME, converter.GetBroadcastGraph());
 
   transform::Status ret =
-    transform::DfGraphManager::GetInstance().AddGraph(checkpoint_name, convertor.GetSaveCheckpointGraph());
+    transform::DfGraphManager::GetInstance().AddGraph(checkpoint_name, converter.GetSaveCheckpointGraph());
   if (ret == transform::Status::SUCCESS) {
     transform::DfGraphManager::GetInstance().SetAnfGraph(checkpoint_name, anf_graph);
   }
@@ -146,17 +130,16 @@ transform::DfGraphPtr ModelConverter::ConvertFuncGraphToAIR(const FuncGraphPtr &
 }
 
 Buffer ModelConverter::BuildAirModel(const transform::DfGraphPtr &graph,
-                                     const std::map<std::string, std::string> &acl_options) {
+                                     const std::map<std::string, std::string> &init_options,
+                                     const std::map<std::string, std::string> &build_options) {
   ge::ModelBufferData model;
-  auto ge_options = acl_options;
-  ge_options.emplace(ge::ir_option::SOC_VERSION, "Ascend310");
-  auto ret = ge::aclgrphBuildInitialize(ge_options);
+  auto ret = ge::aclgrphBuildInitialize(init_options);
   if (ret != ge::SUCCESS) {
     MS_LOG(ERROR) << "Call aclgrphBuildInitialize fail.";
     return Buffer();
   }
 
-  ret = ge::aclgrphBuildModel(*graph, acl_options, model);
+  ret = ge::aclgrphBuildModel(*graph, build_options, model);
   if (ret != ge::SUCCESS) {
     MS_LOG(ERROR) << "Call aclgrphBuildModel fail.";
     return Buffer();
@@ -166,79 +149,137 @@ Buffer ModelConverter::BuildAirModel(const transform::DfGraphPtr &graph,
   return Buffer(model.data.get(), model.length);
 }
 
-void ModelConverter::RegAllOp() {
-  static std::mutex init_mutex;
-  static bool Initialized = false;
+Buffer ModelConverter::LoadMindIR(const FuncGraphPtr &func_graph) {
+  MultiProcess multi_process;
+  Buffer buffer_ret;
+  auto parent_process = [&func_graph, &buffer_ret, this](MultiProcess *multi_process) -> Status {
+    MS_EXCEPTION_IF_NULL(multi_process);
+    auto df_graph = ConvertFuncGraphToAIR(func_graph);
+    if (df_graph == nullptr) {
+      MS_LOG(ERROR) << "Convert FuncGraph to AscendIR failed.";
+      return kMCFailed;
+    }
+    ge::Model model;
+    ge::Buffer model_data;
+    model.SetGraph(*df_graph);
+    auto ge_ret = model.Save(model_data);
+    if (ge_ret != ge::SUCCESS) {
+      MS_LOG(ERROR) << "Save ge model to buffer failed.";
+      return kMCFailed;
+    }
 
-  std::lock_guard<std::mutex> lock(init_mutex);
-  if (Initialized) {
-    return;
+    // send original model to child
+    auto status = multi_process->SendMsg(model_data.data(), model_data.size());
+    if (status != kSuccess) {
+      MS_LOG_ERROR << "Send original model to child process failed";
+      return status;
+    }
+    // receive convert model result from child
+    CreateBufferCall call = [&buffer_ret](size_t msg_len) -> uint8_t * {
+      buffer_ret.ResizeData(msg_len);
+      return reinterpret_cast<uint8_t *>(buffer_ret.MutableData());
+    };
+    status = multi_process->ReceiveMsg(call);
+    if (status != kSuccess) {
+      MS_LOG_ERROR << "Receive result model from child process failed";
+      return status;
+    }
+    return kSuccess;
+  };
+  auto child_process = [this](MultiProcess *multi_process) -> Status {
+    MS_EXCEPTION_IF_NULL(multi_process);
+    // receive original model from parent
+    Buffer model;
+    CreateBufferCall call = [&model](size_t msg_len) -> uint8_t * {
+      model.ResizeData(msg_len);
+      return reinterpret_cast<uint8_t *>(model.MutableData());
+    };
+    auto status = multi_process->ReceiveMsg(call);
+    if (status != kSuccess) {
+      MS_LOG_ERROR << "Receive original model from parent process failed";
+      return status;
+    }
+    Buffer model_result = LoadAscendIRInner(model);
+    if (model_result.DataSize() == 0) {
+      MS_LOG_ERROR << "Convert model from MindIR to OM failed";
+      return kMCFailed;
+    }
+    // send result model to parent
+    status = multi_process->SendMsg(model_result.Data(), model_result.DataSize());
+    if (status != kSuccess) {
+      MS_LOG_ERROR << "Send result model to parent process failed";
+      return status;
+    }
+    return kSuccess;
+  };
+  auto status = multi_process.MainProcess(parent_process, child_process);
+  if (status != kSuccess) {
+    MS_LOG_ERROR << "Convert MindIR model to OM model failed";
+  } else {
+    MS_LOG_INFO << "Convert MindIR model to OM model success";
   }
-  Initialized = true;
-  MsContext::GetInstance()->set_param<int>(MS_CTX_EXECUTION_MODE, kGraphMode);
-  Py_Initialize();
-  auto c_expression = PyImport_ImportModule("mindspore._c_expression");
-  MS_EXCEPTION_IF_NULL(c_expression);
-  PyObject *c_expression_dict = PyModule_GetDict(c_expression);
-  MS_EXCEPTION_IF_NULL(c_expression_dict);
-
-  PyObject *op_info_loader_class = PyDict_GetItemString(c_expression_dict, "OpInfoLoaderPy");
-  MS_EXCEPTION_IF_NULL(op_info_loader_class);
-  PyObject *op_info_loader = PyInstanceMethod_New(op_info_loader_class);
-  MS_EXCEPTION_IF_NULL(op_info_loader);
-  PyObject *op_info_loader_ins = PyObject_CallObject(op_info_loader, nullptr);
-  MS_EXCEPTION_IF_NULL(op_info_loader_ins);
-  auto all_ops_info_vector_addr_ul = PyObject_CallMethod(op_info_loader_ins, "get_all_ops_info", nullptr);
-  MS_EXCEPTION_IF_NULL(all_ops_info_vector_addr_ul);
-  auto all_ops_info_vector_addr = PyLong_AsVoidPtr(all_ops_info_vector_addr_ul);
-  auto all_ops_info = static_cast<std::vector<kernel::OpInfo *> *>(all_ops_info_vector_addr);
-  for (auto op_info : *all_ops_info) {
-    kernel::OpLib::RegOpInfo(std::shared_ptr<kernel::OpInfo>(op_info));
-  }
-  all_ops_info->clear();
-  delete all_ops_info;
-  Py_DECREF(op_info_loader);
-  Py_DECREF(op_info_loader_class);
-  Py_DECREF(c_expression_dict);
-  Py_DECREF(c_expression);
+  return buffer_ret;
 }
 
-Buffer ModelConverter::ReadFile(const std::string &file) {
-  Buffer buffer;
-  if (file.empty()) {
-    MS_LOG(ERROR) << "Pointer file is nullptr";
-    return buffer;
+Buffer ModelConverter::LoadAscendIR(const Buffer &model_data) {
+  MultiProcess multi_process;
+  Buffer buffer_ret;
+  auto parent_process = [&model_data, &buffer_ret](MultiProcess *multi_process) -> Status {
+    MS_EXCEPTION_IF_NULL(multi_process);
+    // send original model to child
+    auto status = multi_process->SendMsg(model_data.Data(), model_data.DataSize());
+    if (status != kSuccess) {
+      MS_LOG_ERROR << "Send original model to child process failed";
+      return status;
+    }
+    // receive convert model result from child
+    CreateBufferCall call = [&buffer_ret](size_t msg_len) -> uint8_t * {
+      buffer_ret.ResizeData(msg_len);
+      return reinterpret_cast<uint8_t *>(buffer_ret.MutableData());
+    };
+    status = multi_process->ReceiveMsg(call);
+    if (status != kSuccess) {
+      MS_LOG_ERROR << "Receive result model from child process failed";
+      return status;
+    }
+    return kSuccess;
+  };
+  auto child_process = [this](MultiProcess *multi_process) -> Status {
+    MS_EXCEPTION_IF_NULL(multi_process);
+    // receive original model from parent
+    Buffer model;
+    CreateBufferCall call = [&model](size_t msg_len) -> uint8_t * {
+      model.ResizeData(msg_len);
+      return reinterpret_cast<uint8_t *>(model.MutableData());
+    };
+    auto status = multi_process->ReceiveMsg(call);
+    if (status != kSuccess) {
+      MS_LOG_ERROR << "Receive original model from parent process failed";
+      return status;
+    }
+    Buffer model_result = LoadAscendIRInner(model);
+    if (model_result.DataSize() == 0) {
+      MS_LOG_ERROR << "Convert model from AIR to OM failed";
+      return kMCFailed;
+    }
+    // send result model to parent
+    status = multi_process->SendMsg(model_result.Data(), model_result.DataSize());
+    if (status != kSuccess) {
+      MS_LOG_ERROR << "Send result model to parent process failed";
+      return status;
+    }
+    return kSuccess;
+  };
+  auto status = multi_process.MainProcess(parent_process, child_process);
+  if (status != kSuccess) {
+    MS_LOG_ERROR << "Convert AIR model to OM model failed";
+  } else {
+    MS_LOG_INFO << "Convert AIR model to OM model success";
   }
-  std::string realPath = file;
-  std::ifstream ifs(realPath);
-  if (!ifs.good()) {
-    MS_LOG(ERROR) << "File: " << realPath << " is not exist";
-    return buffer;
-  }
-
-  if (!ifs.is_open()) {
-    MS_LOG(ERROR) << "File: " << realPath << "open failed";
-    return buffer;
-  }
-
-  ifs.seekg(0, std::ios::end);
-  size_t size = ifs.tellg();
-  buffer.ResizeData(size);
-  if (buffer.DataSize() != size) {
-    MS_LOG(ERROR) << "Malloc buf failed, file: " << realPath;
-    ifs.close();
-    return buffer;
-  }
-
-  ifs.seekg(0, std::ios::beg);
-  ifs.read(reinterpret_cast<char *>(buffer.MutableData()), size);
-  ifs.close();
-
-  return buffer;
+  return buffer_ret;
 }
 
-Buffer ModelConverter::LoadMindIR(const Buffer &model_data) {
-  auto func_graph = ConvertMindIrToFuncGraph(model_data);
+Buffer ModelConverter::LoadMindIRInner(const FuncGraphPtr &func_graph) {
   if (func_graph == nullptr) {
     MS_LOG(ERROR) << "Convert MindIR to FuncGraph failed.";
     return Buffer();
@@ -250,16 +291,17 @@ Buffer ModelConverter::LoadMindIR(const Buffer &model_data) {
     return Buffer();
   }
 
-  std::map<std::string, std::string> acl_options;
+  std::map<std::string, std::string> init_options;
+  std::map<std::string, std::string> build_options;
   if (options_ != nullptr) {
-    acl_options = options_->GenAclOptions();
+    std::tie(init_options, build_options) = options_->GenAclOptions();
   }
 
-  auto om_data = BuildAirModel(df_graph, acl_options);
+  auto om_data = BuildAirModel(df_graph, init_options, build_options);
   return om_data;
 }
 
-Buffer ModelConverter::LoadAscendIR(const Buffer &model_data) {
+Buffer ModelConverter::LoadAscendIRInner(const Buffer &model_data) {
   ge::Model load_model = ge::Model("loadmodel", "version2");
   ge::Status ret =
     ge::Model::Load(reinterpret_cast<const uint8_t *>(model_data.Data()), model_data.DataSize(), load_model);
@@ -274,12 +316,13 @@ Buffer ModelConverter::LoadAscendIR(const Buffer &model_data) {
     return Buffer();
   }
 
-  std::map<std::string, std::string> acl_options;
+  std::map<std::string, std::string> init_options;
+  std::map<std::string, std::string> build_options;
   if (options_ != nullptr) {
-    acl_options = options_->GenAclOptions();
+    std::tie(init_options, build_options) = options_->GenAclOptions();
   }
 
-  auto om_data = BuildAirModel(df_graph, acl_options);
+  auto om_data = BuildAirModel(df_graph, init_options, build_options);
   return om_data;
 }
-}  // namespace mindspore::api
+}  // namespace mindspore

@@ -43,10 +43,10 @@ def create_quant_config(quant_observer=(nn.FakeQuantWithMinMaxObserver, nn.FakeQ
                         symmetric=(False, False),
                         narrow_range=(False, False)):
     r"""
-    Configs the oberser type of weights and data flow with quant params.
+    Configs the observer type of weights and data flow with quant params.
 
     Args:
-        quant_observer (Observer, list or tuple): The oberser type to do quantization. The first element represent
+        quant_observer (Observer, list or tuple): The observer type to do quantization. The first element represent
             weights and second element represent data flow.
             Default: (nn.FakeQuantWithMinMaxObserver, nn.FakeQuantWithMinMaxObserver)
         quant_delay (int, list or tuple): Number of steps after which weights and activations are quantized during
@@ -64,7 +64,7 @@ def create_quant_config(quant_observer=(nn.FakeQuantWithMinMaxObserver, nn.FakeQ
             The first element represents weights and the second element represents data flow. Default: (False, False)
 
     Returns:
-        QuantConfig, Contains the oberser type of weight and activation.
+        QuantConfig, Contains the observer type of weight and activation.
     """
     weight_observer = quant_observer[0].partial_init(quant_delay=quant_delay[0], quant_dtype=quant_dtype[0],
                                                      per_channel=per_channel[0], symmetric=symmetric[0],
@@ -138,41 +138,42 @@ class QuantizationAwareTraining(Quantizer):
             The first element represents weights and the second element represents data flow. Default: (False, False)
         optimize_option (OptimizeOption, list or tuple): Specifies the quant algorithm and options, currently only
             support QAT. Default: OptimizeOption.QAT
+        one_conv_fold (bool): Flag to used one conv bn fold ops for simulation inference operation. Default: True.
 
     Examples:
-        >>> class Net(nn.Cell):
-        >>>     def __init__(self, num_class=10, channel=1):
-        >>>         super(LeNet5, self).__init__()
-        >>>         self.type = "fusion"
-        >>>         self.num_class = num_class
-        >>>
-        >>>         # change `nn.Conv2d` to `nn.Conv2dBnAct`
-        >>>         self.conv1 = nn.Conv2dBnAct(channel, 6, 5, pad_mode='valid', activation='relu')
-        >>>         self.conv2 = nn.Conv2dBnAct(6, 16, 5, pad_mode='valid', activation='relu')
-        >>>         # change `nn.Dense` to `nn.DenseBnAct`
-        >>>         self.fc1 = nn.DenseBnAct(16 * 5 * 5, 120, activation='relu')
-        >>>         self.fc2 = nn.DenseBnAct(120, 84, activation='relu')
-        >>>         self.fc3 = nn.DenseBnAct(84, self.num_class)
-        >>>
-        >>>         self.max_pool2d = nn.MaxPool2d(kernel_size=2, stride=2)
-        >>>         self.flatten = nn.Flatten()
-        >>>
-        >>>     def construct(self, x):
-        >>>         x = self.conv1(x)
-        >>>         x = self.max_pool2d(x)
-        >>>         x = self.conv2(x)
-        >>>         x = self.max_pool2d(x)
-        >>>         x = self.flatten(x)
-        >>>         x = self.fc1(x)
-        >>>         x = self.fc2(x)
-        >>>         x = self.fc3(x)
-        >>>         return x
-        >>>
-        >>> net = Net()
+        >>> class LeNet5(nn.Cell):
+        ...     def __init__(self, num_class=10, channel=1):
+        ...         super(LeNet5, self).__init__()
+        ...         self.type = "fusion"
+        ...         self.num_class = num_class
+        ...
+        ...         # change `nn.Conv2d` to `nn.Conv2dBnAct`
+        ...         self.conv1 = nn.Conv2dBnAct(channel, 6, 5, pad_mode='valid', activation='relu')
+        ...         self.conv2 = nn.Conv2dBnAct(6, 16, 5, pad_mode='valid', activation='relu')
+        ...         # change `nn.Dense` to `nn.DenseBnAct`
+        ...         self.fc1 = nn.DenseBnAct(16 * 5 * 5, 120, activation='relu')
+        ...         self.fc2 = nn.DenseBnAct(120, 84, activation='relu')
+        ...         self.fc3 = nn.DenseBnAct(84, self.num_class)
+        ...
+        ...         self.max_pool2d = nn.MaxPool2d(kernel_size=2, stride=2)
+        ...         self.flatten = nn.Flatten()
+        ...
+        ...     def construct(self, x):
+        ...         x = self.conv1(x)
+        ...         x = self.max_pool2d(x)
+        ...         x = self.conv2(x)
+        ...         x = self.max_pool2d(x)
+        ...         x = self.flatten(x)
+        ...         x = self.fc1(x)
+        ...         x = self.fc2(x)
+        ...         x = self.fc3(x)
+        ...         return x
+        ...
+        >>> net = LeNet5()
         >>> quantizer = QuantizationAwareTraining(bn_fold=False, per_channel=[True, False], symmetric=[True, False])
         >>> net_qat = quantizer.quantize(net)
     """
-    __quant_op_name__ = ["TensorAdd", "Sub", "Mul", "RealDiv"]
+    __quant_op_name__ = ["Add", "Sub", "Mul", "RealDiv"]
 
     def __init__(self,
                  bn_fold=True,
@@ -182,7 +183,8 @@ class QuantizationAwareTraining(Quantizer):
                  per_channel=(False, False),
                  symmetric=(False, False),
                  narrow_range=(False, False),
-                 optimize_option=OptimizeOption.QAT):
+                 optimize_option=OptimizeOption.QAT,
+                 one_conv_fold=True):
         """Init for QuantizationAwareTraining quantizer"""
         super(QuantizationAwareTraining, self).__init__(optimize_option=optimize_option)
         def convert2list(name, value):
@@ -210,6 +212,7 @@ class QuantizationAwareTraining(Quantizer):
         self.act_symmetric = Validator.check_bool(symmetric[-1], "symmetric")
         self.weight_range = Validator.check_bool(narrow_range[0], "narrow range")
         self.act_range = Validator.check_bool(narrow_range[-1], "narrow range")
+        self.one_conv_fold = Validator.check_bool(one_conv_fold, "one conv fold")
         self._convert_method_map = {nn.Conv2dBnAct: self._convert_conv,
                                     nn.DenseBnAct: self._convert_dense}
         self.quant_config = create_quant_config(quant_delay=quant_delay,
@@ -300,22 +303,39 @@ class QuantizationAwareTraining(Quantizer):
         if subcell.has_bn:
             if self.bn_fold:
                 bn_inner = subcell.batchnorm
-                conv_inner = quant.Conv2dBnFoldQuant(conv_inner.in_channels,
-                                                     conv_inner.out_channels,
-                                                     kernel_size=conv_inner.kernel_size,
-                                                     stride=conv_inner.stride,
-                                                     pad_mode=conv_inner.pad_mode,
-                                                     padding=conv_inner.padding,
-                                                     dilation=conv_inner.dilation,
-                                                     group=conv_inner.group,
-                                                     eps=bn_inner.eps,
-                                                     momentum=bn_inner.momentum,
-                                                     has_bias=conv_inner.has_bias,
-                                                     bias_init=conv_inner.bias_init,
-                                                     freeze_bn=self.freeze_bn,
-                                                     quant_config=self.quant_config,
-                                                     quant_dtype=self.weight_dtype,
-                                                     fake=True)
+                if self.one_conv_fold:
+                    conv_inner = quant.Conv2dBnFoldQuantOneConv(conv_inner.in_channels,
+                                                                conv_inner.out_channels,
+                                                                kernel_size=conv_inner.kernel_size,
+                                                                stride=conv_inner.stride,
+                                                                pad_mode=conv_inner.pad_mode,
+                                                                padding=conv_inner.padding,
+                                                                dilation=conv_inner.dilation,
+                                                                group=conv_inner.group,
+                                                                eps=bn_inner.eps,
+                                                                momentum=bn_inner.momentum,
+                                                                has_bias=conv_inner.has_bias,
+                                                                bias_init=conv_inner.bias_init,
+                                                                quant_config=self.quant_config,
+                                                                quant_dtype=self.weight_dtype,
+                                                                fake=True)
+                else:
+                    conv_inner = quant.Conv2dBnFoldQuant(conv_inner.in_channels,
+                                                         conv_inner.out_channels,
+                                                         kernel_size=conv_inner.kernel_size,
+                                                         stride=conv_inner.stride,
+                                                         pad_mode=conv_inner.pad_mode,
+                                                         padding=conv_inner.padding,
+                                                         dilation=conv_inner.dilation,
+                                                         group=conv_inner.group,
+                                                         eps=bn_inner.eps,
+                                                         momentum=bn_inner.momentum,
+                                                         has_bias=conv_inner.has_bias,
+                                                         bias_init=conv_inner.bias_init,
+                                                         freeze_bn=self.freeze_bn,
+                                                         quant_config=self.quant_config,
+                                                         quant_dtype=self.weight_dtype,
+                                                         fake=True)
                 # change original network BatchNormal OP parameters to quant network
                 conv_inner.gamma = subcell.batchnorm.gamma
                 conv_inner.beta = subcell.batchnorm.beta

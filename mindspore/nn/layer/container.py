@@ -1,4 +1,4 @@
-# Copyright 2020 Huawei Technologies Co., Ltd
+# Copyright 2020-2021 Huawei Technologies Co., Ltd
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -42,9 +42,9 @@ class _CellListBase():
     The sequential cell may be iterated using the construct method using for-in statement.
     But there are some scenarios that the construct method built-in does not fit.
     For convenience, we provide an interface that indicates the sequential
-    cell may be interpretated as list of cells, so it can be accessed using
+    cell may be interpreted as list of cells, so it can be accessed using
     iterator or subscript when a sequential cell instantiate is accessed
-    by iterator or subscript , it will be interpretated as a list of cells.
+    by iterator or subscript , it will be interpreted as a list of cells.
     """
     def __init__(self):
         self.__cell_as_list__ = True
@@ -71,27 +71,29 @@ class SequentialCell(Cell):
     Args:
         args (list, OrderedDict): List of subclass of Cell.
 
-    Raises:
-        TypeError: If the type of the argument is not list or OrderedDict.
-
     Inputs:
         - **input** (Tensor) - Tensor with shape according to the first Cell in the sequence.
 
     Outputs:
         Tensor, the output Tensor with shape depending on the input and defined sequence of Cells.
 
+    Raises:
+        TypeError: If the type of the `args` is not list or OrderedDict.
+
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
-        >>> conv = nn.Conv2d(3, 2, 3, pad_mode='valid')
-        >>> bn = nn.BatchNorm2d(2)
+        >>> conv = nn.Conv2d(3, 2, 3, pad_mode='valid', weight_init="ones")
         >>> relu = nn.ReLU()
-        >>> seq = nn.SequentialCell([conv, bn, relu])
-        >>>
-        >>> x = Tensor(np.random.random((1, 3, 4, 4)), dtype=mindspore.float32)
-        >>> seq(x)
-        [[[[0.02531557 0.        ]
-           [0.04933941 0.04880078]]
-          [[0.         0.        ]
-           [0.         0.        ]]]]
+        >>> seq = nn.SequentialCell([conv, relu])
+        >>> x = Tensor(np.ones([1, 3, 4, 4]), dtype=mindspore.float32)
+        >>> output = seq(x)
+        >>> print(output)
+        [[[[27. 27.]
+           [27. 27.]]
+          [[27. 27.]
+           [27. 27.]]]]
     """
     def __init__(self, *args):
         super(SequentialCell, self).__init__()
@@ -149,22 +151,22 @@ class SequentialCell(Cell):
         """Appends a given cell to the end of the list.
 
         Examples:
-            >>> conv = nn.Conv2d(3, 2, 3, pad_mode='valid')
+            >>> conv = nn.Conv2d(3, 2, 3, pad_mode='valid', weight_init="ones")
             >>> bn = nn.BatchNorm2d(2)
             >>> relu = nn.ReLU()
             >>> seq = nn.SequentialCell([conv, bn])
             >>> seq.append(relu)
             >>> x = Tensor(np.ones([1, 3, 4, 4]), dtype=mindspore.float32)
-            >>> seq(x)
-            [[[[0.12445523 0.12445523]
-               [0.12445523 0.12445523]]
-              [[0.         0.        ]
-               [0.         0.        ]]]]
+            >>> output = seq(x)
+            >>> print(output)
+            [[[[26.999863 26.999863]
+               [26.999863 26.999863]]
+              [[26.999863 26.999863]
+               [26.999863 26.999863]]]]
         """
         if _valid_cell(cell):
             self._cells[str(len(self))] = cell
         self.cell_list = list(self._cells.values())
-        return self
 
     def construct(self, input_data):
         for cell in self.cell_list:
@@ -183,6 +185,9 @@ class CellList(_CellListBase, Cell):
     Args:
         args (list, optional): List of subclass of Cell.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> conv = nn.Conv2d(100, 20, 3)
         >>> bn = nn.BatchNorm2d(20)
@@ -190,12 +195,12 @@ class CellList(_CellListBase, Cell):
         >>> cell_ls = nn.CellList([bn])
         >>> cell_ls.insert(0, conv)
         >>> cell_ls.append(relu)
-        >>> x = Tensor(np.random.random((1, 3, 4, 4)), dtype=mindspore.float32)
-        >>> # not same as nn.SequentialCell, `cell_ls(x)` is not correct
         >>> cell_ls
-        CellList< (0): Conv2d<input_channels=100, ..., bias_init=None>
-                  (1): BatchNorm2d<num_features=20, ..., moving_variance=Parameter (name=variance)>
-                  (2): ReLU<> >
+        CellList<
+          (0): Conv2d<input_channels=100, ..., bias_init=None>
+          (1): BatchNorm2d<num_features=20, ..., moving_variance=Parameter (name=variance)>
+          (2): ReLU<>
+          >
     """
     def __init__(self, *args):
         _CellListBase.__init__(self)
@@ -271,7 +276,6 @@ class CellList(_CellListBase, Cell):
         """Appends a given cell to the end of the list."""
         if _valid_cell(cell):
             self._cells[str(len(self))] = cell
-        return self
 
     def set_grad(self, flag=True):
         self.requires_grad = flag

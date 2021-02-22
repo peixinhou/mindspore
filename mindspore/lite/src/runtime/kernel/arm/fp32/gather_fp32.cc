@@ -13,14 +13,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 #include "src/runtime/kernel/arm/fp32/gather_fp32.h"
-#include <vector>
-#include "nnacl/gather_parameter.h"
-#include "nnacl/fp32/gather.h"
+#include <limits>
 #include "schema/model_generated.h"
 #include "src/kernel_registry.h"
 #include "src/runtime/runtime_api.h"
-#include "include/errorcode.h"
 
 using mindspore::kernel::KERNEL_ARCH::kCPU;
 using mindspore::lite::KernelRegistrar;
@@ -29,7 +27,6 @@ using mindspore::lite::RET_OK;
 using mindspore::schema::PrimitiveType_Gather;
 
 namespace mindspore::kernel {
-
 int GatherCPUKernel::Init() {
   if (!InferShapeDone()) {
     return RET_OK;
@@ -43,12 +40,6 @@ int GatherCPUKernel::DoGather(int task_id) {
   auto input_tensor = in_tensors_.at(0);
   auto indices_tensor = in_tensors_.at(1);
   auto out_tensor = out_tensors_.at(0);
-
-  auto input_ptr = reinterpret_cast<float *>(input_tensor->MutableData());
-  auto output_ptr = reinterpret_cast<float *>(out_tensor->MutableData());
-
-  auto input_int32 = reinterpret_cast<int32_t *>(input_tensor->MutableData());
-  auto output_int32 = reinterpret_cast<int32_t *>(out_tensor->MutableData());
 
   auto in_shape = input_tensor->shape();
   int in_rank = in_shape.size();
@@ -66,18 +57,20 @@ int GatherCPUKernel::DoGather(int task_id) {
   }
   int stride = UP_DIV(outer_size, op_parameter_->thread_num_);
   int count = MSMIN(stride, outer_size - stride * task_id);
+  if (count <= 0) {
+    return RET_OK;
+  }
   auto thread_stride = stride * task_id;
 
-  int error_code;
-  if (input_tensor->data_type() == kNumberTypeInt32) {
-    input_int32 += thread_stride * limit;
-    output_int32 += thread_stride * indices_element_size;
-    error_code = GatherInt32(input_int32, count, inner_size, limit, indices_data_, indices_element_size, output_int32);
-  } else {
-    input_ptr += thread_stride * limit;
-    output_ptr += thread_stride * indices_element_size;
-    error_code = Gather(input_ptr, count, inner_size, limit, indices_data_, indices_element_size, output_ptr);
-  }
+  int8_t *int8_in = reinterpret_cast<int8_t *>(input_tensor->data_c());
+  int8_t *int8_out = reinterpret_cast<int8_t *>(out_tensor->data_c());
+
+  int data_size = lite::DataTypeSize(input_tensor->data_type());
+  int8_in += thread_stride * limit * data_size;
+  int8_out += thread_stride * indices_element_size * data_size;
+
+  int error_code = Gather(int8_in, count, inner_size, limit, indices_data_, indices_element_size, int8_out, data_size);
+
   return error_code;
 }
 
@@ -137,30 +130,6 @@ int GatherCPUKernel::AssignIndicesData(bool isIndicesInt32, int indices_num, lit
   return RET_OK;
 }
 
-kernel::LiteKernel *CpuGatherFp32KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                               const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter,
-                                               const lite::InnerContext *ctx, const kernel::KernelKey &desc,
-                                               const mindspore::lite::PrimitiveC *primitive) {
-  MS_ASSERT(desc.type == schema::PrimitiveType_Gather);
-  if (opParameter == nullptr) {
-    MS_LOG(ERROR) << "input parameter is nullptr!";
-    return nullptr;
-  }
-  auto *kernel = new (std::nothrow) GatherCPUKernel(opParameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    free(opParameter);
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
-}
-
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Gather, CpuGatherFp32KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeInt32, PrimitiveType_Gather, CpuGatherFp32KernelCreator)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Gather, LiteKernelCreator<GatherCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt32, PrimitiveType_Gather, LiteKernelCreator<GatherCPUKernel>)
 }  // namespace mindspore::kernel

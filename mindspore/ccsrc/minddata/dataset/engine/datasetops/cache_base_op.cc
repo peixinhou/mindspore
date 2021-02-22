@@ -1,5 +1,5 @@
 /**
- * Copyright 2020 Huawei Technologies Co., Ltd
+ * Copyright 2020-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -74,7 +74,7 @@ Status CacheBase::FetchSamplesToWorkers() {
   // Kick off several threads which will prefetch prefetch_size_ rows in advance. The rows_per_buffers_
   // is too small (1 by default) and won't help performance.
   RETURN_IF_NOT_OK(
-    tree_->LaunchWorkers(num_prefetchers_, std::bind(&CacheBase::Prefetcher, this, std::placeholders::_1)));
+    tree_->LaunchWorkers(num_prefetchers_, std::bind(&CacheBase::Prefetcher, this, std::placeholders::_1), Name()));
   auto send_to_que = [](QueueList<std::unique_ptr<IOBlock>> &qList, int32_t worker_id,
                         std::vector<row_id_type> &keys) -> Status {
     auto blk = std::make_unique<IOBlock>(IOBlock(keys, IOBlock::kDeIoBlockNone));
@@ -84,9 +84,9 @@ Status CacheBase::FetchSamplesToWorkers() {
   // Instead of sending sampler id to WorkerEntry, we send them to the Prefetcher which will redirect them
   // to the WorkerEntry.
   do {
-    if (AllowCacheMiss() && wait_cnt > 0) {
-      MS_LOG(WARNING) << "Epoch: " << wait_cnt << " Cache Miss : " << num_cache_miss_
-                      << " Total number of rows : " << row_cnt_;
+    if (AllowCacheMiss() && wait_cnt > 0 && wait_cnt % op_num_repeats_per_epoch() == 0) {
+      MS_LOG(INFO) << "Epoch: " << op_current_epochs_ << " Cache Miss : " << num_cache_miss_
+                   << " Total number of rows : " << row_cnt_;
     }
     num_cache_miss_ = 0;
     row_cnt_ = 0;
@@ -167,8 +167,8 @@ Status CacheBase::FetchSamplesToWorkers() {
   }
   // Dump the last epoch result (approximately) without waiting for the worker threads to come back.
   if (AllowCacheMiss()) {
-    MS_LOG(WARNING) << "Epoch: " << wait_cnt << " Cache Miss : " << num_cache_miss_
-                    << " Total number of rows : " << row_cnt_;
+    MS_LOG(INFO) << "Epoch: " << wait_cnt / op_num_repeats_per_epoch() << " Cache Miss : " << num_cache_miss_
+                 << " Total number of rows : " << row_cnt_;
   }
   return Status::OK();
 }
@@ -233,7 +233,7 @@ Status CacheBase::UpdateColumnMapFromCache() {
   // Get the schema from the server. It may not be there yet. So tolerate the error.
   if (column_name_id_map_.empty()) {
     rc = cache_client_->FetchSchema(&column_name_id_map_);
-    if (rc == Status(StatusCode::kFileNotExist)) {
+    if (rc == Status(StatusCode::kMDFileNotExist)) {
       MS_LOG(DEBUG) << "Schema not in the server yet.";
       rc = Status::OK();
     }
@@ -304,13 +304,14 @@ Status CacheBase::Prefetcher(int32_t worker_id) {
       int32_t retry_count = 0;
       do {
         rc = PrefetchRows(prefetch_keys, &cache_miss);
-        if (rc.IsNetWorkError() && retry_count < max_retries) {
+        if (rc == StatusCode::kMDNetWorkError && retry_count < max_retries) {
           // If we get some network error, we will attempt some retries
           retry_count++;
-        } else if (rc.IsError()) {
+        } else if (rc.IsError() && rc.StatusCode() != StatusCode::kMDInterrupted) {
+          MS_LOG(WARNING) << rc.ToString();
           return rc;
         }
-      } while (rc.IsNetWorkError());
+      } while (rc == StatusCode::kMDNetWorkError);
       // In case any thread is waiting for the rows to come back and blocked on a semaphore,
       // we will put an empty row in the local cache.
       if (rc.IsError() && AllowCacheMiss()) {

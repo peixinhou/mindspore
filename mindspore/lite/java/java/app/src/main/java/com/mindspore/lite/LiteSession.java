@@ -59,19 +59,19 @@ public class LiteSession {
     public List<MSTensor> getInputs() {
         List<Long> ret = this.getInputs(this.sessionPtr);
         ArrayList<MSTensor> tensors = new ArrayList<MSTensor>();
-        for (Long ms_tensor_addr : ret) {
-            MSTensor msTensor = new MSTensor(ms_tensor_addr);
+        for (Long msTensorAddr : ret) {
+            MSTensor msTensor = new MSTensor(msTensorAddr);
             tensors.add(msTensor);
         }
         return tensors;
     }
 
     public MSTensor getInputsByTensorName(String tensorName) {
-        Long tensor_addr = this.getInputsByTensorName(this.sessionPtr, tensorName);
-        if(tensor_addr == null){
+        Long tensorAddr = this.getInputsByTensorName(this.sessionPtr, tensorName);
+        if (tensorAddr == null) {
             return null;
         }
-        MSTensor msTensor = new MSTensor(tensor_addr);
+        MSTensor msTensor = new MSTensor(tensorAddr);
         return msTensor;
     }
 
@@ -102,11 +102,11 @@ public class LiteSession {
     }
 
     public MSTensor getOutputByTensorName(String tensorName) {
-        Long tensor_addr = getOutputByTensorName(this.sessionPtr, tensorName);
-        if(tensor_addr == null){
+        Long tensorAddr = getOutputByTensorName(this.sessionPtr, tensorName);
+        if (tensorAddr == null) {
             return null;
         }
-        return new MSTensor(tensor_addr);
+        return new MSTensor(tensorAddr);
     }
 
     public void free() {
@@ -115,11 +115,11 @@ public class LiteSession {
     }
 
     public boolean resize(List<MSTensor> inputs, int[][] dims) {
-        long[] inputs_array = new long[inputs.size()];
+        long[] inputsArray = new long[inputs.size()];
         for (int i = 0; i < inputs.size(); i++) {
-            inputs_array[i] = inputs.get(i).getMSTensorPtr();
+            inputsArray[i] = inputs.get(i).getMSTensorPtr();
         }
-        return this.resize(this.sessionPtr, inputs_array, dims);
+        return this.resize(this.sessionPtr, inputsArray, dims);
     }
 
     private native long createSession(long msConfigPtr);
@@ -132,7 +132,7 @@ public class LiteSession {
 
     private native List<Long> getInputs(long sessionPtr);
 
-    private native Long getInputsByTensorName(long sessionPtr, String tensorName);
+    private native long getInputsByTensorName(long sessionPtr, String tensorName);
 
     private native List<Long> getOutputsByNodeName(long sessionPtr, String nodeName);
 
@@ -140,7 +140,7 @@ public class LiteSession {
 
     private native List<String> getOutputTensorNames(long sessionPtr);
 
-    private native Long getOutputByTensorName(long sessionPtr, String tensorName);
+    private native long getOutputByTensorName(long sessionPtr, String tensorName);
 
     private native void free(long sessionPtr);
 

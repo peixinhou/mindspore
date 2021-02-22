@@ -54,7 +54,7 @@ Status UnsortedSegmentOpInfo::GetAttrs() {
     MS_LOG(ERROR) << name_ << ": input can not be a scalar!";
     return FAILED;
   }
-  int num_segments = GetValue<int>(input_value_.at(2));
+  auto num_segments = GetValue<int64_t>(input_value_.at(2));
   if (num_segments < 0) {
     MS_LOG(ERROR) << name_ << ": the number of segments should be non negative value.";
     return FAILED;
@@ -87,7 +87,7 @@ Status UnsortedSegmentOpInfo::CheckStrategy(const StrategyPtr &strategy) {
   Shape input_b_shape = inputs_shape_.at(1);
   // The size of the input b must be equal or smaller than input a
   for (size_t i = 0; i < input_b_shape.size(); ++i) {
-    if ((sub_a_strategy[i] != sub_b_strategy[i]) && (input_a_shape[i] != input_b_shape[i])) {
+    if ((sub_a_strategy[i] != sub_b_strategy[i]) || (input_a_shape[i] != input_b_shape[i])) {
       MS_LOG(ERROR) << name_
                     << " : Invalid strategy. The shape and the strategy of the input0 and input1 "
                        "should be same before the front size of the input[1]";
@@ -100,6 +100,35 @@ Status UnsortedSegmentOpInfo::CheckStrategy(const StrategyPtr &strategy) {
 Status UnsortedSegmentOpInfo::InferDevMatrixShape() {
   Strategys stra = strategy_->GetInputDim();
   dev_matrix_shape_ = stra.at(0);
+  return SUCCESS;
+}
+
+Status UnsortedSegmentOpInfo::InferMirrorOps() {
+  mirror_ops_.clear();
+
+  // Only the first input could be parameter.
+  Shape tensor_map = inputs_tensor_map_[0];
+  std::vector<Group> group;
+  if (CreateGroupByTensorMap(tensor_map, &group) != SUCCESS) {
+    MS_LOG(ERROR) << name_ << " : Create group failed.";
+    return FAILED;
+  }
+
+  OperatorVector mirror_op;
+  OperatorVector op_for_value;
+  OperatorVector op_for_value2;
+  if (group.empty()) {
+    MS_LOG(INFO) << name_ << " : The mirror ops is empty.";
+    return SUCCESS;
+  } else {
+    mirror_op = CreateMirrorOps(group[0].name(), group[0].GetDevNum());
+    mirror_ops_.push_back(mirror_op);
+    mirror_ops_.push_back(op_for_value);
+    mirror_ops_.push_back(op_for_value2);
+    std::string group_name = group[0].name();
+    MS_LOG(INFO) << name_ << " : Create the mirror ops success, the group name is " << group_name;
+  }
+
   return SUCCESS;
 }
 
@@ -180,7 +209,7 @@ Status UnsortedSegmentOpInfo::InitForCostModel(const StrategyPtr &strategy) {
 }
 
 // Set the default strategy
-Status UnsortedSegmentOpInfo::GenerateStrategies(int32_t stage_id) {
+Status UnsortedSegmentOpInfo::GenerateStrategies(int64_t stage_id) {
   Shape input0_split(inputs_shape_[0].size(), 1);
   Shapes splittable_inputs = {input0_split};
 
@@ -221,9 +250,6 @@ Status UnsortedSegmentOpInfo::InferForwardCommunication() {
   std::vector<Group> group_list;
   Shape tmp_group_tensor_map = outputs_tensor_map_.at(0);
   if (repeated_calc_num_ > 1) {
-    for (size_t i = 1; i < tmp_group_tensor_map.size(); ++i) {
-      tmp_group_tensor_map[i] += 1;
-    }
     tmp_group_tensor_map.push_back(0);
   }
   if (CreateGroupByTensorMap(tmp_group_tensor_map, &group_list) != SUCCESS) {
@@ -251,20 +277,17 @@ std::shared_ptr<Strategys> UnsortedSegmentOpInfo::GenerateBatchStrategies() {
     MS_LOG(EXCEPTION) << name_ << ": inputs shape size must be " << UNSORTEDSEGMENTOP_INPUTS_SIZE << ", but is "
                       << inputs_shape_.size();
   }
-  CheckGlobalDeviceManager();
-  size_t dev_num = g_device_manager->GetDeviceListByStageId(0).size();
   if (GetAttrs() != SUCCESS) {
     MS_LOG(EXCEPTION) << "GetAttrs failed!";
   }
 
-  Dimensions strategy_a;
-  Dimensions strategy_b;
-  strategy_a.push_back(SizeToInt(dev_num));
+  Dimensions strategy_a, strategy_b;
+  strategy_a.push_back(stage_device_size_);
   for (size_t i = 1; i < inputs_shape_[0].size(); i++) {
     strategy_a.push_back(1);
   }
 
-  strategy_b.push_back(SizeToInt(dev_num));
+  strategy_b.push_back(stage_device_size_);
   for (size_t i = 1; i < inputs_shape_[1].size(); i++) {
     strategy_b.push_back(1);
   }
@@ -278,7 +301,7 @@ std::shared_ptr<Strategys> UnsortedSegmentOpInfo::GenerateBatchStrategies() {
 ReplaceGraphPtr UnsortedSegmentMinInfo::replace_graph(const CNodePtr &cnode) {
   auto input_id_strategy = strategy_->GetInputDim().at(1);
   // 1. the two input shapes are same, and the strategy is not all ones
-  if (std::any_of(input_id_strategy.begin(), input_id_strategy.end(), [](const int32_t &shard) { return shard > 1; })) {
+  if (std::any_of(input_id_strategy.begin(), input_id_strategy.end(), [](const int64_t &shard) { return shard > 1; })) {
     if (ComputeReplaceGraph(cnode) != SUCCESS) {
       MS_LOG(EXCEPTION) << name_ << ": ComputeReplaceGraph failed.";
     }
@@ -293,17 +316,51 @@ Status UnsortedSegmentMinInfo::ComputeReplaceGraph(const CNodePtr &cnode) {
     return FAILED;
   }
   // Get the attributes of the UnsortedSegmentMin
-  auto num_segments = GetValue<int>(input_value_.at(2));
+  auto num_segments = GetValue<int64_t>(input_value_.at(2));
   // Step1: Output branch
   auto segment_min = gen_g.PushBack({gen_g.NewOpInst(UNSORTED_SEGMENT_MIN), gen_g.virtual_input_node(),
-                                     gen_g.virtual_input_node(), CreatInt32Imm(num_segments)});
-  auto expandim_output = gen_g.PushBack({gen_g.NewOpInst(EXPAND_DIMS), segment_min, CreatInt32Imm(0)});
+                                     gen_g.virtual_input_node(), CreatInt64Imm(num_segments)});
+  auto expandim_output = gen_g.PushBack({gen_g.NewOpInst(EXPAND_DIMS), segment_min, CreatInt64Imm(0)});
   auto all_gather_output = gen_g.PushBack({gen_g.NewOpInst(ALL_GATHER), expandim_output});
-  auto final_output = gen_g.PushBack({gen_g.NewOpInst(REDUCE_MIN), all_gather_output, CreatInt32Imm(0)});
+  auto final_output = gen_g.PushBack({gen_g.NewOpInst(REDUCE_MIN), all_gather_output, CreatInt64Imm(0)});
 
-  std::vector<std::pair<AnfNodePtr, int>> input_nodes = {std::make_pair(segment_min, 1),
-                                                         std::make_pair(segment_min, 2)};
-  replace_graph_ = std::make_shared<std::pair<std::vector<std::pair<AnfNodePtr, int>>, AnfNodePtr>>(
+  std::vector<std::pair<AnfNodePtr, int64_t>> input_nodes = {std::make_pair(segment_min, 1),
+                                                             std::make_pair(segment_min, 2)};
+  replace_graph_ = std::make_shared<std::pair<std::vector<std::pair<AnfNodePtr, int64_t>>, AnfNodePtr>>(
+    std::make_pair(input_nodes, final_output));
+
+  return SUCCESS;
+}
+// The UnsortedSegmentMaxInfo is almost same with UnsortedSegmentMinInfo
+// Except the reduceMin op in the ComputeReplaceGraph is replaced with reduceMax op
+ReplaceGraphPtr UnsortedSegmentMaxInfo::replace_graph(const CNodePtr &cnode) {
+  auto input_id_strategy = strategy_->GetInputDim().at(1);
+  // 1. the two input shapes are same, and the strategy is not all ones
+  if (std::any_of(input_id_strategy.begin(), input_id_strategy.end(), [](const int64_t &shard) { return shard > 1; })) {
+    if (ComputeReplaceGraph(cnode) != SUCCESS) {
+      MS_LOG(EXCEPTION) << name_ << ": ComputeReplaceGraph failed.";
+    }
+  }
+  return replace_graph_;
+}
+
+Status UnsortedSegmentMaxInfo::ComputeReplaceGraph(const CNodePtr &cnode) {
+  GenerateGraph gen_g = GenerateGraph();
+  if (gen_g.Init(cnode) != SUCCESS) {
+    MS_LOG(ERROR) << "GenerateGraph Init failed";
+    return FAILED;
+  }
+  // Get the attributes of the UnsortedSegmentMax
+  auto num_segments = GetValue<int64_t>(input_value_.at(2));
+  auto segment_max = gen_g.PushBack({gen_g.NewOpInst(UNSORTED_SEGMENT_MAX), gen_g.virtual_input_node(),
+                                     gen_g.virtual_input_node(), CreatInt64Imm(num_segments)});
+  auto expandim_output = gen_g.PushBack({gen_g.NewOpInst(EXPAND_DIMS), segment_max, CreatInt64Imm(0)});
+  auto all_gather_output = gen_g.PushBack({gen_g.NewOpInst(ALL_GATHER), expandim_output});
+  auto final_output = gen_g.PushBack({gen_g.NewOpInst(REDUCE_MAX), all_gather_output, CreatInt64Imm(0)});
+
+  std::vector<std::pair<AnfNodePtr, int64_t>> input_nodes = {std::make_pair(segment_max, 1),
+                                                             std::make_pair(segment_max, 2)};
+  replace_graph_ = std::make_shared<std::pair<std::vector<std::pair<AnfNodePtr, int64_t>>, AnfNodePtr>>(
     std::make_pair(input_nodes, final_output));
 
   return SUCCESS;

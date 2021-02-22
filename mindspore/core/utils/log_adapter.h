@@ -112,7 +112,7 @@ enum SubModuleId : int {
   SM_KERNEL,       // kernel
   SM_MD,           // MindData
   SM_ME,           // MindExpression
-  SM_ONNX,         // ONNX
+  SM_EXPRESS,      // EXPRESS_IR
   SM_OPTIMIZER,    // optimzer
   SM_PARALLEL,     // parallel
   SM_PARSER,       // parser
@@ -125,6 +125,7 @@ enum SubModuleId : int {
   SM_PROFILER,     // profiler
   SM_PS,           // Parameter Server
   SM_LITE,         // LITE
+  SM_HCCL_ADPT,    // Hccl Adapter
   NUM_SUBMODUES    // number of submodules
 };
 
@@ -178,7 +179,7 @@ class LogWriter {
                        excp_type) ^                                                                                    \
     mindspore::LogStream()
 
-#define IS_OUTPUT_ON(level) (level) >= mindspore::g_ms_submodule_log_levels[SUBMODULE_ID]
+#define IS_OUTPUT_ON(level) ((level) >= mindspore::g_ms_submodule_log_levels[SUBMODULE_ID])
 
 #define MS_LOG(level) MS_LOG_##level
 
@@ -196,6 +197,14 @@ class LogWriter {
     if ((ptr) == nullptr) {                                          \
       MS_LOG(EXCEPTION) << ": The pointer[" << #ptr << "] is null."; \
     }                                                                \
+  } while (0)
+
+#define MS_ERROR_IF_NULL(ptr)                                    \
+  do {                                                           \
+    if ((ptr) == nullptr) {                                      \
+      MS_LOG(ERROR) << ": The pointer[" << #ptr << "] is null."; \
+      return false;                                              \
+    }                                                            \
   } while (0)
 
 #ifdef DEBUG

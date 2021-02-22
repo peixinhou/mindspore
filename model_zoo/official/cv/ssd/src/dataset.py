@@ -35,13 +35,12 @@ def _rand(a=0., b=1.):
     return np.random.rand() * (b - a) + a
 
 
-def get_imageId_from_fileName(filename):
-    """Get imageID from fileName"""
-    try:
-        filename = os.path.splitext(filename)[0]
+def get_imageId_from_fileName(filename, id_iter):
+    """Get imageID from fileName if fileName is int, else return id_iter."""
+    filename = os.path.splitext(filename)[0]
+    if filename.isdigit():
         return int(filename)
-    except:
-        raise NotImplementedError('Filename %s is supposed to be an integer.' % (filename))
+    return id_iter
 
 
 def random_sample_crop(image, boxes):
@@ -105,6 +104,7 @@ def random_sample_crop(image, boxes):
 
 def preprocess_fn(img_id, image, box, is_training):
     """Preprocess function for dataset."""
+    cv2.setNumThreads(2)
 
     def _infer_data(image, input_shape):
         img_h, img_w, _ = image.shape
@@ -122,7 +122,7 @@ def preprocess_fn(img_id, image, box, is_training):
     def _data_aug(image, box, is_training, image_size=(300, 300)):
         """Data augmentation function."""
         ih, iw, _ = image.shape
-        w, h = image_size
+        h, w = image_size
 
         if not is_training:
             return _infer_data(image, image_size)
@@ -184,6 +184,7 @@ def create_voc_label(is_training):
     image_files_dict = {}
     image_anno_dict = {}
     images = []
+    id_iter = 0
     for anno_file in os.listdir(anno_dir):
         print(anno_file)
         if not anno_file.endswith('xml'):
@@ -191,7 +192,8 @@ def create_voc_label(is_training):
         tree = et.parse(os.path.join(anno_dir, anno_file))
         root_node = tree.getroot()
         file_name = root_node.find('filename').text
-        img_id = get_imageId_from_fileName(file_name)
+        img_id = get_imageId_from_fileName(file_name, id_iter)
+        id_iter += 1
         image_path = os.path.join(image_dir, file_name)
         print(image_path)
         if not os.path.isfile(image_path):
@@ -205,10 +207,10 @@ def create_voc_label(is_training):
                 print(f'Label "{cls_name}" not in "{config.classes}"')
                 continue
             bnd_box = obj.find('bndbox')
-            x_min = int(bnd_box.find('xmin').text) - 1
-            y_min = int(bnd_box.find('ymin').text) - 1
-            x_max = int(bnd_box.find('xmax').text) - 1
-            y_max = int(bnd_box.find('ymax').text) - 1
+            x_min = int(float(bnd_box.find('xmin').text)) - 1
+            y_min = int(float(bnd_box.find('ymin').text)) - 1
+            x_max = int(float(bnd_box.find('xmax').text)) - 1
+            y_max = int(float(bnd_box.find('ymax').text)) - 1
             labels.append([y_min, x_min, y_max, x_max, cls_map[cls_name]])
 
             if not is_training:
@@ -390,7 +392,7 @@ def data_to_mindrecord_byte_image(dataset="coco", is_training=True, prefix="ssd.
 
 def create_ssd_dataset(mindrecord_file, batch_size=32, repeat_num=10, device_num=1, rank=0,
                        is_training=True, num_parallel_workers=4, use_multiprocessing=True):
-    """Creatr SSD dataset with MindDataset."""
+    """Create SSD dataset with MindDataset."""
     ds = de.MindDataset(mindrecord_file, columns_list=["img_id", "image", "annotation"], num_shards=device_num,
                         shard_id=rank, num_parallel_workers=num_parallel_workers, shuffle=is_training)
     decode = C.Decode()

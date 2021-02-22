@@ -15,6 +15,7 @@
  */
 
 #include "src/ops/space_to_batch_nd.h"
+#include <limits>
 #include "src/common/common.h"
 
 #ifndef PRIMITIVE_WRITEABLE
@@ -25,9 +26,8 @@ namespace mindspore {
 namespace lite {
 namespace {
 constexpr int kSpaceToBatchNDOutputNum = 1;
-constexpr int kSpaceToBatchNDInputNum = 1;
-constexpr int kBlockSizesSize = 2;
-constexpr int kPaddingsSize = 4;
+constexpr int kSpaceToBatchNDOneInput = 1;
+constexpr int kSpaceToBatchNDThreeInput = 3;
 }  // namespace
 
 #ifdef PRIMITIVE_WRITEABLE
@@ -87,8 +87,92 @@ Registry SpaceToBatchNDRegistry(schema::PrimitiveType_SpaceToBatchND, SpaceToBat
 
 #endif  // PRIMITIVE_WRITEABLE
 
+int SpaceToBatchND::SetOutputShapeFromParam(const std::vector<lite::Tensor *> inputs,
+                                            std::vector<lite::Tensor *> outputs) {
+  auto input_shape = inputs[0]->shape();
+  if (input_shape.size() != kQuadrupleNum) {
+    MS_LOG(ERROR) << "input shape dimension size only support " << kQuadrupleNum << " now!";
+    return RET_ERROR;
+  }
+  auto block_shape = GetBlockShape();
+  auto padding = GetPaddings();
+  int padding_left = 0;
+  int padding_right = 0;
+  int block_w = 1;
+  if (block_shape.size() == 2) {
+    padding_left = padding.at(2);
+    padding_right = padding.at(3);
+    block_w = block_shape.at(1);
+  }
+  std::vector<int32_t> output_shape(input_shape.size());
+  if (block_shape.at(0) * block_w > std::numeric_limits<int>::max() / input_shape.at(NHWC_N)) {
+    MS_LOG(ERROR) << "The value of block_shape.at(0) * block_w is too big";
+    return RET_ERROR;
+  }
+  output_shape.at(NHWC_N) = input_shape.at(NHWC_N) * block_shape.at(0) * block_w;
+  if (padding.at(0) + padding.at(1) > std::numeric_limits<int>::max() - input_shape.at(NHWC_H)) {
+    MS_LOG(ERROR) << "The value of padding.at(0) + padding.at(1) is too big";
+    return RET_ERROR;
+  }
+  output_shape.at(NHWC_H) = (input_shape.at(NHWC_H) + padding.at(0) + padding.at(1)) / block_shape.at(0);
+  if (padding_left + padding_right > std::numeric_limits<int>::max() - input_shape.at(NHWC_W)) {
+    MS_LOG(ERROR) << "The value of padding_left + padding_right is too big";
+    return RET_ERROR;
+  }
+  output_shape.at(NHWC_W) = (input_shape.at(NHWC_W) + padding_left + padding_right) / block_w;
+  if (input_shape.size() > 3) {
+    output_shape.at(NHWC_C) = input_shape.at(NHWC_C);
+  }
+  outputs.at(0)->set_shape(output_shape);
+  return RET_OK;
+}
+
+int SpaceToBatchND::SetOutputShapeFromInput(const std::vector<lite::Tensor *> inputs,
+                                            std::vector<lite::Tensor *> outputs) {
+  auto input_shape = inputs[0]->shape();
+  if (input_shape.size() != kQuadrupleNum) {
+    MS_LOG(ERROR) << "input shape dimension size only support " << kQuadrupleNum << " now!";
+    return RET_ERROR;
+  }
+  MS_ASSERT(inputs[2]->ElementsNum() == 4);
+  auto block_shape_data = inputs[1]->data_c();
+  auto block_shape = static_cast<int *>(block_shape_data);
+  auto padding_data = inputs[2]->data_c();
+  auto padding = static_cast<int *>(padding_data);
+  int padding_left = 0;
+  int padding_right = 0;
+  int block_w = 1;
+  if (inputs[1]->ElementsNum() == 2) {
+    padding_left = padding[2];
+    padding_right = padding[3];
+    block_w = block_shape[1];
+  }
+  std::vector<int32_t> output_shape(input_shape.size());
+  if (block_shape[0] * block_w > std::numeric_limits<int>::max() / input_shape.at(NHWC_N)) {
+    MS_LOG(ERROR) << "The value of block_shape.at(0) * block_w is too big";
+    return RET_ERROR;
+  }
+  output_shape.at(NHWC_N) = input_shape.at(NHWC_N) * block_shape[0] * block_w;
+  if (padding[0] + padding[1] > std::numeric_limits<int>::max() - input_shape.at(NHWC_H)) {
+    MS_LOG(ERROR) << "The value of padding.at(0) + padding.at(1) is too big";
+    return RET_ERROR;
+  }
+  output_shape.at(NHWC_H) = (input_shape.at(NHWC_H) + padding[0] + padding[1]) / block_shape[0];
+  if (padding_left + padding_right > std::numeric_limits<int>::max() - input_shape.at(NHWC_W)) {
+    MS_LOG(ERROR) << "The value of padding_left + padding_right is too big";
+    return RET_ERROR;
+  }
+  output_shape.at(NHWC_W) = (input_shape.at(NHWC_W) + padding_left + padding_right) / block_w;
+  if (input_shape.size() > 3) {
+    output_shape.at(NHWC_C) = input_shape.at(NHWC_C);
+  }
+  outputs.at(0)->set_shape(output_shape);
+  return RET_OK;
+}
+
 int SpaceToBatchND::InferShape(std::vector<lite::Tensor *> inputs, std::vector<lite::Tensor *> outputs) {
-  if (outputs.size() != kSpaceToBatchNDOutputNum || inputs.size() != kSpaceToBatchNDInputNum) {
+  if (outputs.size() != kSpaceToBatchNDOutputNum ||
+      (inputs.size() != kSpaceToBatchNDOneInput && inputs.size() != kSpaceToBatchNDThreeInput)) {
     MS_LOG(ERROR) << "Invalid output/input size! output size: " << outputs.size() << ",input size: " << inputs.size();
     return 1;
   }
@@ -101,30 +185,28 @@ int SpaceToBatchND::InferShape(std::vector<lite::Tensor *> inputs, std::vector<l
   outputs.at(0)->set_data_type(input->data_type());
   outputs.at(0)->set_format(input->format());
   if (!infer_flag()) {
-    return RET_OK;
-  }
-  auto input_shape = input->shape();
-  if (input_shape.size() != kDimension_4d) {
-    MS_LOG(ERROR) << "input shape dimension size only support " << kDimension_4d << " now!";
-    return RET_ERROR;
-  }
-  auto block_shape = GetBlockShape();
-  if (block_shape.size() != kBlockSizesSize) {
-    MS_LOG(ERROR) << "blockShape size != " << kBlockSizesSize;
-    return RET_ERROR;
-  }
-  auto pedding = GetPaddings();
-  if (pedding.size() != kPaddingsSize) {
-    MS_LOG(ERROR) << "pedding size should be " << kPaddingsSize;
-    return RET_ERROR;
+    return RET_INFER_INVALID;
   }
 
-  std::vector<int32_t> output_shape(input_shape.size());
-  output_shape.at(NHWC_N) = input_shape.at(NHWC_N) * block_shape.at(0) * block_shape.at(1);
-  output_shape.at(NHWC_H) = (input_shape.at(NHWC_H) + pedding.at(0) + pedding.at(1)) / block_shape.at(0);
-  output_shape.at(NHWC_W) = (input_shape.at(NHWC_W) + pedding.at(2) + pedding.at(3)) / block_shape.at(1);
-  output_shape.at(NHWC_C) = input_shape.at(NHWC_C);
-  outputs.at(0)->set_shape(output_shape);
+  if (inputs.size() == kSpaceToBatchNDOneInput) {
+    auto ret = SetOutputShapeFromParam(inputs, outputs);
+    if (ret != RET_OK) {
+      MS_LOG(ERROR) << "SetOutputShapeFromParam failed";
+      return ret;
+    }
+  }
+  if (inputs.size() == kSpaceToBatchNDThreeInput) {
+    if (inputs[0]->data_c() == nullptr) {
+      return RET_INFER_INVALID;
+    }
+    MS_ASSERT(inputs[1]->data_c() != nullptr);
+    MS_ASSERT(inputs[2]->data_c() != nullptr);
+    auto ret = SetOutputShapeFromInput(inputs, outputs);
+    if (ret != RET_OK) {
+      MS_LOG(ERROR) << "SetOutputShapeFromInput failed";
+      return ret;
+    }
+  }
   return RET_OK;
 }
 }  // namespace lite

@@ -15,6 +15,7 @@
  */
 
 #include "src/ops/space_to_depth.h"
+#include <limits>
 #include "src/common/common.h"
 
 #ifndef PRIMITIVE_WRITEABLE
@@ -74,11 +75,11 @@ int SpaceToDepth::InferShape(std::vector<lite::Tensor *> inputs, std::vector<lit
   outputs.at(0)->set_format(input->format());
   outputs.at(0)->set_data_type(input->data_type());
   if (!infer_flag()) {
-    return RET_OK;
+    return RET_INFER_INVALID;
   }
   auto input_shape = input->shape();
-  if (input_shape.size() != kDimension_4d) {
-    MS_LOG(ERROR) << "input shape dimension size should == " << kDimension_4d;
+  if (input_shape.size() != kQuadrupleNum) {
+    MS_LOG(ERROR) << "input shape dimension size should == " << kQuadrupleNum;
     return RET_ERROR;
   }
 

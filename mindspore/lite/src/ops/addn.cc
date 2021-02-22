@@ -23,10 +23,6 @@
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
-int AddN::GetN() const { return this->primitive_->value.AsAddN()->N; }
-
-void AddN::SetN(int n) { this->primitive_->value.AsAddN()->N = n; }
-
 int AddN::UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &inputs) {
   if (this->primitive_ == nullptr) {
     this->primitive_ = new (std::nothrow) schema::PrimitiveT;
@@ -54,17 +50,11 @@ int AddN::UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &input
 int AddN::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::FlatBufferBuilder *fbb) {
   MS_ASSERT(nullptr != primitive);
   MS_ASSERT(nullptr != fbb);
-  auto attr = primitive->value_as_AddN();
-  if (attr == nullptr) {
-    MS_LOG(ERROR) << "value_as_AddN return nullptr";
-    return RET_ERROR;
-  }
-  auto val_offset = schema::CreateAddN(*fbb, attr->N());
+  auto val_offset = schema::CreateAddN(*fbb, 0);
   auto prim_offset = schema::CreatePrimitive(*fbb, schema::PrimitiveType_AddN, val_offset.o);
   fbb->Finish(prim_offset);
   return RET_OK;
 }
-int AddN::GetN() const { return this->primitive_->value_as_AddN()->N(); }
 
 PrimitiveC *AddNCreator(const schema::Primitive *primitive) { return PrimitiveC::NewPrimitiveC<AddN>(primitive); }
 Registry AddNRegistry(schema::PrimitiveType_AddN, AddNCreator);
@@ -86,13 +76,26 @@ int AddN::InferShape(std::vector<Tensor *> inputs, std::vector<Tensor *> outputs
   output->set_format(input->format());
   output->set_data_type(input->data_type());
   if (!infer_flag()) {
-    return RET_OK;
+    return RET_INFER_INVALID;
   }
-  output->set_shape(input->shape());
+
+  size_t max_dims = inputs.at(0)->shape().size();
+  size_t max_dims_idx = 0;
+
+  // determine max_dims
+  for (size_t i = 1; i < inputs.size(); ++i) {
+    if (inputs.at(i)->shape().size() > max_dims) {
+      max_dims = inputs.at(i)->shape().size();
+      max_dims_idx = i;
+    }
+  }
+
+  output->set_shape(inputs.at(max_dims_idx)->shape());
 
   // make sure all elements have the same size or 1 (broadcasting) in all dimensions
   for (size_t i = 1; i < inputs.size(); ++i) {
-    if (inputs.at(i)->shape().size() != inputs.at(0)->shape().size()) {
+    if ((inputs.at(i)->shape().size() != max_dims) &&
+        (inputs.at(i)->ElementsNum() != inputs.at(max_dims_idx)->ElementsNum())) {
       MS_LOG(ERROR) << "AddN inputs shape is not equal!";
       return RET_INPUT_TENSOR_ERROR;
     }
@@ -103,16 +106,12 @@ int AddN::InferShape(std::vector<Tensor *> inputs, std::vector<Tensor *> outputs
   }
 
   for (size_t d = 0; d < input->shape().size(); ++d) {
-    int max_dim = input->shape().at(d);
-    for (size_t i = 1; i < inputs.size(); ++i) {
-      if (inputs.at(i)->shape().at(d) > max_dim) {
-        max_dim = inputs.at(i)->shape().at(d);
-      }
-    }
-    for (size_t i = 1; i < inputs.size(); ++i) {
-      if ((inputs.at(0)->shape().at(d) != max_dim) && (inputs.at(0)->shape().at(d) != 1)) {
-        MS_LOG(ERROR) << "AddN inputs shape is not equal!";
-        return RET_INPUT_TENSOR_ERROR;
+    size_t max_dim = 0;
+    for (size_t i = 0; i < inputs.size(); ++i) {
+      size_t shift = max_dims - inputs.at(i)->shape().size();
+      size_t dim = (i < shift) ? 1 : inputs.at(i)->shape().at(d);
+      if (dim > max_dim) {
+        max_dim = dim;
       }
     }
     output->shape()[d] = max_dim;  // set the biggest dimension in the output tensor

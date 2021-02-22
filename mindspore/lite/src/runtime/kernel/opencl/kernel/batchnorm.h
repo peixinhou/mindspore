@@ -19,23 +19,32 @@
 
 #include <vector>
 #include "src/runtime/kernel/opencl/opencl_kernel.h"
-#include "nnacl/fp32/batchnorm.h"
+#include "nnacl/fp32/batchnorm_fp32.h"
 
 namespace mindspore::kernel {
 
 class BatchNormOpenCLKernel : public OpenCLKernel {
  public:
-  BatchNormOpenCLKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
-                        const std::vector<lite::Tensor *> &outputs)
-      : OpenCLKernel(parameter, inputs, outputs) {}
+  using OpenCLKernel::OpenCLKernel;
 
   ~BatchNormOpenCLKernel() override = default;
 
-  int Init() override;
-
   int Run() override;
+  int Prepare() override;
+
+  int CheckSpecs() override;
+  void SetConstArgs() override;
+  void SetGlobalLocal() override;
 
  private:
+  int Initweight();
+
+ private:
+  bool use_fp16_enable_{false};
+  void *scale_{nullptr};
+  void *offset_{nullptr};
+  void *mean_{nullptr};
+  void *variance_{nullptr};
   cl::Kernel kernel_;
 };
 

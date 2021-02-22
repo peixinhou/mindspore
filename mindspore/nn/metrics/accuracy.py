@@ -14,7 +14,7 @@
 # ============================================================================
 """Accuracy."""
 import numpy as np
-from ._evaluation import EvaluationBase
+from .metric import EvaluationBase
 
 
 class Accuracy(EvaluationBase):
@@ -41,6 +41,8 @@ class Accuracy(EvaluationBase):
         >>> metric.clear()
         >>> metric.update(x, y)
         >>> accuracy = metric.eval()
+        >>> print(accuracy)
+        0.6666666666666666
     """
     def __init__(self, eval_type='classification'):
         super(Accuracy, self).__init__(eval_type)

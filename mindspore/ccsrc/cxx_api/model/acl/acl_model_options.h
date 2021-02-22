@@ -19,29 +19,30 @@
 #include <vector>
 #include <string>
 #include <map>
+#include <tuple>
+#include <memory>
 #include "include/api/types.h"
 #include "include/api/status.h"
+#include "include/api/context.h"
 
-namespace mindspore::api {
+namespace mindspore {
 struct AclModelOptions {
-  std::string dump_cfg_path;
-  std::string dvpp_cfg_path;
-  std::string output_node;  // todo: at convert.cc::BuildGraph(), no atc options
   // build options
   std::string insert_op_cfg_path;
   std::string input_format;
   std::string input_shape;
-  std::string dynamic_batch_size;
-  std::string dynamic_image_size;
-  std::string dynamic_dims;
-  std::string serial_nodes_name;
   std::string output_type;
+  std::string precision_mode;
+  std::string op_select_impl_mode;
+  std::string soc_version = "Ascend310";
 
-  explicit AclModelOptions(const std::map<std::string, std::string> &options);
+  explicit AclModelOptions(const std::shared_ptr<Context> &context);
   ~AclModelOptions() = default;
 
-  std::map<std::string, std::string> GenAclOptions() const;
+  // return tuple<init_options, build_options>
+  std::tuple<std::map<std::string, std::string>, std::map<std::string, std::string>> GenAclOptions() const;
+  std::string GenAclOptionsKey() const;
 };
-}  // namespace mindspore::api
+}  // namespace mindspore
 
 #endif  // MINDSPORE_CCSRC_CXXAPI_SESSION_ACL_OPTION_PARSER_H

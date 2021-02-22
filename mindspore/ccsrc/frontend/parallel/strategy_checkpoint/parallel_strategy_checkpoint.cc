@@ -34,6 +34,8 @@ StrategyCheckpoint &StrategyCheckpoint::GetInstance() {
     instance.load_checkpoint_on_ = !ParallelContext::GetInstance()->strategy_ckpt_load_file().empty();
     instance.save_file_ = ParallelContext::GetInstance()->strategy_ckpt_save_file();
     instance.save_checkpoint_on_ = !ParallelContext::GetInstance()->strategy_ckpt_save_file().empty();
+    instance.group_info_save_file_ = ParallelContext::GetInstance()->group_ckpt_save_file();
+    instance.group_info_save_on_ = !ParallelContext::GetInstance()->group_ckpt_save_file().empty();
   }
   return instance;
 }
@@ -44,6 +46,39 @@ bool StrategyCheckpoint::CheckPointExit(const std::string path) const {
     return true;
   }
   return false;
+}
+
+Status StrategyCheckpoint::LoadGroupInfo(const std::string &file, GroupInfoMap *group_info_map) {
+  MS_EXCEPTION_IF_NULL(group_info_map);
+  if (!CheckPointExit(file)) {
+    MS_LOG(EXCEPTION) << "CheckPoint file is not found";
+  }
+  straspb::ParallelGroupMap parallel_group_map;
+  std::fstream input(file, std::ios::in | std::ios::binary);
+  if (!parallel_group_map.ParseFromIstream(&input)) {
+    MS_LOG(ERROR) << "Load strategy file failed";
+    return FAILED;
+  }
+  input.close();
+
+  size_t group_num = LongToSize(parallel_group_map.parallel_group_item_size());
+  for (size_t i = 0; i < group_num; ++i) {
+    straspb::ParallelGroupItem parallel_group_item = parallel_group_map.parallel_group_item(SizeToLong(i));
+    std::string group_name = parallel_group_item.group_name();
+
+    straspb::ParallelGroupRanks parallel_group_ranks = parallel_group_item.parallel_group_ranks();
+    size_t rank_num = LongToSize(parallel_group_ranks.dim_size());
+    std::vector<uint32_t> ranks;
+    for (size_t j = 0; j < rank_num; ++j) {
+      uint32_t rank = parallel_group_ranks.dim(SizeToLong(j));
+      ranks.push_back(rank);
+    }
+
+    std::pair<std::string, std::vector<uint32_t>> group = std::make_pair(group_name, ranks);
+    group_info_map->push_back(group);
+  }
+
+  return SUCCESS;
 }
 
 Status StrategyCheckpoint::Load(StrategyMap *strategy_map) {
@@ -59,27 +94,28 @@ Status StrategyCheckpoint::Load(StrategyMap *strategy_map) {
     MS_LOG(ERROR) << "Load strategy file failed";
     return FAILED;
   }
-  size_t node_num = IntToSize(parallel_strategy_map.parallel_strategy_item_size());
+  input.close();
+  size_t node_num = LongToSize(parallel_strategy_map.parallel_strategy_item_size());
   for (size_t i = 0; i < node_num; i++) {
-    straspb::ParallelStrategyItem parallel_strategy_item = parallel_strategy_map.parallel_strategy_item(SizeToInt(i));
+    straspb::ParallelStrategyItem parallel_strategy_item = parallel_strategy_map.parallel_strategy_item(SizeToLong(i));
     std::string node_name = parallel_strategy_item.node_name();
     straspb::ParallelStrategys parallel_strategys = parallel_strategy_item.parallel_strategys();
-    auto stage = (int32_t)parallel_strategys.stage();
-    size_t strategys_num = IntToSize(parallel_strategys.parallel_strategy_size());
+    auto stage = (int64_t)parallel_strategys.stage();
+    size_t strategys_num = LongToSize(parallel_strategys.parallel_strategy_size());
     Strategys strategy_inputs;
     for (size_t j = 0; j < strategys_num; j++) {
-      straspb::ParallelStrategy parallel_strategy = parallel_strategys.parallel_strategy(SizeToInt(j));
+      straspb::ParallelStrategy parallel_strategy = parallel_strategys.parallel_strategy(SizeToLong(j));
       Dimensions dimension;
-      size_t dim_num = IntToSize(parallel_strategy.dim_size());
+      size_t dim_num = LongToSize(parallel_strategy.dim_size());
       for (size_t k = 0; k < dim_num; k++) {
-        dimension.push_back(parallel_strategy.dim(SizeToInt(k)));
+        dimension.push_back(parallel_strategy.dim(SizeToLong(k)));
       }
       strategy_inputs.push_back(dimension);
     }
 
     StrategyPtr strategy = NewStrategy(stage, strategy_inputs);
     (*strategy_map)[node_name] = strategy;
-    current_stage_ = (int32_t)parallel_strategy_map.current_stage();
+    current_stage_ = (int64_t)parallel_strategy_map.current_stage();
   }
   return SUCCESS;
 }
@@ -87,7 +123,7 @@ Status StrategyCheckpoint::Load(StrategyMap *strategy_map) {
 Status StrategyCheckpoint::Save(const StrategyMap &strategy_map, const TensorInfoMap &tensor_info_map,
                                 ManualShapeMap *manual_shape_map) {
   straspb::ParallelStrategyMap parallel_strategy_map;
-  parallel_strategy_map.set_current_stage(IntToUint(++current_stage_));
+  parallel_strategy_map.set_current_stage(LongToUlong(++current_stage_));
   for (auto &node_stra : strategy_map) {
     straspb::ParallelStrategyItem *parallel_strategy_item = parallel_strategy_map.add_parallel_strategy_item();
     MS_EXCEPTION_IF_NULL(parallel_strategy_item);
@@ -95,12 +131,12 @@ Status StrategyCheckpoint::Save(const StrategyMap &strategy_map, const TensorInf
     straspb::ParallelStrategys *parallel_strategys = parallel_strategy_item->mutable_parallel_strategys();
     MS_EXCEPTION_IF_NULL(parallel_strategys);
     MS_EXCEPTION_IF_NULL(node_stra.second);
-    parallel_strategys->set_stage(IntToUint(node_stra.second->GetInputStage()));
+    parallel_strategys->set_stage(LongToUlong(node_stra.second->GetInputStage()));
     for (auto &dims : node_stra.second->GetInputDim()) {
       straspb::ParallelStrategy *parallel_strategy = parallel_strategys->add_parallel_strategy();
       MS_EXCEPTION_IF_NULL(parallel_strategy);
       for (auto dim : dims) {
-        parallel_strategy->add_dim(IntToUint(dim));
+        parallel_strategy->add_dim(LongToUlong(dim));
       }
     }
   }
@@ -114,7 +150,7 @@ Status StrategyCheckpoint::Save(const StrategyMap &strategy_map, const TensorInf
     straspb::DevMatrix *dev_matrix = parallel_layouts->add_dev_matrix();
     MS_EXCEPTION_IF_NULL(dev_matrix);
     for (auto dim : tensor_layout.device_arrangement().array()) {
-      dev_matrix->add_dim(IntToUint(dim));
+      dev_matrix->add_dim(LongToUlong(dim));
     }
     straspb::TensorMap *tensor_map = parallel_layouts->add_tensor_map();
     MS_EXCEPTION_IF_NULL(tensor_map);
@@ -137,6 +173,29 @@ Status StrategyCheckpoint::Save(const StrategyMap &strategy_map, const TensorInf
     MS_LOG(ERROR) << "Save strategy file failed";
     return FAILED;
   }
+  output.close();
+  return SUCCESS;
+}
+
+Status StrategyCheckpoint::SaveGroupInfo(const GroupInfoMap &group_info_map) {
+  straspb::ParallelGroupMap parallel_group_map;
+  for (auto &group : group_info_map) {
+    straspb::ParallelGroupItem *parallel_group_item = parallel_group_map.add_parallel_group_item();
+    MS_EXCEPTION_IF_NULL(parallel_group_item);
+    parallel_group_item->set_group_name(group.first);
+    straspb::ParallelGroupRanks *parallel_group_ranks = parallel_group_item->mutable_parallel_group_ranks();
+    MS_EXCEPTION_IF_NULL(parallel_group_ranks);
+    for (auto &rank : group.second) {
+      parallel_group_ranks->add_dim(rank);
+    }
+  }
+
+  std::fstream output(group_info_save_file_, std::ios::out | std::ios::trunc | std::ios::binary);
+  if (!parallel_group_map.SerializeToOstream(&output)) {
+    MS_LOG(ERROR) << "Save strategy file failed";
+    return FAILED;
+  }
+  output.close();
   return SUCCESS;
 }
 }  // namespace parallel

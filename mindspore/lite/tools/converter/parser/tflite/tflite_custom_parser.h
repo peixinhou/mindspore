@@ -28,9 +28,8 @@ class TfliteCustomParser : public TfliteNodeParser {
  public:
   TfliteCustomParser() : TfliteNodeParser("Custom") {}
 
-  STATUS Parse(TfliteTensorsInfo *tensors_info, const std::unique_ptr<tflite::OperatorT> &tflite_op,
-               const std::unique_ptr<tflite::ModelT> &tflite_model,
-               const std::unique_ptr<tflite::SubGraphT> &tflite_subgraph, schema::CNodeT *op) override;
+  PrimitiveC *ParseLitePrimitive(const std::unique_ptr<tflite::OperatorT> &tflite_op,
+                                 const std::unique_ptr<tflite::ModelT> &tflite_model) override;
 
   static STATUS DetectPostProcess(const std::vector<uint8_t> &custom_attr, schema::CNodeT *op,
                                   const std::unique_ptr<tflite::OperatorT> &tflite_op);
@@ -59,6 +58,12 @@ class TfliteCustomParser : public TfliteNodeParser {
 
   static STATUS FftImag(const std::vector<uint8_t> &custom_attr, schema::CNodeT *op,
                         const std::unique_ptr<tflite::OperatorT> &tflite_op);
+
+  static STATUS Identity(const std::vector<uint8_t> &custom_attr, schema::CNodeT *op,
+                         const std::unique_ptr<tflite::OperatorT> &tflite_op);
+
+  static STATUS BatchMatMul(const std::vector<uint8_t> &custom_attr, schema::CNodeT *op,
+                            const std::unique_ptr<tflite::OperatorT> &tflite_op);
 };
 }  // namespace mindspore::lite
 

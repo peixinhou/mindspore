@@ -49,10 +49,22 @@ int ParallelLaunch(struct ThreadPool *thread_pool, int (*job)(void *, int), void
 int BindThreads(struct ThreadPool *thread_pool, bool is_bind, int mode);
 
 /**
+ * activate the thread pool
+ * @param thread_pool_id
+ */
+void ActivateThreadPool(struct ThreadPool *thread_pool);
+
+/**
  * deactivate the thread pool
  * @param thread_pool_id
  */
 void DeactivateThreadPool(struct ThreadPool *thread_pool);
+
+/**
+ *
+ * @return current thread num
+ */
+int GetCurrentThreadNum(struct ThreadPool *thread_pool);
 
 /**
  * destroy thread pool, and release resource

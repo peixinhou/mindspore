@@ -21,9 +21,9 @@
 #include <memory>
 #include "include/api/status.h"
 #include "include/api/types.h"
+#include "include/api/graph.h"
 
 namespace mindspore {
-namespace api {
 class InputAndOutput;
 using Input = InputAndOutput;
 using Output = InputAndOutput;
@@ -34,6 +34,7 @@ class MS_API CellBase {
   virtual ~CellBase() = default;
   virtual std::vector<Output> Construct(const std::vector<Input> &inputs) { return {}; }
   virtual std::shared_ptr<CellBase> Clone() const = 0;
+  virtual Status Run(const std::vector<MSTensor> &inputs, std::vector<MSTensor> *outputs) { return kSuccess; }
   std::vector<Output> operator()(const std::vector<Input> &inputs) const;
 };
 
@@ -41,9 +42,7 @@ template <class T>
 class MS_API Cell : public CellBase {
  public:
   virtual ~Cell() = default;
-  std::shared_ptr<CellBase> Clone() const override {
-    return std::make_shared<T>(static_cast<const T&>(*this));
-  }
+  std::shared_ptr<CellBase> Clone() const override { return std::make_shared<T>(static_cast<const T &>(*this)); }
 };
 
 class MS_API ParameterCell final : public Cell<ParameterCell> {
@@ -57,16 +56,16 @@ class MS_API ParameterCell final : public Cell<ParameterCell> {
   ParameterCell(ParameterCell &&);
   ParameterCell &operator=(ParameterCell &&);
 
-  explicit ParameterCell(const Tensor &);
-  ParameterCell &operator=(const Tensor &);
+  explicit ParameterCell(const MSTensor &);
+  ParameterCell &operator=(const MSTensor &);
 
-  explicit ParameterCell(Tensor &&);
-  ParameterCell &operator=(Tensor &&);
+  explicit ParameterCell(MSTensor &&);
+  ParameterCell &operator=(MSTensor &&);
 
-  Tensor GetTensor() const { return tensor_; }
+  MSTensor GetTensor() const { return tensor_; }
 
  private:
-  Tensor tensor_;
+  MSTensor tensor_;
 };
 
 class MS_API OpCellBase : public CellBase {
@@ -84,9 +83,31 @@ class MS_API OpCell : public OpCellBase, public std::enable_shared_from_this<T> 
  public:
   explicit OpCell(const std::string &name) : OpCellBase(name) {}
   ~OpCell() override = default;
-  std::shared_ptr<CellBase> Clone() const override {
-    return std::make_shared<T>(static_cast<const T&>(*this));
-  }
+  std::shared_ptr<CellBase> Clone() const override { return std::make_shared<T>(static_cast<const T &>(*this)); }
+};
+
+class MS_API GraphCell final : public Cell<GraphCell> {
+ public:
+  class GraphImpl;
+
+  GraphCell() = default;
+  ~GraphCell() override = default;
+
+  explicit GraphCell(const Graph &);
+  explicit GraphCell(Graph &&);
+  explicit GraphCell(const std::shared_ptr<Graph> &);
+
+  const std::shared_ptr<Graph> &GetGraph() const { return graph_; }
+  Status Run(const std::vector<MSTensor> &inputs, std::vector<MSTensor> *outputs) override;
+  std::vector<MSTensor> GetInputs();
+  std::vector<MSTensor> GetOutputs();
+
+ private:
+  friend class ModelImpl;
+  Status Load();
+
+  std::shared_ptr<Graph> graph_;
+  std::shared_ptr<GraphImpl> executor_;
 };
 
 class MS_API InputAndOutput {
@@ -95,8 +116,8 @@ class MS_API InputAndOutput {
   ~InputAndOutput() = default;
 
   // no explicit
-  InputAndOutput(const Tensor &);  // NOLINT(runtime/explicit)
-  InputAndOutput(Tensor &&);  // NOLINT(runtime/explicit)
+  InputAndOutput(const MSTensor &);  // NOLINT(runtime/explicit)
+  InputAndOutput(MSTensor &&);       // NOLINT(runtime/explicit)
 
   InputAndOutput(const std::shared_ptr<CellBase> &, const std::vector<InputAndOutput> &, int32_t index);
 
@@ -108,6 +129,5 @@ class MS_API InputAndOutput {
   std::vector<InputAndOutput> prev_;
   int32_t index_;
 };
-}  // namespace api
 }  // namespace mindspore
 #endif  // MINDSPORE_INCLUDE_API_CELL_H

@@ -2,9 +2,10 @@ set(TOP_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../..)
 set(TEST_DIR ${TOP_DIR}/mindspore/lite/test)
 set(LITE_DIR ${TOP_DIR}/mindspore/lite)
 set(CCSRC_DIR ${TOP_DIR}/mindspore/ccsrc)
+set(CONVERTER_DIR ${TOP_DIR}/mindspore/lite/tools/converter)
 include_directories(${TOP_DIR})
 include_directories(${TEST_DIR})
-include(${CMAKE_CURRENT_SOURCE_DIR}/../../../cmake/dependency_gtest.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/../../../cmake/external_libs/gtest.cmake)
 
 STRING(REPLACE " -fvisibility=hidden " " -fvisibility=default " CMAKE_C_FLAGS "${CMAKE_C_FLAGS}")
 STRING(REPLACE " -fvisibility=hidden " " -fvisibility=default " CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
@@ -16,7 +17,7 @@ set(CCSRC_SRC
         ${CCSRC_DIR}/backend/optimizer/common/visit.cc
         ${CCSRC_DIR}/backend/optimizer/common/optimizer.cc
         )
-else(ENABLE_CONVERTER)
+else()
     set(TEST_LITE_SRC ${LITE_DIR}/src/common/log_adapter.cc)
     add_compile_definitions(USE_ANDROID_LOG)
 endif()
@@ -30,7 +31,7 @@ file(GLOB KERNEL_OP_SRC
         ${LITE_DIR}/nnacl/*.c
         ${LITE_DIR}/nnacl/fp32/*.c
         ${LITE_DIR}/nnacl/int8/*.c
-        ${LITE_DIR}/nnacl/quantization/*.c
+        ${LITE_DIR}/nnacl/base/*.c
         )
 
 file(GLOB KERNEL_OP_TRAIN_SRC
@@ -38,11 +39,10 @@ file(GLOB KERNEL_OP_TRAIN_SRC
         ${LITE_DIR}/src/runtime/kernel/arm/fp32_grad/*.cc
 )
 
-if (SUPPORT_TRAIN)
+if(SUPPORT_TRAIN)
         list(APPEND KERNEL_OP_SRC ${KERNEL_OP_TRAIN_SRC})
 endif()
-
-if (PLATFORM_ARM64)
+if(PLATFORM_ARM64)
     # assembly
     file(GLOB TEST_ASSEMBLY_SRC ${LITE_DIR}/nnacl/assembly/arm64/*.s
             ${LITE_DIR}/nnacl/assembly/arm64/*.S)
@@ -54,7 +54,7 @@ if (PLATFORM_ARM64)
             )
 endif()
 
-if (PLATFORM_ARM32)
+if(PLATFORM_ARM32)
     # assembly
     file(GLOB TEST_ASSEMBLY_SRC
             ${LITE_DIR}/nnacl/assembly/arm32/*.S
@@ -66,8 +66,21 @@ if (PLATFORM_ARM32)
             )
 endif()
 
-if ("${X86_64_SIMD}" STREQUAL "sse")
-    file(GLOB TEST_ASSEMBLY_SRC ${LITE_DIR}/nnacl/x86_64_sse/*.c)
+if("${X86_64_SIMD}" STREQUAL "sse")
+    file(GLOB TEST_ASSEMBLY_SRC ${LITE_DIR}/nnacl/intrinsics/sse/*.c)
+    set_property(SOURCE ${TEST_ASSEMBLY_SRC} PROPERTY LANGUAGE C)
+    set(KERNEL_OP_SRC
+            ${KERNEL_OP_SRC}
+            ${TEST_ASSEMBLY_SRC}
+            )
+endif()
+
+if("${X86_64_SIMD}" STREQUAL "avx")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -msse4.1 -mavx -mavx2")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -msse4.1 -mavx -mavx2")
+    file(GLOB TEST_ASSEMBLY_SRC ${LITE_DIR}/nnacl/intrinsics/sse/*.c
+            ${LITE_DIR}/nnacl/intrinsics/avx/*.c
+            ${LITE_DIR}/nnacl/assembly/avx/*.S)
     set_property(SOURCE ${TEST_ASSEMBLY_SRC} PROPERTY LANGUAGE C)
     set(KERNEL_OP_SRC
             ${KERNEL_OP_SRC}
@@ -76,41 +89,40 @@ if ("${X86_64_SIMD}" STREQUAL "sse")
 endif()
 
 ### gpu kernel
-if (SUPPORT_GPU)
+if(SUPPORT_GPU STREQUAL opencl)
     file(GLOB GPU_KERNEL_OP_SRC
             ${LITE_DIR}/src/runtime/kernel/opencl/kernel/*.cc
             )
     set(KERNEL_OP_SRC
             ${KERNEL_OP_SRC}
             ${GPU_KERNEL_OP_SRC}
-            ${LITE_DIR}/src/runtime/kernel/opencl/subgraph_opencl_kernel.cc
+            ${LITE_DIR}/src/runtime/kernel/opencl/opencl_kernel.cc
+            ${LITE_DIR}/src/runtime/kernel/opencl/opencl_subgraph.cc
+            ${LITE_DIR}/src/runtime/kernel/opencl/opencl_fusion.cc
             ${LITE_DIR}/src/runtime/kernel/opencl/utils.cc
             )
 endif()
+if(SUPPORT_GPU STREQUAL vulkan)
+    file(GLOB GPU_KERNEL_OP_SRC
+            ${LITE_DIR}/src/runtime/kernel/vulkan/kernel/*.cc
+            )
+    set(KERNEL_OP_SRC
+            ${KERNEL_OP_SRC}
+            ${GPU_KERNEL_OP_SRC}
+            )
+endif()
 
-if (PLATFORM_ARM32 OR PLATFORM_ARM64)
-  if (ENABLE_CONVERTER)
+if(PLATFORM_ARM32 OR PLATFORM_ARM64)
+  if(ENABLE_CONVERTER)
     set(BUILD_MINDDATA "off")
   endif()
 endif()
-### minddata lite
-if (BUILD_MINDDATA STREQUAL "lite")
-#    include_directories(${CCSRC_DIR}/minddata)
-#    set(DATASET_TEST_DIR ${TEST_DIR}/ut/src/dataset)
-#    set(TEST_MINDDATA_SRC
-#                ${DATASET_TEST_DIR}/de_tensor_test.cc
-#                ${DATASET_TEST_DIR}/eager_test.cc
-#            )
-elseif (BUILD_MINDDATA STREQUAL "full")
-    #include_directories(${CCSRC_DIR}/minddata)
-    #set(DATASET_TEST_DIR ${TEST_DIR}/ut/src/dataset)
-    #set(TEST_MINDDATA_SRC
-    #            ${DATASET_TEST_DIR}/de_tensor_test.cc
-    #            ${DATASET_TEST_DIR}/eager_test.cc
-    #        )
-endif()
 ### runtime framework
-file(GLOB_RECURSE OPS_SRC ${LITE_DIR}/src/ops/*.cc ${LITE_DIR}/src/ops/populate/*.cc)
+add_definitions(-DENABLE_V0)
+file(GLOB_RECURSE OPS_SRC ${LITE_DIR}/src/ops/*.cc)
+if(ENABLE_CONVERTER)
+    set(OPS_SRC ${OPS_SRC})
+endif()
 set(TEST_LITE_SRC
         ${TEST_LITE_SRC}
         ${CCSRC_SRC}
@@ -121,14 +133,16 @@ set(TEST_LITE_SRC
         ${LITE_DIR}/src/runtime/thread_pool.c
         ${LITE_DIR}/src/runtime/parallel_executor.cc
         ${LITE_DIR}/src/tensor.cc
+        ${LITE_DIR}/src/tensorlist.cc
         ${LITE_DIR}/src/executor.cc
         ${LITE_DIR}/src/inner_context.cc
         ${LITE_DIR}/src/kernel_registry.cc
         ${LITE_DIR}/src/lite_kernel.cc
         ${LITE_DIR}/src/lite_session.cc
+        ${LITE_DIR}/src/dequant.cc
+        ${LITE_DIR}/src/huffman_decode.cc
         ${LITE_DIR}/src/sub_graph_kernel.cc
-        ${LITE_DIR}/src/model.cc
-        ${LITE_DIR}/src/model_common.cc
+        ${LITE_DIR}/src/lite_model.cc
         ${LITE_DIR}/src/scheduler.cc
         ${LITE_DIR}/src/common/graph_util.cc
         ${LITE_DIR}/src/common/file_utils.cc
@@ -144,18 +158,26 @@ set(TEST_LITE_SRC
         ${LITE_DIR}/src/errorcode.cc
         )
 ### gpu runtime
-if (SUPPORT_GPU)
-    include_directories(${TOP_DIR}/third_party/OpenCL-Headers)
-    include_directories(${TOP_DIR}/third_party/OpenCL-CLHPP/include)
-    set(OPENCL_RUNTIME_SRC
-            ${LITE_DIR}/src/runtime/opencl/opencl_allocator.cc
-            ${LITE_DIR}/src/runtime/opencl/opencl_executor.cc
-            ${LITE_DIR}/src/runtime/opencl/opencl_runtime.cc
-            ${LITE_DIR}/src/runtime/opencl/opencl_wrapper.cc
+if(SUPPORT_GPU STREQUAL opencl)
+    include_directories(${CMAKE_BINARY_DIR}/_deps/opencl-headers-src)
+    include_directories(${CMAKE_BINARY_DIR}/_deps/opencl-clhpp-src/include)
+    file(GLOB_RECURSE OPENCL_RUNTIME_SRC
+            ${LITE_DIR}/src/runtime/gpu/opencl/*.cc
             )
     set(TEST_LITE_SRC
             ${TEST_LITE_SRC}
             ${OPENCL_RUNTIME_SRC}
+            )
+endif()
+if(SUPPORT_GPU STREQUAL vulkan)
+    include_directories(${LITE_DIR}/build/_deps/vulkan-headers-src/include)
+    file(GLOB VULKAN_RUNTIME_SRC
+            ${LITE_DIR}/src/runtime/gpu/*.cc
+            ${LITE_DIR}/src/runtime/vulkan/*.cc
+            )
+    set(TEST_LITE_SRC
+            ${TEST_LITE_SRC}
+            ${VULKAN_RUNTIME_SRC}
             )
 endif()
 ### converter
@@ -189,18 +211,40 @@ if(ENABLE_CONVERTER)
             ${LITE_DIR}/tools/optimizer/fusion/layer_norm_fusion.cc
             ${LITE_DIR}/tools/optimizer/fusion/batchmatmul_fusion.cc
             ${LITE_DIR}/tools/optimizer/fusion/sigmoid_mul_fusion.cc
+            ${LITE_DIR}/tools/optimizer/fusion/conv_conv_fusion.cc
+            ${LITE_DIR}/tools/optimizer/fusion/conv_tuplegetitem_fusion.cc
+            ${LITE_DIR}/tools/optimizer/fusion/tflite_lstm_cell_fusion.cc
+            ${LITE_DIR}/tools/optimizer/fusion/tf_lstm_cell_fusion.cc
+            ${LITE_DIR}/tools/optimizer/fusion/bidirection_tf_gru_cell_fusion.cc
             ${LITE_DIR}/tools/optimizer/graph/weight_format_transform_pass.cc
             ${LITE_DIR}/tools/optimizer/graph/weight_format_hardcode_pass.cc
             ${LITE_DIR}/tools/optimizer/graph/clip_convert_activation_pass.cc
+            ${LITE_DIR}/tools/optimizer/graph/group_depthwise_op_convert_pass.cc
+            ${LITE_DIR}/tools/optimizer/graph/tflite_inputs_order_exchange_pass.cc
+            ${LITE_DIR}/tools/optimizer/graph/update_conv2d_param_pass.cc
             ${LITE_DIR}/tools/optimizer/graph/unused_cast_node_remove_pass.cc
             ${LITE_DIR}/tools/optimizer/graph/unused_transpose_node_remove_pass.cc
-            ${LITE_DIR}/tools/optimizer/graph/identity_remove_pass.cc
+            ${LITE_DIR}/tools/optimizer/graph/redundant_op_remove_pass.cc
+            ${LITE_DIR}/tools/optimizer/graph/infershape_pass.cc
+            ${LITE_DIR}/tools/optimizer/graph/slice_prepose_pass.cc
+            ${LITE_DIR}/tools/optimizer/graph/mindir_adjust_pass.cc
+            ${LITE_DIR}/tools/optimizer/graph/mindir_inputs_adjust_pass.cc
+            ${LITE_DIR}/tools/optimizer/graph/onnx_inputs_adjust_pass.cc
+            ${LITE_DIR}/tools/optimizer/graph/while_pass.cc
+            ${LITE_DIR}/tools/optimizer/graph/if_pass.cc
+            ${LITE_DIR}/tools/optimizer/graph/functionalize_control_op_pass.cc
+            ${LITE_DIR}/tools/optimizer/graph/functionalize_while.cc
+            ${LITE_DIR}/tools/optimizer/graph/inputs_adjust_pass.cc
             )
 endif()
 ### train
-if (SUPPORT_TRAIN)
+if(SUPPORT_TRAIN)
     set(TEST_LITE_SRC
             ${TEST_LITE_SRC}
+            ${LITE_DIR}/src/train/train_populate_parameter.cc
+            ${LITE_DIR}/src/train/train_session.cc
+            ${LITE_DIR}/src/train/transfer_session.cc
+            ${LITE_DIR}/src/train/train_model.cc
             ${LITE_DIR}/src/lite_session.cc
             )
 else()
@@ -232,10 +276,12 @@ set(TEST_SRC
         ${TEST_DIR}/ut/src/scheduler_test.cc
 )
 
-if (ENABLE_CONVERTER)
+if(ENABLE_CONVERTER)
     set(TEST_SRC
             ${TEST_SRC}
             ${TEST_DIR}/st/converter_test.cc
+            ${TEST_DIR}/st/control_flow_test.cc
+            ${TEST_DIR}/st/sub_graph_test.cc
             ${TEST_DIR}/ut/tools/optimizer/fusion/conv_biasadd_fusion_test.cc
             ${TEST_DIR}/ut/tools/optimizer/fusion/conv_bn_fusion_test.cc
             ${TEST_DIR}/ut/tools/optimizer/fusion/conv_scale_fusion_test.cc
@@ -244,7 +290,7 @@ if (ENABLE_CONVERTER)
             )
 endif()
 
-if (SUPPORT_TRAIN)
+if(SUPPORT_TRAIN)
     set(TEST_SRC
             ${TEST_SRC}
             ${TEST_CASE_KERNEL_TRAIN_SRC}
@@ -257,7 +303,7 @@ else()
             )
 endif()
 
-if (SUPPORT_GPU)
+if(SUPPORT_GPU STREQUAL opencl)
     file(GLOB_RECURSE TEST_CASE_KERNEL_GPU_SRC
             ${TEST_DIR}/ut/src/runtime/kernel/opencl/*.cc
             )
@@ -267,37 +313,50 @@ if (SUPPORT_GPU)
             )
 endif()
 
-if (ENABLE_FP16)
+if(ENABLE_FP16)
+    file(GLOB_RECURSE TEST_CASE_KERNEL_FP16_SRC
+            ${TEST_DIR}/ut/src/runtime/kernel/arm/fp16/*.cc
+            )
     set(TEST_SRC
             ${TEST_SRC}
-            ${TEST_DIR}/ut/src/runtime/kernel/arm/fp16/convolution_fp16_tests.cc)
-endif ()
+            ${TEST_CASE_KERNEL_FP16_SRC}
+            )
+endif()
 
+if(SUPPORT_TRAIN)
+    file(GLOB_RECURSE TEST_CASE_KERNEL_FP16_SRC_GRAD
+        ${TEST_DIR}/ut/src/runtime/kernel/arm/fp6_grad/*.cc)
+    list(APPEND TEST_SRC ${TEST_CASE_KERNEL_FP16_SRC_GRAD})
+endif()
 
 add_executable(lite-test ${TEST_SRC})
+add_dependencies(lite-test fbs_src)
+target_link_libraries(lite-test dl mindspore::gtest)
+if(SUPPORT_TRAIN)
+    target_link_libraries(lite-test minddata-lite)
+endif()
 
-target_link_libraries(lite-test dl ${GTEST_LIBRARY})
-if (PLATFORM_ARM64)
+if(PLATFORM_ARM64 AND ENABLE_FP16)
     target_link_libraries(lite-test nnacl_fp16_mid nnacl_optimize_mid)
 endif()
 
-if (PLATFORM_ARM)
+if(PLATFORM_ARM)
     target_link_libraries(lite-test log)
 endif()
 
-#if (BUILD_MINDDATA STREQUAL "lite")
-#    target_link_libraries(lite-test
-	    # minddata_eager_mid
-	    #minddata-lite
-	    #           )
-	    #endif()
-if (ENABLE_CONVERTER)
+if(SUPPORT_NPU)
+    include_directories(${DDK_PATH})
+    target_link_libraries(lite-test npu_kernel_mid)
+endif()
+if(ENABLE_CONVERTER)
+    add_dependencies(lite-test fbs_inner_src)
     target_link_libraries(lite-test
             anf_importer_mid
             anf_exporter_mid
             tflite_parser_mid
             caffe_parser_mid
             onnx_parser_mid
+            tf_parser_mid
             graph_pass_mid
             fusion_mid
             quantizer_mid

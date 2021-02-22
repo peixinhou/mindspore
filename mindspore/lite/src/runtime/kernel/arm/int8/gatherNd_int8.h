@@ -18,7 +18,7 @@
 #define MINDSPORE_LITE_SRC_RUNTIME_KERNEL_ARM_INT8_GATHERND_INT8_H_
 
 #include <vector>
-#include "nnacl/quantization/quantize.h"
+#include "mindspore/lite/nnacl/int8/quantize.h"
 #include "src/lite_kernel.h"
 
 namespace mindspore::kernel {
@@ -36,6 +36,7 @@ class GatherNdInt8CPUKernel : public LiteKernel {
   int DoGatherNd(int task_id);
 
  private:
+  void InitOffset();
   int thread_count_;
   int thread_sz_count_;
   int thread_sz_stride_;

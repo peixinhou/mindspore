@@ -27,6 +27,7 @@
 #include "ir/graph_utils.h"
 #include "utils/misc.h"
 #include "debug/draw.h"
+#include "base/core_ops.h"
 
 namespace mindspore {
 namespace abstract {
@@ -95,7 +96,7 @@ void TestSpecializeGraph::SetUp() {
   // build func_graph beta
   ParameterPtr x1 = graph_beta_->add_parameter();
   inputs.clear();
-  inputs.push_back(NewValueNode(std::make_shared<Primitive>("scalar_add")));
+  inputs.push_back(NewValueNode(std::make_shared<Primitive>(prim::kScalarAdd)));
   inputs.push_back(x1);
   inputs.push_back(y);
   CNodePtr cnode_add = graph_beta_->NewCNode(inputs);
@@ -124,7 +125,7 @@ TEST_F(TestSpecializeGraph, test_specialize) {
   AbstractBasePtrList args_spec_list;
   MS_LOG(INFO) << "Begin TestSpecializeGraph call other graph.";
   MS_LOG(INFO) << "" << graph_f_->get_return()->ToString();
-  AbstractBasePtr abstract_v1 = FromValue(1, false);
+  AbstractBasePtr abstract_v1 = FromValue(static_cast<int64_t>(1), false);
   args_spec_list.push_back(abstract_v1);
 
   AnalysisResult result = engine_->Run(graph_f_, args_spec_list);
@@ -133,8 +134,8 @@ TEST_F(TestSpecializeGraph, test_specialize) {
 
 TEST_F(TestSpecializeGraph, test_specialize1) {
   AbstractBasePtrList args_spec_list;
-  AbstractBasePtr abstract_v1 = FromValue(1, true);
-  AbstractBasePtr abstract_v2 = FromValue(2, true);
+  AbstractBasePtr abstract_v1 = FromValue(static_cast<int64_t>(1), true);
+  AbstractBasePtr abstract_v2 = FromValue(static_cast<int64_t>(2), true);
   args_spec_list.push_back(abstract_v1);
   args_spec_list.push_back(abstract_v2);
   AnalysisResult result = engine_->Run(graph_alpha_, args_spec_list);
@@ -166,7 +167,7 @@ class MetaScalarAdd : public MetaFuncGraph {
     FuncGraphPtr graph_g = std::make_shared<FuncGraph>();
     ParameterPtr x = graph_g->add_parameter();
     ParameterPtr y = graph_g->add_parameter();
-    auto prim_scalar_add = std::make_shared<Primitive>("scalar_add");
+    auto prim_scalar_add = std::make_shared<Primitive>(prim::kScalarAdd);
     std::vector<AnfNodePtr> inputs;
     inputs.push_back(NewValueNode(prim_scalar_add));
     inputs.push_back(x);
@@ -214,8 +215,8 @@ void TestSpecializeMetaFuncGraph::TearDown() {}
 TEST_F(TestSpecializeMetaFuncGraph, test_specialize) {
   AbstractBasePtrList args_spec_list;
   std::cout << graph_->get_return()->ToString() << std::endl;
-  AbstractBasePtr abstract_v1 = FromValue(1, true);
-  AbstractBasePtr abstract_v2 = FromValue(2, true);
+  AbstractBasePtr abstract_v1 = FromValue(static_cast<int64_t>(1), true);
+  AbstractBasePtr abstract_v2 = FromValue(static_cast<int64_t>(2), true);
   args_spec_list.push_back(abstract_v1);
   args_spec_list.push_back(abstract_v2);
   AnalysisResult result = engine_->Run(graph_, args_spec_list);

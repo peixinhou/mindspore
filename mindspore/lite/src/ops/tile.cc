@@ -15,6 +15,7 @@
  */
 
 #include "src/ops/tile.h"
+#include <limits>
 #include <algorithm>
 
 #ifndef PRIMITIVE_WRITEABLE
@@ -52,12 +53,6 @@ int Tile::UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &input
       MS_LOG(ERROR) << "new primitiveT value failed";
       return RET_ERROR;
     }
-    if (prim.GetAttr("dims") == nullptr) {
-      MS_LOG(WARNING) << "get dims failed";
-      attr->dims = {1};
-    } else {
-      attr->dims = GetValue<std::vector<int>>(prim.GetAttr("dims"));
-    }
     if (inputs.size() == kAnfPopulaterInputNumTwo) {
       auto inputNode = inputs[kAnfPopulaterInputNumOne];
       MS_ASSERT(inputNode != nullptr);
@@ -70,15 +65,24 @@ int Tile::UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &input
           auto valTuplPtr = dyn_cast<ValueTuple>(value);
           MS_ASSERT(valTuplPtr != nullptr);
           for (size_t i = 0; i < valTuplPtr->size(); i++) {
-            auto elem = dyn_cast<Int32Imm>((*valTuplPtr)[i]);
+            auto elem = (*valTuplPtr)[i];
             MS_ASSERT(elem != nullptr);
-            attr->multiples.emplace_back(elem->value());
+            attr->multiples.emplace_back(CastToInt(elem).front());
           }
         } else {
-          int multiple = GetValue<int>(value);
+          int multiple = CastToInt(value).front();
           attr->multiples = {multiple};
         }
       }
+    }
+    if (prim.GetAttr("dims") == nullptr) {
+      MS_LOG(INFO) << "Tile's attr dims is set to default. The operator in mindspore has no attribute"
+                      "named dims and all the dimensions needs to be multiplied by default.";
+      for (size_t i = 0; i < attr->multiples.size(); i++) {
+        attr->dims.push_back(i);
+      }
+    } else {
+      attr->dims = CastToInt(prim.GetAttr("dims"));
     }
     this->primitive_->value.value = attr;
   }
@@ -135,23 +139,60 @@ int Tile::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> output
   output->set_data_type(input->data_type());
   output->set_format(input->format());
   if (!infer_flag()) {
-    return RET_OK;
+    return RET_INFER_INVALID;
   }
 
-  MS_ASSERT(tile_prim != nullptr);
   std::vector<int> out_shape;
-  std::vector<int> multiples = GetMultiples();
-  const size_t in_dims = input->shape().size();
-  const size_t delta_dims = in_dims - multiples.size();
-
-  size_t i = 0;
-  for (; i < delta_dims; ++i) {
-    int tmp = input->shape()[i];
-    out_shape.push_back(tmp);
+  std::vector<int> multiples;
+  if (inputs_.size() == 2) {
+    if (inputs_[1]->data_c() == nullptr) {
+      MS_LOG(INFO) << "Do infer shape in runtime.";
+      return RET_INFER_INVALID;
+    }
+    int data_num = inputs_[1]->ElementsNum();
+    if (data_num > static_cast<int>(input->shape().size())) {
+      MS_LOG(ERROR) << "multiples data num cannot be larger than input shape size.";
+      return RET_INPUT_TENSOR_ERROR;
+    }
+    multiples.resize(data_num);
+    memcpy(multiples.data(), inputs_[1]->data_c(), inputs_[1]->Size());
+  } else {
+    multiples = GetMultiples();
   }
-  for (; i < in_dims; ++i) {
-    int tmp = input->shape()[i] * (multiples[i - delta_dims]);
-    out_shape.push_back(tmp);
+  if (train_flag()) {
+    const size_t in_dims = input->shape().size();
+    const size_t delta_dims = in_dims - multiples.size();
+
+    size_t i = 0;
+    for (; i < delta_dims; ++i) {
+      int tmp = input->shape().at(i);
+      out_shape.push_back(tmp);
+    }
+    for (; i < in_dims; ++i) {
+      int tmp = input->shape().at(i) * (multiples[i - delta_dims]);
+      out_shape.push_back(tmp);
+    }
+  } else {
+    std::vector<int> dims = GetDims();
+    if (inputs_.size() == 2 && dims.empty()) {
+      for (int dim = 0; dim < inputs_[1]->ElementsNum(); ++dim) {
+        dims.push_back(dim);
+      }
+    }
+    const size_t in_dims = input->shape().size();
+
+    MS_ASSERT(multiples.size() == dims.size());
+    for (size_t i = 0; i < in_dims; ++i) {
+      out_shape.push_back(input->shape().at(i));
+    }
+    for (size_t i = 0; i < dims.size(); ++i) {
+      if (input->shape().at(dims.at(i)) != 0 &&
+          multiples.at(i) > std::numeric_limits<int>::max() / input->shape().at(dims.at(i))) {
+        MS_LOG(ERROR) << "The value of multiples[" << i << "] is too big";
+        return RET_ERROR;
+      }
+      out_shape.at(dims.at(i)) = input->shape().at(dims.at(i)) * (multiples.at(i));
+    }
   }
   output->set_shape(out_shape);
   return RET_OK;

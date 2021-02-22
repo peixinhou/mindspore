@@ -27,25 +27,24 @@
 #include "external/ge/ge_ir_build.h"
 #include "cxx_api/model/acl/acl_model_options.h"
 
-namespace mindspore::api {
+namespace mindspore {
 class ModelConverter {
  public:
   ModelConverter() : options_(nullptr) {}
 
-  Buffer LoadMindIR(const Buffer &model_data);
+  Buffer LoadMindIR(const FuncGraphPtr &func_graph);
   Buffer LoadAscendIR(const Buffer &model_data);
 
   void set_options(AclModelOptions *options) { options_ = options; }
 
-  static Buffer ReadFile(const std::string &file);
-  static void RegAllOp();
-
  private:
-  std::shared_ptr<FuncGraph> ConvertMindIrToFuncGraph(const Buffer &model_data);
   transform::DfGraphPtr ConvertFuncGraphToAIR(const FuncGraphPtr &anf_graph);
-  Buffer BuildAirModel(const transform::DfGraphPtr &graph, const std::map<std::string, std::string> &acl_options);
+  Buffer BuildAirModel(const transform::DfGraphPtr &graph, const std::map<std::string, std::string> &init_options,
+                       const std::map<std::string, std::string> &build_options);
   AclModelOptions *options_;
-};
-}  // namespace mindspore::api
 
+  Buffer LoadMindIRInner(const FuncGraphPtr &func_graph);
+  Buffer LoadAscendIRInner(const Buffer &model_data);
+};
+}  // namespace mindspore
 #endif  // MINDSPORE_CCSRC_CXXAPI_SESSION_ACL_MODEL_CONVERTER_H

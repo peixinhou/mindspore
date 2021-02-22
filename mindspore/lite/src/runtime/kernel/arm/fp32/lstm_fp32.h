@@ -19,7 +19,7 @@
 
 #include <vector>
 #include "src/lite_kernel.h"
-#include "nnacl/fp32/lstm.h"
+#include "nnacl/fp32/lstm_fp32.h"
 
 namespace mindspore::kernel {
 class LstmCPUKernel : public LiteKernel {
@@ -28,7 +28,7 @@ class LstmCPUKernel : public LiteKernel {
                 const std::vector<lite::Tensor *> &outputs, const lite::InnerContext *ctx,
                 const mindspore::lite::PrimitiveC *primitive)
       : LiteKernel(parameter, inputs, outputs, ctx, primitive) {
-    lstm_parm_ = reinterpret_cast<LstmParameter *>(op_parameter_);
+    lstm_param_ = reinterpret_cast<LstmParameter *>(op_parameter_);
   }
 
   ~LstmCPUKernel() override { FreeTmpBuffer(); }
@@ -39,15 +39,21 @@ class LstmCPUKernel : public LiteKernel {
 
  private:
   void FreeTmpBuffer();
+  void FreeRunBuffer();
   int InitParam();
-  int InitBuffer();
+  int MallocRunBuffer();
   int InitWeightBias();
 
   float *gate_buffer_ = nullptr;
+  float *state_buffer_ = nullptr;
   float *weight_i_ptr_ = nullptr;
   float *weight_h_ptr_ = nullptr;
   float *bias_ptr_ = nullptr;
-  LstmParameter *lstm_parm_ = nullptr;
+  float *matmul_buffer_[2];
+  int row_tile_ = 0;
+  int col_tile_ = 0;
+  bool is_vec_ = false;
+  LstmParameter *lstm_param_ = nullptr;
 };
 }  // namespace mindspore::kernel
 

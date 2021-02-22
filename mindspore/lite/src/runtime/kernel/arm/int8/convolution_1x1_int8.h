@@ -22,7 +22,8 @@
 #include "include/errorcode.h"
 #include "schema/model_generated.h"
 #include "src/runtime/kernel/arm/base/convolution_base.h"
-#include "nnacl/int8/conv_int8.h"
+#include "nnacl/int8/conv1x1_int8.h"
+#include "nnacl/base/conv1x1_base.h"
 #include "nnacl/int8/matmul_int8.h"
 #include "nnacl/matmul_parameter.h"
 #include "src/common/utils.h"
@@ -45,8 +46,15 @@ class Convolution1x1Int8CPUKernel : public ConvolutionBaseCPUKernel {
   void FreeRunBuf();
 
  public:
-  int RunImpl(int task_id);
-  int RunPre(int task_id);
+  int OcRun(int task_id);
+  int HwRun(int task_id);
+  int OcOptPre(int task_id);
+
+ private:
+  int RunArmOc(int task_id);
+  int RunArm64OptOc(int task_id);
+  int RunArmHw(int task_id);
+  int RunArm64OptHw(int task_id);
 
  private:
   void FreeResizeBuf();
@@ -58,8 +66,8 @@ class Convolution1x1Int8CPUKernel : public ConvolutionBaseCPUKernel {
   int InitBiasByzp(const void *src_weight, int input_channel, int output_channel, int round_oc);
 
  private:
-  int32_t *input_sum_ = nullptr;     /* per-oc: oc4 format */
-  int32_t *filter_zp_ptr_ = nullptr; /* per-oc */
+  int32_t *input_sum_ = nullptr;     /* per-oc */
+  int32_t *filter_zp_ptr_ = nullptr; /* per-oc up round  */
   int32_t *left_shift_ = nullptr;    /* per-oc up round  */
   int32_t *right_shift_ = nullptr;   /* per-oc up round  */
   int32_t *multiplier_ = nullptr;    /* per-oc up round  */
@@ -67,14 +75,15 @@ class Convolution1x1Int8CPUKernel : public ConvolutionBaseCPUKernel {
   int8_t *packed_input_ = nullptr;
   int8_t *input_ptr_ = nullptr;
   int8_t *output_ptr_ = nullptr;
-  size_t thread_count_ = 1;
-  size_t thread_stride_ = 0;
   size_t thread_count_hw_ = 1;
   size_t thread_stride_hw_ = 0;
+  size_t thread_count_oc_ = 1;
+  size_t thread_stride_oc_ = 0;
   bool pre_trans_input_ = false;
+  bool parallel_by_oc_ = false;
   size_t input_sum_size_ = 0;
   MatMulParameter *matmul_param_ = nullptr;
-  MATMUL_OPT_R_FUNC matmul_func_ = nullptr;
+  MATMUL_OPT_DP_FUNC matmul_func_ = nullptr;
   bool support_optimize_ = false;
   bool filter_peroc_ = false;
 };

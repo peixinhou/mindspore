@@ -21,13 +21,15 @@
 
 namespace mindspore {
 namespace lite {
-bool OnnxDeConvParser::ParseGroupDeConvolution(const std::unique_ptr<schema::DeConv2DT> &attr, schema::CNodeT *op) {
-  if (attr == nullptr || attr->group != attr->channelOut) {
+bool OnnxDeConvParser::ParseGroupDeConvolution(const std::unique_ptr<schema::DeConv2DT> &attr,
+                                               schema::PrimitiveT *primitive) {
+  if (attr == nullptr || attr->group != attr->channelOut || primitive == nullptr) {
+    MS_LOG(ERROR) << "input parameter is nullptr";
     return false;
   }
-  std::unique_ptr<schema::DeDepthwiseConv2DT> deDepthwiseConv2DParam = std::make_unique<schema::DeDepthwiseConv2DT>();
+  auto deDepthwiseConv2DParam = std::make_unique<schema::DeDepthwiseConv2DT>();
   if (deDepthwiseConv2DParam == nullptr) {
-    MS_LOG(WARNING) << "new op failed";
+    MS_LOG(ERROR) << "new op failed";
     return false;
   }
   deDepthwiseConv2DParam->format = attr->format;
@@ -44,39 +46,22 @@ bool OnnxDeConvParser::ParseGroupDeConvolution(const std::unique_ptr<schema::DeC
   deDepthwiseConv2DParam->padRight = attr->padRight;
   deDepthwiseConv2DParam->dilateW = attr->dilateW;
   deDepthwiseConv2DParam->dilateH = attr->dilateH;
-  deDepthwiseConv2DParam->hasBias = attr->hasBias;
   deDepthwiseConv2DParam->activationType = attr->activationType;
 
-  op->primitive->value.type = schema::PrimitiveType_DeDepthwiseConv2D;
-  op->primitive->value.value = deDepthwiseConv2DParam.release();
+  primitive->value.type = schema::PrimitiveType_DeDepthwiseConv2D;
+  primitive->value.value = deDepthwiseConv2DParam.release();
   return true;
 }
 
-STATUS OnnxDeConvParser::Parse(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node,
-                               schema::CNodeT *op) {
-  MS_LOG(DEBUG) << "onnx DeConvParser";
-  if (op == nullptr) {
-    MS_LOG(ERROR) << "op is null";
-    return RET_NULL_PTR;
-  }
-  op->primitive = std::make_unique<schema::PrimitiveT>();
-  if (op->primitive == nullptr) {
-    MS_LOG(ERROR) << "op->primitive is null";
-    return RET_NULL_PTR;
-  }
-
-  std::unique_ptr<schema::DeConv2DT> attr = std::make_unique<schema::DeConv2DT>();
-  if (attr == nullptr) {
-    MS_LOG(ERROR) << "new op failed";
-    return RET_NULL_PTR;
-  }
-
+int OnnxDeConvParser::ParseParameters(const onnx::NodeProto &onnx_node,
+                                      const std::unique_ptr<schema::DeConv2DT> &attr) {
   attr->padMode = schema::PadMode_NOTSET;
   attr->group = 1;
   attr->strideW = 1;
   attr->strideH = 1;
   attr->dilateW = 1;
   attr->dilateH = 1;
+
   for (const auto &onnx_node_attr : onnx_node.attribute()) {
     if (onnx_node_attr.name() == "group") {
       attr->group = static_cast<int32_t>(onnx_node_attr.i());
@@ -127,46 +112,67 @@ STATUS OnnxDeConvParser::Parse(const onnx::GraphProto &onnx_graph, const onnx::N
         return RET_ERROR;
       }
     } else if (onnx_node_attr.name() == "output_padding") {
-      MS_LOG(ERROR) << "output_padding param hasn't been supported";
-      return RET_NOT_SUPPORT;
+      attr->outputPaddingH = static_cast<int32_t>(onnx_node_attr.ints(0));
+      attr->outputPaddingW = static_cast<int32_t>(onnx_node_attr.ints(1));
     }
+  }
+  return RET_OK;
+}
+
+lite::PrimitiveC *OnnxDeConvParser::ParseLitePrimitive(const onnx::GraphProto &onnx_graph,
+                                                       const onnx::NodeProto &onnx_node) {
+  MS_LOG(DEBUG) << "onnx DeConvParser";
+  auto attr = std::make_unique<schema::DeConv2DT>();
+  if (attr == nullptr) {
+    MS_LOG(ERROR) << "new op failed";
+    return nullptr;
+  }
+
+  auto status = ParseParameters(onnx_node, attr);
+  if (status != RET_OK) {
+    MS_LOG(ERROR) << "Parse parameters failed.";
+    return nullptr;
   }
 
   const auto &onnx_conv_weight = onnx_node.input(1);
-  auto nodeIter =
+  auto node_iter =
     std::find_if(onnx_graph.initializer().begin(), onnx_graph.initializer().end(),
                  [onnx_conv_weight](const onnx::TensorProto &proto) { return proto.name() == onnx_conv_weight; });
-  if (nodeIter == onnx_graph.initializer().end()) {
+  if (node_iter == onnx_graph.initializer().end()) {
     MS_LOG(ERROR) << "not find node: " << onnx_conv_weight.c_str();
-    return RET_ERROR;
+    return nullptr;
   }
   std::vector<int> weight_shape;
-  auto size = (*nodeIter).dims_size();
+  auto size = (*node_iter).dims_size();
   weight_shape.reserve(size);
   for (int i = 0; i < size; ++i) {
-    weight_shape.emplace_back((*nodeIter).dims(i));
+    weight_shape.emplace_back((*node_iter).dims(i));
   }
   if (weight_shape.size() != 4) {
     MS_LOG(ERROR) << "weight_shape.size() should be 4, but is " << weight_shape.size();
-    return RET_ERROR;
+    return nullptr;
   }
   attr->channelIn = weight_shape[0];
   attr->channelOut = weight_shape[1] * attr->group;
 
   attr->format = schema::Format::Format_NCHW;
-  attr->hasBias = onnx_node.input().size() == 3;
 
+  auto primitive = std::make_unique<schema::PrimitiveT>();
+  if (primitive == nullptr) {
+    MS_LOG(ERROR) << "new primitive failed";
+    return nullptr;
+  }
   if (attr->group != 1) {
-    if (!ParseGroupDeConvolution(attr, op)) {
+    if (!ParseGroupDeConvolution(attr, primitive.get())) {
       MS_LOG(ERROR) << "Convert DeConvolution to DeDepthwise failed, generalized group deconv hasn't support";
-      return RET_NOT_SUPPORT;
+      return nullptr;
     }
   } else {
-    op->primitive->value.type = schema::PrimitiveType_DeConv2D;
-    op->primitive->value.value = attr.release();
+    primitive->value.type = schema::PrimitiveType_DeConv2D;
+    primitive->value.value = attr.release();
   }
 
-  return RET_OK;
+  return PrimitiveC::Create(primitive.release());
 }
 
 OnnxNodeRegistrar g_onnxDeConvParser("ConvTranspose", new OnnxDeConvParser());

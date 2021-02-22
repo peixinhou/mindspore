@@ -22,7 +22,6 @@
 #include "src/kernel_registry.h"
 #include "include/errorcode.h"
 #include "src/runtime/runtime_api.h"
-#include "src/runtime/kernel/arm/base/dequant.h"
 
 using mindspore::kernel::KERNEL_ARCH::kCPU;
 using mindspore::lite::KernelRegistrar;
@@ -40,8 +39,6 @@ ConvolutionDepthwiseFp16CPUKernel::~ConvolutionDepthwiseFp16CPUKernel() {
 
 int ConvolutionDepthwiseFp16CPUKernel::InitWeightBias() {
   // init weight: o, h, w, i; o == group, i == 1
-  ConvolutionBaseFP16CPUKernel::GetExecuteFilter();
-
   auto weight_tensor = in_tensors_.at(kWeightIndex);
   int channel = weight_tensor->Batch();
   int pack_weight_size = channel * weight_tensor->Height() * weight_tensor->Width();
@@ -50,6 +47,11 @@ int ConvolutionDepthwiseFp16CPUKernel::InitWeightBias() {
   if (packed_weight_ == nullptr) {
     MS_LOG(ERROR) << "Malloc buffer failed.";
     return RET_ERROR;
+  }
+  auto ret = ConvolutionBaseFP16CPUKernel::GetExecuteFilter(weight_tensor, weight_tensor->data_c());
+  if (ret != RET_OK) {
+    MS_LOG(ERROR) << "get execute filter data failed.";
+    return ret;
   }
   PackNCHWToNHWCFp16(fp16_weight_, packed_weight_, 1, weight_tensor->Height() * weight_tensor->Width(),
                      weight_tensor->Batch());
@@ -115,19 +117,13 @@ static int ConvDwFp16Run(void *cdata, int task_id) {
 }
 
 int ConvolutionDepthwiseFp16CPUKernel::Run() {
-  auto ret = ConvolutionBaseFP16CPUKernel::GetExecuteTensor();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Get Execute tensor failed.";
-    return ret;
-  }
+  ConvolutionBaseFP16CPUKernel::GetExecuteTensor();
 
-  ret = ParallelLaunch(this->context_->thread_pool_, ConvDwFp16Run, this, conv_param_->thread_num_);
+  auto ret = ParallelLaunch(this->context_->thread_pool_, ConvDwFp16Run, this, conv_param_->thread_num_);
   if (ret != RET_OK) {
     MS_LOG(ERROR) << "ConvDwFp16Run error: error_code[" << ret << "]";
   }
 
-  ConvolutionBaseFP16CPUKernel::IfCastOutput();
-  ConvolutionBaseFP16CPUKernel::FreeTmpBuffer();
   return ret;
 }
 
@@ -137,22 +133,6 @@ kernel::LiteKernel *CpuConvDwFp16KernelCreator(const std::vector<lite::Tensor *>
                                                const mindspore::lite::PrimitiveC *primitive) {
   MS_ASSERT(opParameter != nullptr);
   MS_ASSERT(desc.type == schema::PrimitiveType_DepthwiseConv2D);
-
-  auto *weight_tensor = inputs.at(kWeightIndex);
-  auto *restore_data = weight_tensor->data_c();
-  auto restore_type = weight_tensor->data_type();
-  bool dequant_flag =
-    !weight_tensor->quant_params().empty() && weight_tensor->quant_params().front().inited && restore_data != nullptr;
-  if (dequant_flag) {
-    auto *dequant_weight = kernel::DequantUtil::DequantWeight(weight_tensor);
-    if (dequant_weight == nullptr) {
-      MS_LOG(ERROR) << "dequant data is nullptr.";
-      free(opParameter);
-      return nullptr;
-    }
-    weight_tensor->set_data_type(kNumberTypeFloat32);
-    weight_tensor->set_data(dequant_weight);
-  }
 
   auto conv_param = reinterpret_cast<ConvParameter *>(opParameter);
   kernel::LiteKernel *kernel;
@@ -164,11 +144,6 @@ kernel::LiteKernel *CpuConvDwFp16KernelCreator(const std::vector<lite::Tensor *>
   }
   if (kernel == nullptr) {
     MS_LOG(ERROR) << "kernel is nullptr.";
-    if (dequant_flag) {
-      weight_tensor->FreeData();
-      weight_tensor->set_data(restore_data);
-      weight_tensor->set_data_type(restore_type);
-    }
     free(opParameter);
     return nullptr;
   }
@@ -176,18 +151,8 @@ kernel::LiteKernel *CpuConvDwFp16KernelCreator(const std::vector<lite::Tensor *>
   if (ret != RET_OK) {
     MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
                   << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
-    if (dequant_flag) {
-      weight_tensor->FreeData();
-      weight_tensor->set_data(restore_data);
-      weight_tensor->set_data_type(restore_type);
-    }
     delete kernel;
     return nullptr;
-  }
-  if (dequant_flag) {
-    weight_tensor->FreeData();
-    weight_tensor->set_data(restore_data);
-    weight_tensor->set_data_type(restore_type);
   }
   return kernel;
 }

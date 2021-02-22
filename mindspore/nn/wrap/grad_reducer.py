@@ -65,9 +65,7 @@ def _tensors_allreduce(degree, mean, allgather, allreduce, allreduce_filter, gra
         grad = allreduce(grad)
         if mean:
             degree = F.scalar_cast(degree, F.dtype(grad))
-            cast_op = P.Cast()
-            mul_op = P.Mul()
-            grad = mul_op(grad, cast_op(F.scalar_to_array(1.0 / degree), F.dtype(grad)))
+            grad = F.tensor_mul(grad, F.cast(F.scalar_to_array(1.0 / degree), F.dtype(grad)))
         return grad
     return grad
 
@@ -241,70 +239,88 @@ class DistributedGradReducer(Cell):
         parameters (list): the parameters to be updated.
         mean (bool): When mean is true, the mean coefficient (degree) would apply on gradients. Default: False.
         degree (int): The mean coefficient. Usually it equals to device number. Default: None.
+        fusion_type (int): The type of all reduce fusion. Default: 1.
 
     Raises:
         ValueError: If degree is not a int or less than 0.
 
+    Supported Platforms:
+        ``Ascend``, ``GPU``
+
     Examples:
-        >>> from mindspore.communication import init, get_group_size
+        >>> # This example should be run with multiple processes.
+        >>> # Please refer to the tutorial > Distributed Training on mindspore.cn.
+        >>> import numpy as np
+        >>> from mindspore.communication import init
         >>> from mindspore.ops import composite as C
         >>> from mindspore.ops import operations as P
         >>> from mindspore.ops import functional as F
         >>> from mindspore import context
         >>> from mindspore.context import ParallelMode
+        >>> from mindspore import Parameter, Tensor
         >>> from mindspore import nn
-        >>> from mindspore import ParameterTuple
+        >>> from mindspore.nn.wrap.cell_wrapper import WithLossCell
+        >>> from mindspore.parallel._utils import (_get_device_num, _get_gradients_mean)
         >>>
-        >>> device_id = int(os.environ["DEVICE_ID"])
-        >>> context.set_context(mode=context.GRAPH_MODE, device_target="Ascend", save_graphs=True,
-        >>>                     device_id=int(device_id))
+        >>> context.set_context(mode=context.GRAPH_MODE)
         >>> init()
         >>> context.reset_auto_parallel_context()
         >>> context.set_auto_parallel_context(parallel_mode=ParallelMode.DATA_PARALLEL)
         >>>
-        >>>
         >>> class TrainingWrapper(nn.Cell):
-        >>>     def __init__(self, network, optimizer, sens=1.0):
-        >>>         super(TrainingWrapper, self).__init__(auto_prefix=False)
-        >>>         self.network = network
-        >>>         self.network.add_flags(defer_inline=True)
-        >>>         self.weights = optimizer.parameters
-        >>>         self.optimizer = optimizer
-        >>>         self.grad = C.GradOperation(get_by_list=True, sens_param=True)
-        >>>         self.sens = sens
-        >>>         self.reducer_flag = False
-        >>>         self.grad_reducer = None
-        >>>         self.parallel_mode = context.get_auto_parallel_context("parallel_mode")
-        >>>         if self.parallel_mode in [ParallelMode.DATA_PARALLEL,
-        >>>                                            ParallelMode.HYBRID_PARALLEL]:
-        >>>             self.reducer_flag = True
-        >>>         if self.reducer_flag:
-        >>>             mean = context.get_auto_parallel_context("gradients_mean")
-        >>>             if mean.get_device_num_is_set():
-        >>>                 degree = context.get_auto_parallel_context("device_num")
-        >>>             else:
-        >>>                 degree = get_group_size()
-        >>>             self.grad_reducer = nn.DistributedGradReducer(optimizer.parameters, mean, degree)
+        ...     def __init__(self, network, optimizer, sens=1.0):
+        ...         super(TrainingWrapper, self).__init__(auto_prefix=False)
+        ...         self.network = network
+        ...         self.network.add_flags(defer_inline=True)
+        ...         self.weights = optimizer.parameters
+        ...         self.optimizer = optimizer
+        ...         self.grad = C.GradOperation(get_by_list=True, sens_param=True)
+        ...         self.sens = sens
+        ...         self.reducer_flag = False
+        ...         self.grad_reducer = None
+        ...         self.parallel_mode = context.get_auto_parallel_context("parallel_mode")
+        ...         if self.parallel_mode in [ParallelMode.DATA_PARALLEL, ParallelMode.HYBRID_PARALLEL]:
+        ...             self.reducer_flag = True
+        ...         if self.reducer_flag:
+        ...             mean = _get_gradients_mean()
+        ...             degree = _get_device_num()
+        ...             self.grad_reducer = nn.DistributedGradReducer(optimizer.parameters, mean, degree)
+        ...
+        ...     def construct(self, *args):
+        ...         weights = self.weights
+        ...         loss = self.network(*args)
+        ...         sens = P.Fill()(P.DType()(loss), P.Shape()(loss), self.sens)
+        ...         grads = self.grad(self.network, weights)(*args, sens)
+        ...         if self.reducer_flag:
+        ...             # apply grad reducer on grads
+        ...             grads = self.grad_reducer(grads)
+        ...         return F.depend(loss, self.optimizer(grads))
         >>>
-        >>>     def construct(self, *args):
-        >>>         weights = self.weights
-        >>>         loss = self.network(*args)
-        >>>         sens = P.Fill()(P.DType()(loss), P.Shape()(loss), self.sens)
-        >>>         grads = self.grad(self.network, weights)(*args, sens)
-        >>>         if self.reducer_flag:
-        >>>             # apply grad reducer on grads
-        >>>             grads = self.grad_reducer(grads)
-        >>>         return F.depend(loss, self.optimizer(grads))
+        >>> class Net(nn.Cell):
+        ...     def __init__(self, in_features, out_features):
+        ...         super(Net, self).__init__()
+        ...         self.weight = Parameter(Tensor(np.ones([in_features, out_features]).astype(np.float32)),
+        ...                                 name='weight')
+        ...         self.matmul = P.MatMul()
+        ...
+        ...     def construct(self, x):
+        ...         output = self.matmul(x, self.weight)
+        ...         return output
         >>>
-        >>> network = Net()
-        >>> optimizer = nn.Momentum(network.trainable_params(), learning_rate=0.1, momentum=0.9)
-        >>> train_cell = TrainingWrapper(network, optimizer)
-        >>> inputs = Tensor(np.ones([16, 16]).astype(np.float32))
-        >>> label = Tensor(np.zeros([16, 16]).astype(np.float32))
+        >>> size, in_features, out_features = 16, 16, 10
+        >>> network = Net(in_features, out_features)
+        >>> loss = nn.MSELoss()
+        >>> net_with_loss = WithLossCell(network, loss)
+        >>> optimizer = nn.Momentum(net_with_loss.trainable_params(), learning_rate=0.1, momentum=0.9)
+        >>> train_cell = TrainingWrapper(net_with_loss, optimizer)
+        >>> inputs = Tensor(np.ones([size, in_features]).astype(np.float32))
+        >>> label = Tensor(np.zeros([size, out_features]).astype(np.float32))
         >>> grads = train_cell(inputs, label)
+        >>> print(grads)
+        256.0
     """
 
-    def __init__(self, parameters, mean=True, degree=None):
+    def __init__(self, parameters, mean=True, degree=None, fusion_type=1):
         super(DistributedGradReducer, self).__init__(auto_prefix=False)
         self.map_ = C.Map()
         if degree is None:
@@ -322,7 +338,7 @@ class DistributedGradReducer(Cell):
             self.op_list = _init_allreduce_operators(len(parameters), split_indices)
         else:
             self.split_fusion = False
-            self.allreduce = AllReduce().add_prim_attr('fusion', 1)
+            self.allreduce = AllReduce().add_prim_attr('fusion', fusion_type)
         self.allgather = AllGather(GlobalComm.WORLD_COMM_GROUP)
         ps_filter = lambda x: x.is_param_ps
         self.ps_parameters = tuple(ps_filter(x) for x in parameters)

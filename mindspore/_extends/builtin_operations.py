@@ -20,32 +20,33 @@ from mindspore.common.tensor import Tensor
 import mindspore.common.dtype as mstype
 from mindspore.common.dtype import dtype_to_nptype, get_py_obj_dtype
 
-def scalar_add(x, y):
+
+def ScalarAdd(x, y):
     """Implement `scalar_add`."""
     return x + y
 
 
-def scalar_mul(x, y):
+def ScalarMul(x, y):
     """Implement `scalar_mul`."""
     return x * y
 
 
-def scalar_mod(x, y):
+def ScalarMod(x, y):
     """Implement `scalar_mul`."""
     return x % y
 
 
-def scalar_sub(x, y):
+def ScalarSub(x, y):
     """Implement `scalar_sub`."""
     return x - y
 
 
-def scalar_usub(x):
+def ScalarUsub(x):
     """Implement `scalar_usub`."""
     return -x
 
 
-def tuple_getitem(x, index):
+def TupleGetItem(x, index):
     """Implement `tuple_getitem`."""
     if isinstance(x, Tensor):
         x = x.asnumpy()
@@ -131,6 +132,16 @@ def Depend(value, expr):
     return value
 
 
+def UpdateState(monad, expr):
+    """Implement `UpdateState`."""
+    return monad
+
+
+def Load(value, u=None):
+    """Implement `Load`."""
+    return value
+
+
 # only used in PyNative mode
 def make_ref(key, value, ref):
     return value
@@ -164,8 +175,9 @@ hyper_map = C.HyperMap()
 
 def mixed_precision_cast(dst_type, x):
     """Implement `mixed_precision_cast`."""
+
     def cast_inner(data):
-        if isinstance(data, Tensor) and data.dtype in (mstype.float32, mstype.float16):
+        if isinstance(data, Tensor) and data.dtype in (mstype.float32, mstype.float16, mstype.float64):
             return F.cast(data, dst_type)
         return data
 

@@ -22,7 +22,7 @@
 #include "src/lite_kernel.h"
 #include "nnacl/op_base.h"
 #include "src/runtime/kernel/arm/base/convolution_base.h"
-#include "nnacl/fp32/conv.h"
+#include "nnacl/fp32/conv_common_fp32.h"
 
 namespace mindspore::kernel {
 class GroupConvolutionCPUKernel : public ConvolutionBaseCPUKernel {
@@ -41,15 +41,17 @@ class GroupConvolutionCPUKernel : public ConvolutionBaseCPUKernel {
   int ReSize() override;
   int Run() override;
   int PreProcess() override;
-  void SeparateInput(int group_id);
-  void PostConcat(int group_id);
+  virtual void SeparateInput(int group_id);
+  virtual void PostConcat(int group_id);
   void FreeSubKernel();
 
- private:
+ protected:
   std::vector<kernel::LiteKernel *> group_convs_;
+  const int group_num_;
+
+ private:
   float *ori_in_data_ = nullptr;   // do not free
   float *ori_out_data_ = nullptr;  // do not free
-  const int group_num_;
 };
 }  // namespace mindspore::kernel
 

@@ -1,5 +1,5 @@
 /**
- * Copyright 2020 Huawei Technologies Co., Ltd
+ * Copyright 2020-2021 Huawei Technologies Co., Ltd
 
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,12 +25,14 @@
 #include <chrono>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <utility>
 #include <vector>
 #include <map>
 #include <set>
 #include <thread>
+#include "minddata/dataset/engine/cache/cache_arena.h"
 #include "minddata/dataset/engine/cache/cache_hw.h"
 #include "minddata/dataset/engine/cache/cache_numa.h"
 #include "minddata/dataset/engine/cache/cache_service.h"
@@ -68,6 +70,7 @@ class CacheServer : public Service {
     int32_t GetPort() const { return port_; }
     int32_t GetSharedMemorySzInGb() const { return shared_memory_sz_in_gb_; }
     float GetMemoryCapRatio() const { return memory_cap_ratio_; }
+    int8_t GetLogLevel() const { return log_level_; }
 
     Builder &SetRootDirectory(std::string root) {
       top_ = std::move(root);
@@ -89,6 +92,10 @@ class CacheServer : public Service {
       memory_cap_ratio_ = ratio;
       return *this;
     }
+    Builder &SetLogLevel(int8_t log_level) {
+      log_level_ = log_level;
+      return *this;
+    }
 
     Status SanityCheck();
 
@@ -98,7 +105,8 @@ class CacheServer : public Service {
           << "Number of parallel workers: " << GetNumWorkers() << "\n"
           << "Tcp/ip port: " << GetPort() << "\n"
           << "Shared memory size (in GB): " << GetSharedMemorySzInGb() << "\n"
-          << "Memory cap ratio: " << GetMemoryCapRatio();
+          << "Memory cap ratio: " << GetMemoryCapRatio() << "\n"
+          << "Log level: " << GetLogLevel();
     }
 
     friend std::ostream &operator<<(std::ostream &out, const Builder &bld) {
@@ -111,7 +119,7 @@ class CacheServer : public Service {
       // We need to bring up the Task Manager by bringing up the Services singleton.
       RETURN_IF_NOT_OK(Services::CreateInstance());
       RETURN_IF_NOT_OK(
-        CacheServer::CreateInstance(top_, num_workers_, port_, shared_memory_sz_in_gb_, memory_cap_ratio_));
+        CacheServer::CreateInstance(top_, num_workers_, port_, shared_memory_sz_in_gb_, memory_cap_ratio_, log_level_));
       return Status::OK();
     }
 
@@ -121,6 +129,7 @@ class CacheServer : public Service {
     int32_t port_;
     int32_t shared_memory_sz_in_gb_;
     float memory_cap_ratio_;
+    int8_t log_level_;
 
     /// \brief Sanity checks on the shared memory.
     /// \return Status object
@@ -136,11 +145,11 @@ class CacheServer : public Service {
   ~CacheServer() override { (void)ServiceStop(); }
 
   static Status CreateInstance(const std::string &spill_path, int32_t num_workers, int32_t port,
-                               int32_t shared_memory_sz, float memory_cap_ratio) {
+                               int32_t shared_memory_sz, float memory_cap_ratio, int8_t log_level) {
     std::call_once(init_instance_flag_, [&]() -> Status {
       auto &SvcManager = Services::GetInstance();
       RETURN_IF_NOT_OK(
-        SvcManager.AddHook(&instance_, spill_path, num_workers, port, shared_memory_sz, memory_cap_ratio));
+        SvcManager.AddHook(&instance_, spill_path, num_workers, port, shared_memory_sz, memory_cap_ratio, log_level));
       return Status::OK();
     });
     return Status::OK();
@@ -163,7 +172,7 @@ class CacheServer : public Service {
   /// \brief Get a free tag
   /// \param q[in] pointer to a pointer to a CacheServerRequest
   /// \return Status object
-  static Status GetFreeRequestTag(int32_t queue_id, CacheServerRequest **q);
+  static Status GetFreeRequestTag(CacheServerRequest **q);
 
   /// \brief Return a tag to the free list
   /// \param p[in] pointer to already finished CacheServerRequest tag
@@ -187,23 +196,55 @@ class CacheServer : public Service {
 
   /// \brief Assign a worker by a numa id
   /// \return worker id
-  worker_id_t GetWorkerByNumaId(numa_id_t node_id);
+  worker_id_t GetWorkerByNumaId(numa_id_t node_id) const;
 
   /// \brief Randomly pick a worker
   /// \return worker id
-  worker_id_t GetRandomWorker();
+  worker_id_t GetRandomWorker() const;
 
   /// \brief Check if we bind threads to numa cores
   bool IsNumaAffinityOn() const { return numa_affinity_; }
 
-  /// \brief Internal function to do row batch fetch
-  /// \param rq Request
-  /// \param reply Reply
-  /// \return Status object
-  Status BatchFetchRows(CacheRequest *rq, CacheReply *reply);
-
   /// \brief Return the memory cap ratio
   float GetMemoryCapRatio() const { return memory_cap_ratio_; }
+
+  /// \brief Function to handle a row request
+  /// \param[in] cache_req A row request to handle
+  /// \param[out] internal_request Indicator if the request is an internal request
+  /// \return Status object
+  Status ProcessRowRequest(CacheServerRequest *cache_req, bool *internal_request);
+
+  /// \brief Function to handle an admin request
+  /// \param[in] cache_req An admin request to handle
+  /// \return Status object
+  Status ProcessAdminRequest(CacheServerRequest *cache_req);
+
+  /// \brief Function to handle a session request
+  /// \param[in] cache_req A session request to handle
+  /// \return Status object
+  Status ProcessSessionRequest(CacheServerRequest *cache_req);
+
+  /// \brief How a request is handled.
+  /// \note that it can be process immediately by a grpc thread or routed to a server thread
+  /// which is pinned to some numa node core.
+  Status ProcessRequest(CacheServerRequest *cache_req);
+
+  void GlobalShutdown();
+
+  /// \brief This returns where we attach to the shared memory.
+  /// Some gRPC requests will ask for a shared memory block, and
+  /// we can't return the absolute address as this makes no sense
+  /// in the client. So instead we will return an address relative
+  /// to the base address of the shared memory where we attach to.
+  /// \return Base address of the shared memory.
+  const void *SharedMemoryBaseAddr() const { return shm_->SharedMemoryBaseAddr(); }
+
+  /// \brief Return the public key of the shared memory.
+  int32_t GetKey() const { return shm_->GetKey(); }
+
+  Status AllocateSharedMemory(int32_t client_id, size_t sz, void **p);
+
+  void DeallocateSharedMemory(int32_t client_id, void *p);
 
  private:
   static std::once_flag init_instance_flag_;
@@ -214,29 +255,36 @@ class CacheServer : public Service {
   cache_index all_caches_;
   std::set<session_id_type> active_sessions_;
   std::shared_ptr<QueueList<CacheServerRequest *>> cache_q_;
-  std::shared_ptr<QueueList<CacheServerRequest *>> free_list_;
-  std::vector<std::unique_ptr<MemGuard<CacheServerRequest, NumaAllocator<CacheServerRequest>>>> tag_;
   std::shared_ptr<CacheServerGreeterImpl> comm_layer_;
   TaskGroup vg_;
   int32_t num_workers_;
   int32_t num_grpc_workers_;
   int32_t port_;
   int32_t shared_memory_sz_in_gb_;
+  int8_t log_level_;  // log_level is saved here for informational purpose only. It's not a functional field.
   std::atomic<bool> global_shutdown_;
   float memory_cap_ratio_;
   std::shared_ptr<CacheServerHW> hw_info_;
   std::map<worker_id_t, Task *> numa_tasks_;
   bool numa_affinity_;
+  std::vector<int32_t> shutdown_qIDs_;
+  std::unique_ptr<CachedSharedMemory> shm_;
 
   /// \brief Constructor
   /// \param spill_path Top directory for spilling buffers to.
   /// \param num_workers Number of threads for handling requests.
   explicit CacheServer(const std::string &spill_path, int32_t num_workers, int32_t port, int32_t share_memory_sz_in_gb,
-                       float memory_cap_ratio);
+                       float memory_cap_ratio, int8_t log_level);
 
   /// \brief Locate a cache service from connection id.
   /// \return Pointer to cache service. Null if not found
   CacheService *GetService(connection_id_type id) const;
+
+  /// \brief Going over existing cache service and calculate how much we have consumed so far, a new cache service
+  /// can only be created if there is still enough avail memory left
+  /// \param cache_mem_sz Requested memory for a new cache service
+  /// \return Status object
+  Status GlobalMemoryCheck(uint64_t cache_mem_sz);
 
   /// \brief Create a cache service. We allow multiple clients to create the same cache service.
   /// Subsequent duplicate requests are ignored. The first cache client to create the service will be given
@@ -296,6 +344,12 @@ class CacheServer : public Service {
   /// \return Status object
   Status GetStat(CacheRequest *rq, CacheReply *reply);
 
+  /// \brief Internal function to get cache state
+  /// \param rq
+  /// \param reply
+  /// \return Status object
+  Status GetCacheState(CacheRequest *rq, CacheReply *reply);
+
   /// \brief Cache a schema request
   /// \param rq
   /// \return Status object
@@ -314,7 +368,7 @@ class CacheServer : public Service {
 
   /// \brief A proper shutdown of the server
   /// \return Status object
-  Status GlobalShutdown();
+  Status AcknowledgeShutdown(CacheServerRequest *cache_req);
 
   /// \brief Find keys that will be cache miss
   /// \return Status object
@@ -330,6 +384,72 @@ class CacheServer : public Service {
 
   /// \brief Connect request by a pipeline
   Status ConnectReset(CacheRequest *rq);
+
+  /// \brief This is an internal structure used by Batch processing.
+  /// This is how it works internally. For batch fetch/cache, the grpc thread
+  /// will intercept the request and breaks it down into multiple internal requests
+  /// and spread over all the server workers. But each internal request consumes
+  /// one free tag and we may run out of free tags if they don't return promptly.
+  /// So we will let the server thread return the free tag immediately but the put
+  /// the return code in this following structure. GRPC thread must wait until all
+  /// the rc come back.
+  class BatchWait : public std::enable_shared_from_this<BatchWait> {
+   public:
+    explicit BatchWait(int n) : expected_(n), num_back_(0) {
+      expected_ = n;
+      rc_lists_.reserve(expected_);
+    }
+    ~BatchWait() = default;
+
+    std::weak_ptr<BatchWait> GetBatchWait() { return weak_from_this(); }
+
+    Status Set(Status rc) {
+      CHECK_FAIL_RETURN_UNEXPECTED(expected_ > num_back_, "Programming error");
+      std::unique_lock<std::mutex> lck(mux_);
+      rc_lists_.push_back(std::move(rc));
+      ++num_back_;
+      if (num_back_ == expected_) {
+        wp_.Set();
+      }
+      return Status::OK();
+    }
+
+    Status Wait() { return wp_.Wait(); }
+
+    Status GetRc() {
+      Status rc;
+      for (auto &cache_rc : rc_lists_) {
+        if (cache_rc.IsError() && cache_rc != StatusCode::kMDInterrupted && rc.IsOk()) {
+          rc = cache_rc;
+        }
+      }
+      return rc;
+    }
+
+   private:
+    std::mutex mux_;
+    WaitPost wp_;
+    int64_t expected_;
+    int64_t num_back_;
+    std::vector<Status> rc_lists_;
+  };
+
+  /// \brief Internal function to do row batch fetch
+  /// \param rq Request
+  /// \param reply Reply
+  /// \return Status object
+  Status BatchFetchRows(CacheRequest *rq, CacheReply *reply);
+
+  /// \brief Main function to fetch rows in batch. The output is a contiguous memory which will be decoded
+  /// by the CacheClient. Cache miss is not an error, and will be coded in the output to mark an empty row.
+  /// \param[in] v A vector of row id.
+  /// \param[out] out A contiguous memory buffer that holds the requested rows.
+  /// \return Status object
+  Status BatchFetch(const std::shared_ptr<flatbuffers::FlatBufferBuilder> &fbb, WritableSlice *out);
+  Status BatchCacheRows(CacheRequest *rq);
+
+  Status InternalFetchRow(CacheRequest *rq);
+  Status InternalCacheRow(CacheRequest *rq, CacheReply *reply);
 };
 }  // namespace dataset
 }  // namespace mindspore

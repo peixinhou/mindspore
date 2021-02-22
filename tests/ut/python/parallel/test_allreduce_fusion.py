@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import numpy as np
+import pytest
 
 import mindspore as ms
 import mindspore.nn as nn
@@ -125,6 +126,7 @@ def train_common(net):
     return allreduce_fusion_dict
 
 
+@pytest.mark.skip(reason="depreciated feature")
 def test_allreduce_fusion_parameters():
     cost_model_context.reset_cost_model_context()
     cost_model_context.set_cost_model_context(costmodel_allreduce_fusion_algorithm=2)
@@ -181,6 +183,7 @@ def test_allreduce_fusion_parameters():
     assert computation_time_parameter == 0.1
 
 
+@pytest.mark.skip(reason="depreciated feature")
 def test_allreduce_fusion1():
     cost_model_context.set_cost_model_context(costmodel_allreduce_fusion_algorithm=1)
     cost_model_context.set_cost_model_context(costmodel_allreduce_fusion_times=2)
@@ -205,6 +208,7 @@ def test_allreduce_fusion1():
     cost_model_context.reset_cost_model_context()
 
 
+@pytest.mark.skip(reason="depreciated feature")
 # reset_cost_model_context is called, the default value of costmodel_allreduce_fusion_times is 0, step_allreduce_fusion
 # is bypassed.
 def test_allreduce_fusion2():
@@ -220,6 +224,7 @@ def test_allreduce_fusion2():
     cost_model_context.reset_cost_model_context()
 
 
+@pytest.mark.skip(reason="depreciated feature")
 def test_allreduce_fusion3():
     cost_model_context.set_cost_model_context(costmodel_allreduce_fusion_algorithm=1)
     cost_model_context.set_cost_model_context(costmodel_allreduce_fusion_times=3)
@@ -248,6 +253,7 @@ def test_allreduce_fusion3():
     cost_model_context.reset_cost_model_context()
 
 
+@pytest.mark.skip(reason="depreciated feature")
 def test_allreduce_fusion4():
     cost_model_context.set_cost_model_context(costmodel_allreduce_fusion_algorithm=1)
     cost_model_context.set_cost_model_context(costmodel_allreduce_fusion_times=2)
@@ -277,6 +283,7 @@ def test_allreduce_fusion4():
     cost_model_context.reset_cost_model_context()
 
 
+@pytest.mark.skip(reason="depreciated feature")
 def test_allreduce_fusion5():
     cost_model_context.set_cost_model_context(costmodel_allreduce_fusion_algorithm=2)
     cost_model_context.set_cost_model_context(costmodel_allreduce_fusion_tail_time=0.1)

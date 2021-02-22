@@ -33,8 +33,8 @@ enum DynamicMemBufStatus : int { kMemBufIdle, kMemBufUsed };
 // Alloc memory aligned according to 512 bytes.
 static const size_t DYNAMIC_MEM_ALIGN_SIZE = 512;
 
-// The minimum unit size (500M) of memory block used for dynamic extend.
-static const size_t DYNAMIC_MEM_ALLOC_UNIT_SIZE = 500 << 20;
+// The minimum unit size (1G) of memory block used for dynamic extend.
+static const size_t DYNAMIC_MEM_ALLOC_UNIT_SIZE = 1024 << 20;
 
 // The Comparator of device address from small to large.
 struct DeviceAddrCmp {
@@ -87,7 +87,8 @@ class DynamicMemPoolBestFit {
   void ReleaseDeviceRes();
   // Display the information of memory block and memory buf.
   void DumpDynamicMemPoolInfo();
-  SizeMapMemBuf GetIdleMemBufMap() { return global_idle_mem_buf_map_; }
+  // Get the map of global idle mem buf and size.
+  SizeMapMemBuf global_idle_mem_buf_map() const { return global_idle_mem_buf_map_; }
 
   // Get the related memory statistics information.
   size_t total_mem_statistics() const { return total_mem_statistics_; }

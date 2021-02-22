@@ -1,5 +1,5 @@
 /**
- * Copyright 2019 Huawei Technologies Co., Ltd
+ * Copyright 2019-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -109,12 +109,12 @@ class CifarOp : public ParallelOp, public RandomAccessOp {
     }
 
     // Check validity of input args
-    // @return - The error code return
+    // @return Status The status code returned
     Status SanityCheck();
 
     // The builder "build" method creates the final object.
     // @param std::shared_ptr<CifarOp> *op - DatasetOp
-    // @return - The error code return
+    // @return Status The status code returned
     Status Build(std::shared_ptr<CifarOp> *op);
 
    private:
@@ -144,13 +144,13 @@ class CifarOp : public ParallelOp, public RandomAccessOp {
 
   // Worker thread pulls a number of IOBlock from IOBlock Queue, make a buffer and push it to Connector
   // @param uint32_t workerId - id of each worker
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status WorkerEntry(int32_t worker_id) override;
 
   // Main Loop of CifarOp
   // Master thread: Fill IOBlockQueue, then goes to sleep
   // Worker thread: pulls IOBlock from IOBlockQueue, work on it then put buffer to mOutConnector
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status operator()() override;
 
   // A print method typically used for debugging
@@ -165,35 +165,24 @@ class CifarOp : public ParallelOp, public RandomAccessOp {
   // @return
   static Status CountTotalRows(const std::string &dir, const std::string &usage, bool isCIFAR10, int64_t *count);
 
-  /// \brief Base-class override for NodePass visitor acceptor
-  /// \param[in] p Pointer to the NodePass to be accepted
-  /// \param[out] modified Indicator if the node was changed at all
-  /// \return Status of the node visit
-  Status Accept(NodePass *p, bool *modified) override;
-
   // Op name getter
   // @return Name of the current Op
   std::string Name() const override { return "CifarOp"; }
 
-  /// \brief Base-class override for GetDatasetSize
-  /// \param[out] dataset_size the size of the dataset
-  /// \return Status of the function
-  Status GetDatasetSize(int64_t *dataset_size) override;
-
  private:
   // Initialize Sampler, calls sampler->Init() within
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status InitSampler();
 
   // Load a tensor row according to a pair
   // @param uint64_t index - index need to load
   // @param TensorRow row - image & label read into this tensor row
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status LoadTensorRow(uint64_t index, TensorRow *row);
 
   // @param const std::vector<uint64_t> &keys - keys in ioblock
   // @param std::unique_ptr<DataBuffer> db
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status LoadBuffer(const std::vector<int64_t> &keys, std::unique_ptr<DataBuffer> *db);
 
   // Read block data from cifar file
@@ -205,7 +194,7 @@ class CifarOp : public ParallelOp, public RandomAccessOp {
   Status LaunchThreadsAndInitOp();
 
   // reset Op
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status Reset() override;
 
   // Get cifar files in dir
@@ -224,9 +213,9 @@ class CifarOp : public ParallelOp, public RandomAccessOp {
   // @return
   Status ParseCifarData();
 
-  // Method derived from RandomAccess Op, enable Sampler to get all ids for each calss
+  // Method derived from RandomAccess Op, enable Sampler to get all ids for each class
   // @param (std::map<uint64_t, std::vector<uint64_t >> * map - key label, val all ids for this class
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status GetClassIds(std::map<int32_t, std::vector<int64_t>> *cls_ids) const override;
 
   // Private function for computing the assignment of the column name map.
@@ -243,6 +232,7 @@ class CifarOp : public ParallelOp, public RandomAccessOp {
   const std::string usage_;  // can only be either "train" or "test"
   std::unique_ptr<Queue<std::vector<unsigned char>>> cifar_raw_data_block_;
   std::vector<std::string> cifar_files_;
+  std::vector<std::string> path_record_;
   std::vector<std::pair<std::shared_ptr<Tensor>, std::vector<uint32_t>>> cifar_image_label_pairs_;
 };
 }  // namespace dataset

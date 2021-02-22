@@ -20,27 +20,27 @@
 #include <vector>
 
 #include "src/runtime/kernel/opencl/opencl_kernel.h"
-#include "nnacl/fp32/pooling.h"
+#include "nnacl/fp32/pooling_fp32.h"
 
 namespace mindspore::kernel {
 
 class PoolingOpenCLKernel : public OpenCLKernel {
  public:
   PoolingOpenCLKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
-                      const std::vector<lite::Tensor *> &outputs)
-      : OpenCLKernel(parameter, inputs, outputs), parameter_(reinterpret_cast<PoolingParameter *>(parameter)) {}
+                      const std::vector<lite::Tensor *> &outputs, const lite::InnerContext *ctx,
+                      const mindspore::lite::PrimitiveC *primitive)
+      : OpenCLKernel(parameter, inputs, outputs, ctx, primitive),
+        parameter_(reinterpret_cast<PoolingParameter *>(parameter)) {}
   ~PoolingOpenCLKernel() override = default;
 
-  int Init() override;
   int Run() override;
+  int Prepare() override;
+  int CheckSpecs() override;
+  void SetConstArgs() override;
+  void SetGlobalLocal() override;
 
  private:
-  void InitGlobalSize();
   PoolingParameter *parameter_;
-  cl::Kernel kernel_;
-  bool enable_fp16_{false};
-  std::vector<size_t> local_size_;
-  std::vector<size_t> global_size_;
 };
 
 }  // namespace mindspore::kernel

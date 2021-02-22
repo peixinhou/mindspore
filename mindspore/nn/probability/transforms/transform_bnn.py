@@ -34,30 +34,33 @@ class TransformToBNN:
         dnn_factor ((int, float): The coefficient of backbone's loss, which is computed by loss function. Default: 1.
         bnn_factor (int, float): The coefficient of KL loss, which is KL divergence of Bayesian layer. Default: 1.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> class Net(nn.Cell):
-        >>>     def __init__(self):
-        >>>         super(Net, self).__init__()
-        >>>         self.conv = nn.Conv2d(3, 64, 3, has_bias=False, weight_init='normal')
-        >>>         self.bn = nn.BatchNorm2d(64)
-        >>>         self.relu = nn.ReLU()
-        >>>         self.flatten = nn.Flatten()
-        >>>         self.fc = nn.Dense(64*224*224, 12) # padding=0
-        >>>
-        >>>     def construct(self, x):
-        >>>         x = self.conv(x)
-        >>>         x = self.bn(x)
-        >>>         x = self.relu(x)
-        >>>         x = self.flatten(x)
-        >>>         out = self.fc(x)
-        >>>         return out
+        ...     def __init__(self):
+        ...         super(Net, self).__init__()
+        ...         self.conv = nn.Conv2d(3, 64, 3, has_bias=False, weight_init='normal')
+        ...         self.bn = nn.BatchNorm2d(64)
+        ...         self.relu = nn.ReLU()
+        ...         self.flatten = nn.Flatten()
+        ...         self.fc = nn.Dense(64*224*224, 12) # padding=0
+        ...
+        ...     def construct(self, x):
+        ...         x = self.conv(x)
+        ...         x = self.bn(x)
+        ...         x = self.relu(x)
+        ...         x = self.flatten(x)
+        ...         out = self.fc(x)
+        ...         return out
         >>>
         >>> net = Net()
-        >>> criterion = nn.SoftmaxCrossEntropyWithLogits(is_grad=False, sparse=True)
+        >>> criterion = nn.SoftmaxCrossEntropyWithLogits(sparse=True)
         >>> optim = Momentum(params=net.trainable_params(), learning_rate=0.1, momentum=0.9)
-        >>> net_with_loss = WithLossCell(network, criterion)
+        >>> net_with_loss = WithLossCell(net, criterion)
         >>> train_network = TrainOneStepCell(net_with_loss, optim)
-        >>> bnn_transformer = TransformToBNN(train_network, 60000, 0.1)
+        >>> bnn_transformer = TransformToBNN(train_network, 60000, 0.0001)
     """
 
     def __init__(self, trainable_dnn, dnn_factor=1, bnn_factor=1):
@@ -105,11 +108,14 @@ class TransformToBNN:
         Returns:
             Cell, a trainable BNN model wrapped by TrainOneStepCell.
 
+        Supported Platforms:
+        ``Ascend`` ``GPU``
+
         Examples:
             >>> net = Net()
-            >>> criterion = nn.SoftmaxCrossEntropyWithLogits(is_grad=False, sparse=True)
+            >>> criterion = nn.SoftmaxCrossEntropyWithLogits(sparse=True)
             >>> optim = Momentum(params=net.trainable_params(), learning_rate=0.1, momentum=0.9)
-            >>> net_with_loss = WithLossCell(network, criterion)
+            >>> net_with_loss = WithLossCell(net, criterion)
             >>> train_network = TrainOneStepCell(net_with_loss, optim)
             >>> bnn_transformer = TransformToBNN(train_network, 60000, 0.1)
             >>> train_bnn_network = bnn_transformer.transform_to_bnn_model()
@@ -147,11 +153,14 @@ class TransformToBNN:
             Cell, a trainable model wrapped by TrainOneStepCell, whose specific type of layer is transformed to the
             corresponding bayesian layer.
 
+        Supported Platforms:
+        ``Ascend`` ``GPU``
+
         Examples:
             >>> net = Net()
-            >>> criterion = nn.SoftmaxCrossEntropyWithLogits(is_grad=False, sparse=True)
+            >>> criterion = nn.SoftmaxCrossEntropyWithLogits(sparse=True)
             >>> optim = Momentum(params=net.trainable_params(), learning_rate=0.1, momentum=0.9)
-            >>> net_with_loss = WithLossCell(network, criterion)
+            >>> net_with_loss = WithLossCell(net, criterion)
             >>> train_network = TrainOneStepCell(net_with_loss, optim)
             >>> bnn_transformer = TransformToBNN(train_network, 60000, 0.1)
             >>> train_bnn_network = bnn_transformer.transform_to_bnn_layer(Dense, DenseReparam)

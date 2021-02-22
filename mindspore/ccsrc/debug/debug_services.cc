@@ -17,6 +17,8 @@
 #include <map>
 #include "backend/session/anf_runtime_algorithm.h"
 #include "debug/debug_services.h"
+#include "debug/debugger/tensor_summary.h"
+
 namespace mindspore {
 
 DebugServices::DebugServices() {
@@ -49,9 +51,6 @@ void DebugServices::AddWatchpoint(unsigned int id, unsigned int watch_condition,
   watchpoint_item.id = id;
   watchpoint_item.condition.type = static_cast<CONDITION_TYPE>(watch_condition);
   watchpoint_item.condition.parameter = parameter;
-  if (watch_condition > 2 && watch_condition < 13)
-    // odd indices are greater than conditions and even indices are less than
-    watchpoint_item.condition.comparison = (watch_condition & 1) == 0 ? "LT" : "GT";
   watchpoint_item.check_node_list = check_node_list;
   watchpoint_item.parameter_list = parameter_list;
   watchpoint_table[id] = watchpoint_item;
@@ -62,328 +61,154 @@ void DebugServices::RemoveWatchpoint(unsigned int id) {
   watchpoint_table.erase(id);
 }
 
-template <typename T>
-DebugServices::tensor_stats DebugServices::SummarizeTensor(const T *start, const T *start_prev, unsigned int n,
-                                                           bool need_min_max, bool need_mean_sd,
-                                                           bool need_zero_percentage,
-                                                           bool need_tensor_update_ratio_mean, bool need_allclose) {
-  tensor_stats stats;
-  double zero_count = 0.0;
-  double rtol = 1.0e-5;
-  double atol = 1.0e-8;
-  double update_ratio_sum = 0.0;
-  double epsilon = 1.0e-9;
-  for (unsigned int i = 0; i < n; ++i) {
-    auto val = static_cast<double>(start[i]);
-    double val_prev = 0.0;
-    if (start_prev) {
-      val_prev = static_cast<double>(start_prev[i]);
-    }
-    stats.has_nan = stats.has_nan || std::isnan(val);
-    stats.has_inf = stats.has_inf || std::isinf(val);
-    if (stats.has_inf && stats.has_nan) {
-      // other statistics don't make sense in this case
-      break;
-    }
-
-    if (need_min_max) {
-      stats.min = std::min(stats.min, val);
-      stats.max = std::max(stats.max, val);
-    }
-
-    if (need_mean_sd) {
-      double delta = val - stats.mean;
-      stats.mean += delta / (i + 1);
-      stats.m2 += delta * (val - stats.mean);
-    }
-
-    if (need_zero_percentage) {
-      if (val == 0) zero_count++;
-    }
-
-    if (need_tensor_update_ratio_mean && start_prev) {
-      update_ratio_sum += (std::abs(val) / (epsilon + std::abs(val_prev)));
-    }
-
-    if (need_allclose && start_prev) {
-      stats.allclose &= (std::abs(val - val_prev) <= (atol + rtol * std::abs(val_prev)));
-    }
-  }
-  if (need_tensor_update_ratio_mean && start_prev) {
-    stats.tensor_update_ratio_mean = (update_ratio_sum / n);
-  }
-  stats.zero_percentage = (zero_count / n) * 100;
-  stats.n = n;
-  return stats;
-}
-
 void DebugServices::CheckWatchpoints(std::vector<std::string> *name, std::vector<std::string> *slot,
                                      std::vector<int> *condition, std::vector<unsigned int> *watchpoint_id,
                                      std::vector<std::vector<parameter_t>> *parameters,
-                                     const std::vector<std::string> &op_overflows,
+                                     std::vector<int32_t> *error_codes, const std::vector<std::string> &op_overflows,
                                      const std::vector<std::shared_ptr<TensorData>> &tensor_list,
-                                     const bool init_dbg_suspend) {
+                                     const bool init_dbg_suspend, const bool step_end, const bool recheck) {
   std::lock_guard<std::mutex> lg(lock_);
-  if (watchpoint_table.empty()) {
-    return;
-  }
+  if (watchpoint_table.empty()) return;
 
   for (const auto &tensor : tensor_list) {
     const auto tensor_name = tensor->GetName();
     const auto tensor_name_no_slot = tensor_name.substr(0, tensor_name.find_first_of(':'));
     const auto tensor_slot = std::to_string(tensor->GetSlot());
     mindspore::tensor::TensorPtr tensor_ptr = tensor->GetTensor();
+    // no elements to analyze
+    if (tensor_ptr->DataSize() == 0) continue;
     int tensor_dtype = tensor_ptr->data_type_c();
-    std::vector<unsigned int> hit_encountered;
-    std::vector<std::vector<bool>> hit_parms;
-    std::unordered_map<unsigned int, watchpoint_t> watchpoints_to_check_table;
-    bool min_max_enabled = false;
-    bool mean_sd_enabled = false;
-    bool inf_nan_enabled = false;
-    bool zero_percentage_enabled = false;
-    bool tensor_update_ratio_mean_enabled = false;
-    bool allclose_enabled = false;
+    std::vector<watchpoint_t> watchpoints_to_check;
+    std::string qualified_tensor_name;
     for (auto w_table_item : watchpoint_table) {
       auto wp = std::get<1>(w_table_item);
-      if (wp.condition.type == INIT && !init_dbg_suspend) continue;
-      if (wp.condition.type != IS_OVERFLOW && tensor_dtype == kNumberTypeBool) continue;
-      if (wp.IsNodeIncluded(tensor_name_no_slot)) {
-        min_max_enabled |= wp.min_max_enabled();
-        mean_sd_enabled |= wp.mean_sd_enabled();
-        inf_nan_enabled |= wp.inf_nan_enabled();
-        zero_percentage_enabled |= wp.zero_percentage_enabled();
-        tensor_update_ratio_mean_enabled |= wp.tensor_update_ratio_mean_enabled();
-        allclose_enabled |= wp.allclose_enabled();
-        watchpoints_to_check_table[w_table_item.second.id] = w_table_item.second;
+      // check ONLY init conditions on intial suspended state.
+      // skip other conditions on intial suspended state
+      if (init_dbg_suspend && (wp.condition.type != INIT)) continue;
+      // skip init condition if not init suspend
+      if ((wp.condition.type == INIT) && !init_dbg_suspend) continue;
+      // check change conditions only on step end.
+      if (wp.change_condition() && !step_end) continue;
+      // if recheck, ignore the cache results and reanalyze everything.
+      // if not a recheck, check only unanalyzed tensors
+      if (!recheck && wp_id_cache[tensor_name].count(wp.id)) continue;
+      std::string found = wp.FindQualifiedTensorName(tensor_name_no_slot);
+      if (!found.empty()) {
+        qualified_tensor_name = found;
+        watchpoints_to_check.push_back(w_table_item.second);
       }
     }
-    tensor_stats stats;
-    uint num_elements = tensor_ptr->DataSize();
-    if (min_max_enabled || mean_sd_enabled || inf_nan_enabled || zero_percentage_enabled ||
-        tensor_update_ratio_mean_enabled || allclose_enabled) {
-      bool need_prev = (tensor_update_ratio_mean_enabled || allclose_enabled);
-      bool have_prev = tensor_loader_->GetPrevTensor(tensor_name) != NULL;
+    // no wp set on current tensor
+    if (watchpoints_to_check.empty()) continue;
+
+    uint32_t num_elements = tensor_ptr->DataSize();
+    void *previous_tensor_ptr = tensor_loader_->GetPrevTensor(tensor_name)
+                                  ? tensor_loader_->GetPrevTensor(tensor_name)->GetTensor()->data_c()
+                                  : nullptr;
+    std::unique_ptr<ITensorSummary> base_summary_ptr;
+    if (!(watchpoints_to_check.size() == 1 && watchpoints_to_check[0].condition.type == IS_OVERFLOW)) {
       switch (tensor_dtype) {
         case kNumberTypeUInt8: {
-          auto start_addr = reinterpret_cast<uint8_t *>(tensor_ptr->data_c());
-          auto start_addr_prev =
-            (need_prev && have_prev
-               ? reinterpret_cast<uint8_t *>(tensor_loader_->GetPrevTensor(tensor_name)->GetTensor()->data_c())
-               : NULL);
-          stats = SummarizeTensor(start_addr, start_addr_prev, num_elements, min_max_enabled, mean_sd_enabled,
-                                  zero_percentage_enabled, tensor_update_ratio_mean_enabled, allclose_enabled);
+          base_summary_ptr =
+            std::make_unique<TensorSummary<uint8_t>>(tensor_ptr->data_c(), previous_tensor_ptr, num_elements);
           break;
         }
         case kNumberTypeInt8: {
-          auto start_addr = reinterpret_cast<int8_t *>(tensor_ptr->data_c());
-          auto start_addr_prev =
-            (need_prev && have_prev
-               ? reinterpret_cast<int8_t *>(tensor_loader_->GetPrevTensor(tensor_name)->GetTensor()->data_c())
-               : NULL);
-          stats = SummarizeTensor(start_addr, start_addr_prev, num_elements, min_max_enabled, mean_sd_enabled,
-                                  zero_percentage_enabled, tensor_update_ratio_mean_enabled, allclose_enabled);
+          base_summary_ptr =
+            std::make_unique<TensorSummary<int8_t>>(tensor_ptr->data_c(), previous_tensor_ptr, num_elements);
           break;
         }
         case kNumberTypeUInt16: {
-          auto start_addr = reinterpret_cast<uint16_t *>(tensor_ptr->data_c());
-          auto start_addr_prev =
-            (need_prev && have_prev
-               ? reinterpret_cast<uint16_t *>(tensor_loader_->GetPrevTensor(tensor_name)->GetTensor()->data_c())
-               : NULL);
-          stats = SummarizeTensor(start_addr, start_addr_prev, num_elements, min_max_enabled, mean_sd_enabled,
-                                  zero_percentage_enabled, tensor_update_ratio_mean_enabled, allclose_enabled);
+          base_summary_ptr =
+            std::make_unique<TensorSummary<uint16_t>>(tensor_ptr->data_c(), previous_tensor_ptr, num_elements);
           break;
         }
         case kNumberTypeInt16: {
-          auto start_addr = reinterpret_cast<int16_t *>(tensor_ptr->data_c());
-          auto start_addr_prev =
-            (need_prev && have_prev
-               ? reinterpret_cast<int16_t *>(tensor_loader_->GetPrevTensor(tensor_name)->GetTensor()->data_c())
-               : NULL);
-          stats = SummarizeTensor(start_addr, start_addr_prev, num_elements, min_max_enabled, mean_sd_enabled,
-                                  zero_percentage_enabled, tensor_update_ratio_mean_enabled, allclose_enabled);
+          base_summary_ptr =
+            std::make_unique<TensorSummary<int16_t>>(tensor_ptr->data_c(), previous_tensor_ptr, num_elements);
           break;
         }
         case kNumberTypeUInt32: {
-          auto start_addr = reinterpret_cast<uint32_t *>(tensor_ptr->data_c());
-          auto start_addr_prev =
-            (need_prev && have_prev
-               ? reinterpret_cast<uint32_t *>(tensor_loader_->GetPrevTensor(tensor_name)->GetTensor()->data_c())
-               : NULL);
-          stats = SummarizeTensor(start_addr, start_addr_prev, num_elements, min_max_enabled, mean_sd_enabled,
-                                  zero_percentage_enabled, tensor_update_ratio_mean_enabled, allclose_enabled);
+          base_summary_ptr =
+            std::make_unique<TensorSummary<uint32_t>>(tensor_ptr->data_c(), previous_tensor_ptr, num_elements);
           break;
         }
         case kNumberTypeInt32:
         case kNumberTypeInt: {
-          auto start_addr = reinterpret_cast<int32_t *>(tensor_ptr->data_c());
-          auto start_addr_prev =
-            (need_prev && have_prev
-               ? reinterpret_cast<int32_t *>(tensor_loader_->GetPrevTensor(tensor_name)->GetTensor()->data_c())
-               : NULL);
-          stats = SummarizeTensor(start_addr, start_addr_prev, num_elements, min_max_enabled, mean_sd_enabled,
-                                  zero_percentage_enabled, tensor_update_ratio_mean_enabled, allclose_enabled);
+          base_summary_ptr =
+            std::make_unique<TensorSummary<int32_t>>(tensor_ptr->data_c(), previous_tensor_ptr, num_elements);
           break;
         }
         case kNumberTypeUInt64: {
-          auto start_addr = reinterpret_cast<uint64_t *>(tensor_ptr->data_c());
-          auto start_addr_prev =
-            (need_prev && have_prev
-               ? reinterpret_cast<uint64_t *>(tensor_loader_->GetPrevTensor(tensor_name)->GetTensor()->data_c())
-               : NULL);
-          stats = SummarizeTensor(start_addr, start_addr_prev, num_elements, min_max_enabled, mean_sd_enabled,
-                                  zero_percentage_enabled, tensor_update_ratio_mean_enabled, allclose_enabled);
+          base_summary_ptr =
+            std::make_unique<TensorSummary<uint64_t>>(tensor_ptr->data_c(), previous_tensor_ptr, num_elements);
           break;
         }
         case kNumberTypeInt64: {
-          auto start_addr = reinterpret_cast<int64_t *>(tensor_ptr->data_c());
-          auto start_addr_prev =
-            (need_prev && have_prev
-               ? reinterpret_cast<int64_t *>(tensor_loader_->GetPrevTensor(tensor_name)->GetTensor()->data_c())
-               : NULL);
-          stats = SummarizeTensor(start_addr, start_addr_prev, num_elements, min_max_enabled, mean_sd_enabled,
-                                  zero_percentage_enabled, tensor_update_ratio_mean_enabled, allclose_enabled);
+          base_summary_ptr =
+            std::make_unique<TensorSummary<int64_t>>(tensor_ptr->data_c(), previous_tensor_ptr, num_elements);
           break;
         }
         case kNumberTypeFloat16: {
-          auto start_addr = reinterpret_cast<float16 *>(tensor_ptr->data_c());
-          auto start_addr_prev =
-            (need_prev && have_prev
-               ? reinterpret_cast<float16 *>(tensor_loader_->GetPrevTensor(tensor_name)->GetTensor()->data_c())
-               : NULL);
-          stats = SummarizeTensor(start_addr, start_addr_prev, num_elements, min_max_enabled, mean_sd_enabled,
-                                  zero_percentage_enabled, tensor_update_ratio_mean_enabled, allclose_enabled);
+          base_summary_ptr =
+            std::make_unique<TensorSummary<float16>>(tensor_ptr->data_c(), previous_tensor_ptr, num_elements);
           break;
         }
         case kNumberTypeFloat32:
         case kNumberTypeFloat: {
-          auto start_addr = reinterpret_cast<float *>(tensor_ptr->data_c());
-          auto start_addr_prev =
-            (need_prev && have_prev
-               ? reinterpret_cast<float *>(tensor_loader_->GetPrevTensor(tensor_name)->GetTensor()->data_c())
-               : NULL);
-          stats = SummarizeTensor(start_addr, start_addr_prev, num_elements, min_max_enabled, mean_sd_enabled,
-                                  zero_percentage_enabled, tensor_update_ratio_mean_enabled, allclose_enabled);
+          base_summary_ptr =
+            std::make_unique<TensorSummary<float>>(tensor_ptr->data_c(), previous_tensor_ptr, num_elements);
           break;
         }
         case kNumberTypeFloat64: {
-          auto start_addr = reinterpret_cast<double *>(tensor_ptr->data_c());
-          auto start_addr_prev =
-            (need_prev && have_prev
-               ? reinterpret_cast<double *>(tensor_loader_->GetPrevTensor(tensor_name)->GetTensor()->data_c())
-               : NULL);
-          stats = SummarizeTensor(start_addr, start_addr_prev, num_elements, min_max_enabled, mean_sd_enabled,
-                                  zero_percentage_enabled, tensor_update_ratio_mean_enabled, allclose_enabled);
+          base_summary_ptr =
+            std::make_unique<TensorSummary<double>>(tensor_ptr->data_c(), previous_tensor_ptr, num_elements);
+          break;
+        }
+        case kNumberTypeBool: {
+          base_summary_ptr =
+            std::make_unique<TensorSummary<bool>>(tensor_ptr->data_c(), previous_tensor_ptr, num_elements);
           break;
         }
         default:
           MS_LOG(INFO) << "Unsupported tensor type";
-          break;
+          continue;
       }
+      base_summary_ptr->SummarizeTensor(watchpoints_to_check);
     }
 
-    for (auto &it : watchpoints_to_check_table) {
-      auto wp_id = it.second.id;
-      std::vector<bool> hit_p;
-      CONDITION_TYPE enabled_condition = it.second.condition.type;
-      bool hit = (enabled_condition == HAS_NAN && stats.has_nan) || (enabled_condition == HAS_INF && stats.has_inf) ||
-                 (enabled_condition == GENERAL_OVERFLOW && (stats.has_nan || stats.has_inf)) ||
-                 (enabled_condition == IS_OVERFLOW &&
-                  std::find(op_overflows.begin(), op_overflows.end(), tensor_name_no_slot) != op_overflows.end());
-
-      if (enabled_condition > 2 && enabled_condition != GENERAL_OVERFLOW) {
-        if (stats.has_inf || stats.has_nan) {
-          MS_LOG(WARNING) << "NaN or/and INF present in tensor: " << tensor_name << ". Cannot check "
-                          << condition_label[enabled_condition] << " watchpoint.";
-        } else if (enabled_condition < 13) {
-          bool gt = stats.statLookup(enabled_condition) > it.second.condition.parameter;
-          bool lt = stats.statLookup(enabled_condition) < it.second.condition.parameter;
-          hit |= it.second.condition.comparison == "GT" ? gt : lt;
-        } else {
-          std::vector<parameter_t> parameter_list_item = it.second.parameter_list;
-          for (auto &p : parameter_list_item) {
-            if (p.disabled == false) {
-              bool p_hit = false;
-              if (p.name == "zero_percentage_ge") {
-                p_hit = stats.parmLookup(STAT_ZERO_PERCENTAGE) >= p.value;
-              } else if (p.name == "max_gt") {
-                p_hit = stats.parmLookup(STAT_MAX) > p.value;
-              } else if (p.name == "max_lt") {
-                p_hit = stats.parmLookup(STAT_MAX) < p.value;
-              } else if (p.name == "min_gt") {
-                p_hit = stats.parmLookup(STAT_MIN) > p.value;
-              } else if (p.name == "min_lt") {
-                p_hit = stats.parmLookup(STAT_MIN) < p.value;
-              } else if (p.name == "mean_gt") {
-                p_hit = stats.parmLookup(STAT_MEAN) > p.value;
-              } else if (p.name == "mean_lt") {
-                p_hit = stats.parmLookup(STAT_MEAN) < p.value;
-              } else if (p.name == "abs_mean_gt") {
-                p_hit = std::abs(stats.parmLookup(STAT_MEAN)) > p.value;
-              } else if (p.name == "abs_mean_lt") {
-                p_hit = std::abs(stats.parmLookup(STAT_MEAN)) < p.value;
-              } else if (p.name == "abs_update_ratio_mean_gt") {
-                p_hit = stats.parmLookup(STAT_TENSOR_UPDATE_RATIO_MEAN) > p.value;
-              } else if (p.name == "abs_update_ratio_mean_lt") {
-                p_hit = stats.parmLookup(STAT_TENSOR_UPDATE_RATIO_MEAN) < p.value;
-              }
-              hit |= p_hit;
-              hit_p.push_back(p_hit);
-            } else {
-              hit_p.push_back(false);
-            }
-          }
-
-          hit |= (enabled_condition == NOT_CHANGED && stats.parmLookup(STAT_ALLCLOSE));
-
-          if (hit) hit_parms.push_back(hit_p);
-        }
+    for (auto &wp : watchpoints_to_check) {
+      bool is_hit = false;
+      int error_code = 0;
+      std::vector<parameter_t> parameter_list = {};
+      if (wp.condition.type == IS_OVERFLOW) {
+        is_hit = (std::find(op_overflows.begin(), op_overflows.end(), tensor_name_no_slot) != op_overflows.end());
+      } else if (base_summary_ptr != nullptr) {
+        auto item = base_summary_ptr->IsWatchpointHit(wp);
+        is_hit = std::get<0>(item);
+        error_code = std::get<1>(item);
+        parameter_list = std::get<2>(item);
       }
-      if (hit) hit_encountered.push_back(wp_id);
-    }
+      // add analyzed tensor to cache
+      if (!recheck) {
+        wp_id_cache[tensor_name].insert(wp.id);
+      }
 
-    unsigned int index_parm_list = 0;
-    for (auto it_hit_id = hit_encountered.begin(); it_hit_id != hit_encountered.end(); ++it_hit_id) {
-      if (watchpoint_table.find(*it_hit_id) != watchpoint_table.end()) {
-        // return fully qualified name for weights and bias to MI
-        auto found_dot = tensor_name_no_slot.find_last_of('.');
-        if (found_dot != std::string::npos && (tensor_name_no_slot.substr(found_dot + 1) == "weight" ||
-                                               tensor_name_no_slot.substr(found_dot + 1) == "bias")) {
-          auto check_node_list = watchpoint_table.find(*it_hit_id)->second.check_node_list;
-          for (auto check_node : check_node_list) {
-            std::string w_name = std::get<0>(check_node);
-            auto found_slash = w_name.find_last_of('/');
-            if (found_slash != std::string::npos && w_name.substr(found_slash + 1) == tensor_name_no_slot) {
-              name->push_back(w_name);
-            }
-          }
-        } else {
-          name->push_back(tensor_name_no_slot);
-        }
-
+      if (is_hit || error_code) {
+        name->push_back(qualified_tensor_name);
         slot->push_back(tensor_slot);
-        int condition_item = watchpoint_table.find(*it_hit_id)->second.condition.type;
-        condition->push_back(condition_item);
-        watchpoint_id->push_back(*it_hit_id);
-        std::vector<parameter_t> parameter_list_item = watchpoint_table.find(*it_hit_id)->second.parameter_list;
-        if (condition_item >= 13) {
-          unsigned int index_hit_parm = 0;
-          for (auto &p : parameter_list_item) {
-            p.hit = hit_parms[index_parm_list][index_hit_parm];
-            index_hit_parm++;
-          }
-          index_parm_list++;
-        }
-        parameters->push_back(parameter_list_item);
+        condition->push_back(wp.condition.type);
+        watchpoint_id->push_back(wp.id);
+        parameters->push_back(parameter_list);
+        error_codes->push_back(error_code);
       }
-      watchpoints_to_check_table.erase(*it_hit_id);
     }
   }
 }
 
 void DebugServices::ReadNodesTensors(std::vector<std::string> name, std::vector<std::string> *ret_name,
-                                     std::vector<char *> *data_ptr, std::vector<unsigned int> *data_size,
-                                     std::vector<TypePtr> *dtype, std::vector<std::vector<int>> *shape) {
+                                     std::vector<char *> *data_ptr, std::vector<ssize_t> *data_size,
+                                     std::vector<TypePtr> *dtype, std::vector<std::vector<int64_t>> *shape) {
   std::vector<std::tuple<std::string, std::shared_ptr<TensorData>>> result_list;
   tensor_loader_->SearchTensors(name, &result_list);
 
@@ -399,7 +224,7 @@ void DebugServices::ReadNodesTensors(std::vector<std::string> name, std::vector<
   }
 }
 
-bool DebugServices::IsWatchPoint(std::string kernel_name, const CNodePtr &kernel) {
+bool DebugServices::IsWatchPoint(const std::string &kernel_name, const CNodePtr &kernel) const {
   bool ret = false;
   for (auto w_table_item : watchpoint_table) {
     auto check_node_list = std::get<1>(w_table_item).check_node_list;
@@ -417,7 +242,7 @@ bool DebugServices::IsWatchPoint(std::string kernel_name, const CNodePtr &kernel
   return ret;
 }
 
-bool DebugServices::IsWatchPointNodeInput(std::string w_name, const CNodePtr &kernel) {
+bool DebugServices::IsWatchPointNodeInput(const std::string &w_name, const CNodePtr &kernel) const {
   if (kernel) {
     auto input_size = AnfAlgo::GetInputTensorNum(kernel);
     for (size_t j = 0; j < input_size; ++j) {
@@ -432,27 +257,64 @@ bool DebugServices::IsWatchPointNodeInput(std::string w_name, const CNodePtr &ke
   }
 }
 
-void DebugServices::AddWeightsBiasInputs(std::vector<std::shared_ptr<TensorData>> *tensor_list,
-                                         const CNodePtr &kernel) {
-  if (kernel) {
-    auto input_size = AnfAlgo::GetInputTensorNum(kernel);
-    for (size_t j = 0; j < input_size; ++j) {
-      auto input_kernel = kernel->input(j + 1);
-      std::string input_kernel_name = input_kernel->fullname_with_scope();
-      std::string locate_tensor = input_kernel_name + ":0";
-      std::map<std::string, std::shared_ptr<TensorData>> tensor_map = tensor_loader_->GetTensorMap();
-      std::map<std::string, std::shared_ptr<TensorData>>::iterator iter;
-      iter = tensor_map.find(locate_tensor);
-      if (iter != tensor_map.end()) {
-        tensor_list->push_back(iter->second);
-      }
-    }
-  }
+void DebugServices::EmptyTensor() { tensor_loader_->EmptyTensor(); }
+
+std::vector<std::shared_ptr<TensorData>> DebugServices::GetTensor() const { return tensor_loader_->GetTensor(); }
+
+std::vector<std::shared_ptr<TensorData>> DebugServices::GetNodeTensorMap(const std::string &node_name) const {
+  return tensor_loader_->GetNodeTensorMap(node_name);
 }
 
-TensorLoader *DebugServices::tensor_loader() const { return tensor_loader_; }
+uint32_t DebugServices::GetTensorLoaderIterNum() const { return tensor_loader_->GetIterNum(); }
+
+void DebugServices::SetTensorLoaderIterNum(uint32_t iter_num) { tensor_loader_->set_iter_num(iter_num); }
+
+void DebugServices::EmptyPrevTensor() { tensor_loader_->EmptyPrevTensor(); }
+
+void DebugServices::EmptyCurrentTensor() { tensor_loader_->EmptyCurrentTensor(); }
+
+bool DebugServices::DumpTensorToFile(const std::string &tensor_name, bool trans_flag, const std::string &filepath,
+                                     const std::string &host_fmt, const std::vector<int64_t> &host_shape,
+                                     TypeId host_type, TypeId addr_type_id, const std::string &addr_format,
+                                     size_t slot) const {
+  return tensor_loader_->DumpTensorToFile(tensor_name, trans_flag, filepath, host_fmt, host_shape, host_type,
+                                          addr_type_id, addr_format, slot);
+}
+
+bool DebugServices::LoadNewTensor(const std::shared_ptr<TensorData> &tensor, bool keep_prev) {
+  return tensor_loader_->LoadNewTensor(tensor, keep_prev);
+}
+
 std::unordered_map<unsigned int, DebugServices::watchpoint_t> DebugServices::GetWatchpointTable() {
   return watchpoint_table;
+}
+
+void DebugServices::ResetLoadedTensors() {
+  wp_id_cache.clear();
+  MS_LOG(INFO) << "Resetting loaded tensors";
+  tensor_loader_->MoveParametersCurrentToPrev();
+  tensor_loader_->EmptyCurrentTensor();
+  // will move parameters from previous to current map
+  tensor_loader_->SwapCurrentPrev();
+}
+
+std::vector<std::shared_ptr<TensorData>> DebugServices::GetNodeTensor(const CNodePtr &kernel) {
+  MS_EXCEPTION_IF_NULL(kernel);
+  std::vector<std::shared_ptr<TensorData>> result;
+  auto output_size = AnfAlgo::GetOutputTensorNum(kernel);
+  auto kernel_name = kernel->fullname_with_scope();
+  for (size_t j = 0; j < output_size; ++j) {
+    auto tensor_name_with_slot = kernel_name + ":" + std::to_string(j);
+    auto tensor = tensor_loader_->GetTensor(tensor_name_with_slot);
+    if (tensor) result.push_back(tensor);
+  }
+  return result;
+}
+bool DebugServices::TensorExistsInCurrent(std::string tensor_name) {
+  return tensor_loader_->TensorExistsInCurrent(tensor_name);
+}
+void DebugServices::MoveTensorCurrentToPrev(std::string tensor_name) {
+  tensor_loader_->MoveTensorCurrentToPrev(tensor_name);
 }
 
 }  // namespace mindspore

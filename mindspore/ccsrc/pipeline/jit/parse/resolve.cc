@@ -109,7 +109,7 @@ AnfNodePtr ResolveParameterObj(const FuncGraphPtr &func_graph, const py::object 
     node->set_abstract(abs);
     para_node = node;
   }
-  func_graph->add_parameter_obj_node(para_node);
+  func_graph->add_used_global_parameters(para_node);
   return para_node;
 }
 
@@ -156,9 +156,12 @@ bool ResolveObjectToNode(const FuncGraphPtr &func_graph, const py::object &obj, 
 }
 
 bool IsAllFuncInValueSequence(const std::vector<ValuePtr> &value_vec) {
+  if (value_vec.empty()) {
+    return false;
+  }
   for (auto &elem : value_vec) {
     if (elem->isa<ValueTuple>() || elem->isa<ValueList>()) {
-      const auto &vec = GetValue<std::vector<ValuePtr>>(elem);
+      const auto &vec = GetValue<ValuePtrList>(elem);
       auto is_graph = IsAllFuncInValueSequence(vec);
       if (!is_graph) {
         return false;
@@ -194,20 +197,20 @@ AnfNodePtr TransformToMakeTupleNodes(const FuncGraphManagerPtr &manager, const F
   return cnode;
 }
 
-// transform the ValueTuple or ValueList of graph/primitve node to make tuple of const graph/primitve node
+// transform the ValueTuple or ValueList of graph/primitive node to make tuple of const graph/primitive node
 bool TransformVectorFuncValueNode(const FuncGraphManagerPtr &manager, const FuncGraphPtr &func_graph,
                                   const ValueNodePtr &value_node, AnfNodePtr *const transformed) {
   MS_EXCEPTION_IF_NULL(value_node);
-  const auto &value_vec = GetValue<std::vector<ValuePtr>>(value_node->value());
+  const auto &value_vec = GetValue<ValuePtrList>(value_node->value());
   if (!IsAllFuncInValueSequence(value_vec)) {
     return false;
   }
 
   // (1) The celllist or ordered_cell will be parsed as valuetuple of const graph in it,
   // So if has graph in list, try to replace the node with make tuple of graph value node.
-  // we do this because the graphmanger won't investigate the graph inside valuetuple,
+  // we do this because the graph manager won't investigate the graph inside valuetuple,
   // change the vector of graph to be make_tuple of graph value node.
-  // (2) the primitve valuetuple or valuelist may encounter to abstract error, make it all
+  // (2) the primitive valuetuple or valuelist may encounter to abstract error, make it all
   // independent nodes.
   auto node_tuple_graphs = TransformToMakeTupleNodes(manager, func_graph, value_vec);
   // replace the ret ptr to be make tuple of graph value node
@@ -221,10 +224,9 @@ AnfNodePtr ResolveObjectAndAddToManager(const FuncGraphManagerPtr &manager, cons
                                         const AnfNodePtr &node) {
   ScopeGuard scope_guard(node->scope());
   AnfNodePtr resolved_node = nullptr;
-  TraceManager::DebugTrace(std::make_shared<TraceResolve>(node->debug_info()));
   bool success = ResolveObjectToNode(node->func_graph(), obj, &resolved_node);
   if (!success) {
-    MS_LOG(EXCEPTION) << "Parse Resolve covert failed NodeInfo: " << trace::GetDebugInfo(node->debug_info());
+    MS_LOG(EXCEPTION) << "Parse Resolve covert failed NodeInfo.";
   }
   if (IsValueNode<FuncGraph>(resolved_node)) {
     auto new_fg = GetValueNode<FuncGraphPtr>(resolved_node);
@@ -236,63 +238,64 @@ AnfNodePtr ResolveObjectAndAddToManager(const FuncGraphManagerPtr &manager, cons
     (void)TransformVectorFuncValueNode(manager, node->func_graph(), resolved_node->cast<ValueNodePtr>(),
                                        &resolved_node);
   }
-
-  TraceManager::EndTrace();
   return resolved_node;
 }
 }  // namespace
 
 AnfNodePtr ResolveSymbol(const FuncGraphManagerPtr &manager, const NameSpacePtr &name_space, const SymbolPtr &symbol,
                          const AnfNodePtr &node) {
+  MS_EXCEPTION_IF_NULL(node);
+  TraceGuard trace_guard(std::make_shared<TraceResolve>(node->debug_info()));
   if (node->func_graph() == nullptr || manager == nullptr) {
     MS_LOG(EXCEPTION) << "Node " << node->DebugString() << " graph or manager is nullptr";
   }
   SymbolResolver symbol_resolver(name_space, symbol, node);
   if (!symbol_resolver.Resolve()) {
-    MS_EXCEPTION(TypeError) << "Parse Resolve node failed NodeInfo: " << trace::GetDebugInfo(node->debug_info());
+    MS_EXCEPTION(TypeError) << "Parse Resolve node failed NodeInfo.";
   }
 
   py::object obj = symbol_resolver.result();
-
   AnfNodePtr resolved_node = ResolveObjectAndAddToManager(manager, obj, node);
-
+  TraceManager::ClearParseOrResolveDebugInfo();
   return resolved_node;
 }
 
 AnfNodePtr ResolveCellwithAttr(const FuncGraphManagerPtr &manager, const NameSpacePtr &name_space,
                                const SymbolPtr &symbol, const AnfNodePtr &node, const std::string &attr) {
+  MS_EXCEPTION_IF_NULL(node);
+  TraceGuard trace_guard(std::make_shared<TraceResolve>(node->debug_info()));
   if (node->func_graph() == nullptr || manager == nullptr) {
     MS_LOG(EXCEPTION) << "Node " << node->DebugString() << " graph or manager is nullptr";
   }
   SymbolResolver symbol_resolver(name_space, symbol, node);
   if (!symbol_resolver.Resolve()) {
-    MS_LOG(EXCEPTION) << "Parse Resolve node failed NodeInfo: " << trace::GetDebugInfo(node->debug_info());
+    MS_LOG(EXCEPTION) << "Parse Resolve node failed NodeInfo.";
   }
 
   py::object obj = symbol_resolver.result();
   if (!data_converter::IsCellInstance(obj)) {
     return nullptr;
   }
-  py::object obj_attr = obj.attr(attr.c_str());
 
-  AnfNodePtr resolved_node = ResolveObjectAndAddToManager(manager, obj_attr, node);
+  const std::string fn = PYTHON_MOD_GET_MEMBER_NAMESPACE_SYMBOL;
+  const std::string module = "mindspore._extends.parse.parser";
+  py::object namespace_obj = parse::python_adapter::GetPyFn(module, fn)(obj);
+  auto new_namespace = std::make_shared<NameSpace>(RESOLVE_NAMESPACE_NAME_CLASS_MEMBER, namespace_obj);
+  auto new_symbol = std::make_shared<Symbol>(attr);
 
+  AnfNodePtrList inputs = {NewValueNode(prim::kPrimResolve), NewValueNode(new_namespace), NewValueNode(new_symbol)};
+  AnfNodePtr resolved_node = node->func_graph()->NewCNode(inputs);
+  TraceManager::ClearParseOrResolveDebugInfo();
   return resolved_node;
 }
 
 namespace {
 opt::OptPassGroupMap GetOptResolvePasses(const opt::irpass::ResolveIRPassLib &irpass) {
   opt::OptPassGroupMap map({
-    {"resolve_attr",
-     {
-       // for resolve primitive;
-       irpass.resolver_resolve_attr_,
-     }},
     {"resolve",
      {
        // for resolve and getattr primitive;
-       irpass.resolver_resolve_,
-       irpass.resolver_getattr_,
+       irpass.resolver_resolve_and_getattr_,
      }},
   });
   return map;

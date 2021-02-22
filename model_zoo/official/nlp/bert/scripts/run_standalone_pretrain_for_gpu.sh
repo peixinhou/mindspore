@@ -15,7 +15,7 @@
 # ============================================================================
 
 echo "=============================================================================================================="
-echo "Please run the scipt as: "
+echo "Please run the script as: "
 echo "bash run_standalone_pretrain.sh DEVICE_ID EPOCH_SIZE DATA_DIR SCHEMA_DIR"
 echo "for example: bash run_standalone_pretrain.sh 0 40 /path/zh-wiki/ /path/Schema.json"
 echo "=============================================================================================================="
@@ -36,10 +36,10 @@ python run_pretrain.py  \
     --distribute="false" \
     --epoch_size=$EPOCH_SIZE \
     --enable_save_ckpt="true" \
-    --enable_lossscale="false" \
+    --enable_lossscale="true" \
     --do_shuffle="true" \
     --enable_data_sink="true" \
-    --data_sink_steps=1 \
+    --data_sink_steps=20 \
     --load_checkpoint_path="" \
     --save_checkpoint_path="" \
     --save_checkpoint_steps=10000 \

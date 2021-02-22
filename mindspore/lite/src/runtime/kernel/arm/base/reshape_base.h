@@ -13,34 +13,32 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 #ifndef MINDSPORE_LITE_SRC_RUNTIME_KERNEL_ARM_BASE_RESHAPE_BASE_H_
 #define MINDSPORE_LITE_SRC_RUNTIME_KERNEL_ARM_BASE_RESHAPE_BASE_H_
 
 #include <vector>
 #include "src/lite_kernel.h"
-#include "nnacl/reshape_parameter.h"
+#include "include/context.h"
 
 using mindspore::lite::InnerContext;
-
 namespace mindspore::kernel {
 class ReshapeBaseCPUKernel : public LiteKernel {
  public:
   ReshapeBaseCPUKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
                        const std::vector<lite::Tensor *> &outputs, const InnerContext *ctx,
                        const mindspore::lite::PrimitiveC *primitive)
-      : LiteKernel(parameter, inputs, outputs, ctx, primitive), ctx_(ctx) {
-    reshape_param_ = reinterpret_cast<ReshapeParameter *>(op_parameter_);
-  }
-  ~ReshapeBaseCPUKernel() = default;
+      : LiteKernel(parameter, inputs, outputs, ctx, primitive) {}
+  ~ReshapeBaseCPUKernel() override = default;
 
   int Init() override;
-  int ReSize() override { return 0; }
-  int Run() override { return 0; }
+  int ReSize() override;
+  int Run() override;
+  int RunImpl(int task_id);
 
- protected:
-  const InnerContext *ctx_;
-  ReshapeParameter *reshape_param_;
+ private:
+  size_t cal_max_num_per_thread_ = 0;
+  uint8_t *input_ptr_ = nullptr;
+  uint8_t *output_ptr_ = nullptr;
 };
 }  // namespace mindspore::kernel
 

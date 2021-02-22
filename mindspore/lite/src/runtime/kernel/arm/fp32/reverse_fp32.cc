@@ -18,7 +18,7 @@
 #include <vector>
 #include "schema/model_generated.h"
 #include "src/kernel_registry.h"
-#include "nnacl/fp32/reverse.h"
+#include "nnacl/fp32/reverse_fp32.h"
 #include "include/errorcode.h"
 #include "src/runtime/runtime_api.h"
 
@@ -28,7 +28,6 @@ using mindspore::lite::RET_OK;
 using mindspore::schema::PrimitiveType_Reverse;
 
 namespace mindspore::kernel {
-
 int ReverseCPUKernel::Stride(int index) {
   int stride = 1;
   for (size_t i = index + 1; i < in_tensors_.at(0)->shape().size(); ++i) {
@@ -39,7 +38,7 @@ int ReverseCPUKernel::Stride(int index) {
 
 int ReverseCPUKernel::ReSize() {
   data_size_ = in_tensors_.at(0)->ElementsNum();
-  thread_sz_count_ = MSMIN(thread_count_, data_size_);
+  thread_sz_count_ = MSMIN(op_parameter_->thread_num_, data_size_);
   thread_sz_stride_ = UP_DIV(data_size_, thread_sz_count_);
 
   auto *param = reinterpret_cast<ReverseParameter *>(op_parameter_);
@@ -135,32 +134,6 @@ int ReverseCPUKernel::Run() {
   return RET_OK;
 }
 
-kernel::LiteKernel *CpuReverseFp32KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                                const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter,
-                                                const lite::InnerContext *ctx, const kernel::KernelKey &desc,
-                                                const mindspore::lite::PrimitiveC *primitive) {
-  if (opParameter == nullptr) {
-    MS_LOG(ERROR) << "opParameter is NULL! ";
-    return nullptr;
-  }
-  MS_ASSERT(desc.type == schema::PrimitiveType_Reverse);
-  auto *kernel = new (std::nothrow) ReverseCPUKernel(opParameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "Kernel is NULL! name: " << opParameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
-    free(opParameter);
-    return nullptr;
-  }
-
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
-}
-
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Reverse, CpuReverseFp32KernelCreator)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Reverse, LiteKernelCreator<ReverseCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt32, PrimitiveType_Reverse, LiteKernelCreator<ReverseCPUKernel>)
 }  // namespace mindspore::kernel

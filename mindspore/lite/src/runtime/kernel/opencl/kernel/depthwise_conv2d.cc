@@ -23,7 +23,7 @@
 #include <utility>
 #include "src/kernel_registry.h"
 #include "src/runtime/kernel/opencl/utils.h"
-#include "nnacl/fp32/common_func.h"
+#include "nnacl/fp32/common_func_fp32.h"
 #include "nnacl/op_base.h"
 #include "include/errorcode.h"
 
@@ -37,136 +37,169 @@ using mindspore::kernel::KERNEL_ARCH::kGPU;
 using mindspore::lite::KernelRegistrar;
 using mindspore::lite::RET_ERROR;
 using mindspore::lite::RET_OK;
+using mindspore::lite::opencl::ImageSize;
+using mindspore::lite::opencl::MemType;
 using mindspore::schema::PrimitiveType_DepthwiseConv2D;
 
 namespace mindspore::kernel {
 
-int DepthwiseConv2dOpenCLKernel::Init() {
+int DepthwiseConv2dOpenCLKernel::CheckSpecs() {
   if ((in_tensors_.size() != 2 && in_tensors_.size() != 3) || out_tensors_.size() != 1) {
-    MS_LOG(ERROR) << "Invalid input size: " << in_tensors_.size() << ", output size: " << out_tensors_.size();
+    MS_LOG(ERROR) << "in size: " << in_tensors_.size() << ", out size: " << out_tensors_.size();
     return RET_ERROR;
   }
+  if (in_tensors_[0]->data_type() != kNumberTypeFloat32 && in_tensors_[0]->data_type() != kNumberTypeFloat16) {
+    MS_LOG(ERROR) << "Unsupported data type " << in_tensors_[0]->data_type();
+    return RET_ERROR;
+  }
+  if (!in_tensors_.at(kWeightIndex)->IsConst()) {
+    MS_LOG(ERROR) << "DepthwiseConv2d don't support non-constant weight yet.";
+    return RET_ERROR;
+  }
+  if (in_tensors_.size() == 3 && !in_tensors_.at(kBiasIndex)->IsConst()) {
+    MS_LOG(ERROR) << "DepthwiseConv2d don't support non-constant bias yet.";
+    return RET_ERROR;
+  }
+  return RET_OK;
+}
+
+int DepthwiseConv2dOpenCLKernel::Prepare() {
   std::string kernel_name = "DepthwiseConv2d";
-  if (out_mem_type_ == OpenCLMemType::BUF) {
+  if (out_mem_type_ == MemType::BUF) {
     kernel_name += "_BUF";
   } else {
     kernel_name += "_IMG";
   }
   kernel_name += "_NHWC4";
   auto parameter = reinterpret_cast<ConvParameter *>(op_parameter_);
-  if (parameter->kernel_h_ == 1) {
+  if (parameter->kernel_h_ == 1 && parameter->kernel_w_ == 1) {
     kernel_name += "_1x1";
   }
-  kernel_name += "_b";
-  for (auto iv : block_size_) {
-    kernel_name += std::to_string(iv);
+  if (filter_type_ == lite::opencl::MemType::BUF) {
+    kernel_name += "_b" + std::to_string(block_size_.H) + std::to_string(block_size_.W) + std::to_string(block_size_.C);
+  } else {
+    block_size_.C = block_size_.H = block_size_.W = 1;
   }
 #ifdef PROGRAM_WITH_IL
   kernel_ = ocl_runtime_->GetKernelFromBinary(kernel_name);
 #else
   std::string program_name = "DepthwiseConv2d";
-  std::set<std::string> build_options;
   std::string source = depthwise_conv2d_source;
   ocl_runtime_->LoadSource(program_name, source);
-  ocl_runtime_->BuildKernel(kernel_, program_name, kernel_name, build_options);
+  ocl_runtime_->BuildKernel(kernel_, program_name, kernel_name);
 #endif
-  InitBuffer();
-  GetGlobalSize(0, &global_size_);
-  GetLocalSize(0, global_size_, &local_size_);
+  auto ret = InitWeights();
+  if (ret != RET_OK) {
+    return ret;
+  }
+  SetGlobalLocal();
+  SetConstArgs();
   MS_LOG(DEBUG) << kernel_name << " Init Done! mem type=" << static_cast<int>(out_mem_type_);
   return mindspore::lite::RET_OK;
 }
 
-int DepthwiseConv2dOpenCLKernel::InitBuffer() {
+int DepthwiseConv2dOpenCLKernel::InitWeights() {
+  auto ret = DequantWeight();
+  if (ret != RET_OK) {
+    return ret;
+  }
   auto parameter = reinterpret_cast<ConvParameter *>(op_parameter_);
   auto allocator = ocl_runtime_->GetAllocator();
   bool is_fp16 = ocl_runtime_->GetFp16Enable();
 
+  size_t dtype_size = is_fp16 ? sizeof(int16_t) : sizeof(float);
+  auto out_info = GpuTensorInfo(out_tensors_[0]);
   // weight: o, h, w, i; o == group, i == 1
   void *origin_weight = in_tensors_.at(kWeightIndex)->data_c();
-  int CO4 = UP_DIV(out_tensors_[0]->Channel(), C4NUM);
+  int CO4 = UP_DIV(out_info.C, C4NUM * block_size_.C);
   int pack_weight_size = C4NUM * CO4 * parameter->kernel_h_ * parameter->kernel_w_;
 
-  int plane = parameter->kernel_h_ * parameter->kernel_w_;
-  if (is_fp16) {
-    packed_weight_ = allocator->Malloc(pack_weight_size * sizeof(int16_t));
-    packed_weight_ = allocator->MapBuffer(packed_weight_, CL_MAP_WRITE, nullptr, true);
-    if (in_tensors_.at(kWeightIndex)->data_type() == kNumberTypeFloat16) {
-      std::function<int16_t(int16_t)> to_dtype = [](int16_t x) -> int16_t { return x; };
-      PackNCHWToNC4HW4<int16_t, int16_t>(origin_weight, packed_weight_, 1, plane, out_tensors_[0]->Channel(), to_dtype);
-    } else if (in_tensors_.at(kWeightIndex)->data_type() == kNumberTypeFloat32) {
-      std::function<float16_t(float)> to_dtype = [](float x) -> float16_t { return static_cast<float16_t>(x); };
-      PackNCHWToNC4HW4<float, float16_t>(origin_weight, packed_weight_, 1, plane, out_tensors_[0]->Channel(), to_dtype);
-    } else {
-      MS_LOG(ERROR) << "Only support float16/float32, actual data type " << in_tensors_.at(kWeightIndex)->data_type();
-      return mindspore::lite::RET_ERROR;
-    }
-  } else {
-    packed_weight_ = allocator->Malloc(pack_weight_size * sizeof(float));
-    packed_weight_ = allocator->MapBuffer(packed_weight_, CL_MAP_WRITE, nullptr, true);
-    if (in_tensors_.at(kWeightIndex)->data_type() == kNumberTypeFloat32) {
-      std::function<float(float)> to_dtype = [](float x) -> float { return x; };
-      PackNCHWToNC4HW4<float, float>(origin_weight, packed_weight_, 1, plane, out_tensors_[0]->Channel(), to_dtype);
-    } else if (in_tensors_.at(kWeightIndex)->data_type() == kNumberTypeFloat16) {
-      std::function<float(float16_t)> to_dtype = [](float16_t x) -> float { return static_cast<float>(x); };
-      PackNCHWToNC4HW4<float16_t, float>(origin_weight, packed_weight_, 1, plane, out_tensors_[0]->Channel(), to_dtype);
-    } else {
-      MS_LOG(ERROR) << "Only support float16/float32, actual data type " << in_tensors_.at(kWeightIndex)->data_type();
-      return mindspore::lite::RET_ERROR;
-    }
+  int plane_in = parameter->kernel_h_ * parameter->kernel_w_;
+  int plane_out = plane_in * C4NUM;
+  if (filter_type_ == MemType::IMG) {
+    int alignment = ocl_runtime_->GetImagePitchAlignment();
+    plane_out = UP_ROUND(plane_out, alignment) * C4NUM;
+    pack_weight_size = plane_out * CO4;
   }
-
-  allocator->UnmapBuffer(packed_weight_);
-
-  if (in_tensors_.size() == kInputSize2) {
-    size_t dtype_size = sizeof(float);
-    if (is_fp16 && in_tensors_.at(kBiasIndex)->data_type() == kNumberTypeFloat16) {
-      dtype_size = sizeof(int16_t);
-    }
-    bias_data_ = allocator->Malloc(C4NUM * CO4 * dtype_size);
-    bias_data_ = allocator->MapBuffer(bias_data_, CL_MAP_WRITE, nullptr, true);
-    size_t up_co_size = C4NUM * CO4 * dtype_size;
-    memset(bias_data_, 0, up_co_size);
-    auto ori_bias = in_tensors_.at(kBiasIndex)->data_c();
-    if (is_fp16 && in_tensors_.at(kBiasIndex)->data_type() == kNumberTypeFloat32) {
-      float16_t *bias_ptr = static_cast<float16_t *>(bias_data_);
-      for (size_t i = 0; i < in_tensors_.at(kBiasIndex)->ElementsNum(); ++i) {
-        bias_ptr[i] = static_cast<float16_t>(static_cast<float *>(ori_bias)[i]);
+  pack_weight_size = pack_weight_size * dtype_size;
+  auto ConvertFilter = [](void *src, void *dst, TypeId src_type, TypeId dst_type, size_t plane_in, size_t plane_out,
+                          size_t channel) {
+    if (dst_type == kNumberTypeFloat16) {
+      if (src_type == kNumberTypeFloat16) {
+        std::function<int16_t(int16_t)> to_dtype = [](int16_t x) -> int16_t { return x; };
+        PackNCHWToNC4HW4<int16_t, int16_t>(src, dst, 1, plane_in, plane_out, channel, to_dtype);
+      } else if (src_type == kNumberTypeFloat32) {
+        std::function<float16_t(float)> to_dtype = [](float x) -> float16_t { return static_cast<float16_t>(x); };
+        PackNCHWToNC4HW4<float, float16_t>(src, dst, 1, plane_in, plane_out, channel, to_dtype);
+      } else {  // int8 or int16
+        std::function<int16_t(int16_t)> to_dtype = [](int16_t x) -> int16_t { return x; };
+        PackNCHWToNC4HW4<int16_t, int16_t>(src, dst, 1, plane_in, plane_out, channel, to_dtype);
       }
     } else {
-      memcpy(bias_data_, ori_bias, out_tensors_[0]->Channel() * dtype_size);
+      if (src_type == kNumberTypeFloat32) {
+        std::function<float(float)> to_dtype = [](float x) -> float { return x; };
+        PackNCHWToNC4HW4<float, float>(src, dst, 1, plane_in, plane_out, channel, to_dtype);
+      } else if (src_type == kNumberTypeFloat16) {
+        std::function<float(float16_t)> to_dtype = [](float16_t x) -> float { return static_cast<float>(x); };
+        PackNCHWToNC4HW4<float16_t, float>(src, dst, 1, plane_in, plane_out, channel, to_dtype);
+      } else {  // int8 or int16
+        std::function<float(float)> to_dtype = [](float x) -> float { return x; };
+        PackNCHWToNC4HW4<float, float>(src, dst, 1, plane_in, plane_out, channel, to_dtype);
+      }
     }
-    allocator->UnmapBuffer(bias_data_);
+  };
+  std::vector<char> temp_filter(pack_weight_size);
+  auto src_type = in_tensors_.at(kWeightIndex)->data_type();
+  auto dst_type = is_fp16 ? kNumberTypeFloat16 : kNumberTypeFloat32;
+  ConvertFilter(origin_weight, temp_filter.data(), src_type, dst_type, plane_in, plane_out, out_info.C);
+  if (filter_type_ == MemType::IMG) {
+    size_t img_dtype = ocl_runtime_->GetFp16Enable() ? CL_HALF_FLOAT : CL_FLOAT;
+    ImageSize img_size{(size_t)plane_out / C4NUM, (size_t)out_info.N * CO4, img_dtype};
+    packed_weight_ = allocator->Malloc(img_size, temp_filter.data());
   } else {
-    MS_ASSERT(in_tensors_.size() == kInputSize1);
+    packed_weight_ = allocator->Malloc(pack_weight_size, temp_filter.data());
+  }
+  FreeDequantedWeight();
+  if (packed_weight_ == nullptr) {
+    return RET_ERROR;
+  }
+
+  auto ConvertBias = [](void *src, void *dst, size_t size, size_t dtype_size, TypeId src_type, TypeId dst_type) {
+    if (dst_type == kNumberTypeFloat16 && src_type == kNumberTypeFloat32) {
+      float16_t *bias_ptr = static_cast<float16_t *>(dst);
+      for (size_t i = 0; i < size; ++i) {
+        bias_ptr[i] = static_cast<float16_t>(static_cast<float *>(src)[i]);
+      }
+    } else if (dst_type == kNumberTypeFloat32 && src_type == kNumberTypeFloat16) {
+      float32_t *bias_ptr = static_cast<float32_t *>(dst);
+      for (size_t i = 0; i < size; ++i) {
+        bias_ptr[i] = static_cast<float32_t>(static_cast<float16_t *>(src)[i]);
+      }
+    } else {
+      memcpy(dst, src, size * dtype_size);
+    }
+  };
+  size_t bias_size = C4NUM * CO4 * dtype_size;
+  std::vector<char> temp_bias(bias_size, 0);
+  if (in_tensors_.size() == 3) {
+    src_type = in_tensors_.at(kBiasIndex)->data_type();
+    dst_type = is_fp16 ? kNumberTypeFloat16 : kNumberTypeFloat32;
+    auto element_size = in_tensors_.at(kBiasIndex)->ElementsNum();
+    ConvertBias(in_tensors_.at(kBiasIndex)->data_c(), temp_bias.data(), element_size, dtype_size, src_type, dst_type);
+  }
+  bias_data_ = allocator->Malloc(bias_size, temp_bias.data());
+  if (bias_data_ == nullptr) {
+    return RET_ERROR;
   }
   return mindspore::lite::RET_OK;
 }
 
-int DepthwiseConv2dOpenCLKernel::GetGlobalSize(size_t idx, std::vector<size_t> *global_size) {
-  size_t CO4 = UP_DIV(out_tensors_[0]->Channel(), C4NUM * block_size_[2]);
-  std::vector<size_t> global = {CO4, (size_t)UP_DIV(out_tensors_[0]->Width(), block_size_[1]),
-                                (size_t)UP_DIV(out_tensors_[0]->Height(), block_size_[0])};
-  *global_size = std::move(global);
-  return mindspore::lite::RET_OK;
-}
-
-int DepthwiseConv2dOpenCLKernel::GetLocalSize(size_t idx, const std::vector<size_t> &global_size,
-                                              std::vector<size_t> *local_size) {
-  const int max_group_size = ocl_runtime_->DeviceMaxWorkGroupSize();
-  int z = global_size[0];
-  int y = std::min(max_group_size / z, GetMaxDivisorStrategy0(global_size[2], 8));
-  int x = std::max(1, std::min(static_cast<int>(global_size[1]), max_group_size / (y * z)));
-  local_size->clear();
-  *local_size = std::vector<size_t>({static_cast<size_t>(z), static_cast<size_t>(x), static_cast<size_t>(y)});
-  return mindspore::lite::RET_OK;
-}
-
-int DepthwiseConv2dOpenCLKernel::Run() {
-  MS_LOG(DEBUG) << this->name() << " Running!";
+void DepthwiseConv2dOpenCLKernel::SetConstArgs() {
   auto parameter = reinterpret_cast<ConvParameter *>(op_parameter_);
-  size_t CO4 = UP_DIV(out_tensors_[0]->Channel(), C4NUM);
-  size_t CI4 = UP_DIV(in_tensors_[0]->Channel(), C4NUM);
+  auto in_info = GpuTensorInfo(in_tensors_[0]);
+  auto out_info = GpuTensorInfo(out_tensors_[0]);
+  size_t CO4 = UP_DIV(out_info.C, C4NUM);
+  size_t CI4 = UP_DIV(in_info.C, C4NUM);
 
   std::map<ActType, std::pair<float, float>> relu_clips{
     {ActType_No, {-FLT_MAX, FLT_MAX}}, {ActType_Relu, {0.0, FLT_MAX}}, {ActType_Relu6, {0, 6.0}}};
@@ -174,15 +207,12 @@ int DepthwiseConv2dOpenCLKernel::Run() {
   cl_int2 stride = {parameter->stride_h_, parameter->stride_w_};
   cl_int2 padding = {-parameter->pad_u_, -parameter->pad_l_};
   cl_int2 dilation = {parameter->dilation_h_, parameter->dilation_w_};
-  cl_int4 src_size = {in_tensors_[0]->Width(), in_tensors_[0]->Height(), (cl_int)CI4, in_tensors_[0]->Batch()};
-  cl_int4 dst_size = {(cl_int)out_tensors_[0]->Width(), (cl_int)out_tensors_[0]->Height(), (cl_int)CO4,
-                      (cl_int)out_tensors_[0]->Batch()};
+  cl_int4 src_size = {(cl_int)in_info.W, (cl_int)in_info.H, (cl_int)CI4, (cl_int)in_info.N};
+  cl_int4 dst_size = {(cl_int)out_info.W, (cl_int)out_info.H, (cl_int)CO4, (cl_int)out_info.N};
 
-  int arg_cnt = 0;
-  ocl_runtime_->SetKernelArg(kernel_, arg_cnt++, in_tensors_[0]->data_c());
-  ocl_runtime_->SetKernelArg(kernel_, arg_cnt++, packed_weight_, lite::opencl::MemType::BUF);
+  int arg_cnt = 2;
+  ocl_runtime_->SetKernelArg(kernel_, arg_cnt++, packed_weight_, filter_type_);
   ocl_runtime_->SetKernelArg(kernel_, arg_cnt++, bias_data_, lite::opencl::MemType::BUF);
-  ocl_runtime_->SetKernelArg(kernel_, arg_cnt++, out_tensors_[0]->data_c());
   ocl_runtime_->SetKernelArg(kernel_, arg_cnt++, kernel_size);
   ocl_runtime_->SetKernelArg(kernel_, arg_cnt++, stride);
   ocl_runtime_->SetKernelArg(kernel_, arg_cnt++, padding);
@@ -191,31 +221,32 @@ int DepthwiseConv2dOpenCLKernel::Run() {
   ocl_runtime_->SetKernelArg(kernel_, arg_cnt++, dst_size);
   ocl_runtime_->SetKernelArg(kernel_, arg_cnt++, relu_clips[parameter->act_type_].first);
   ocl_runtime_->SetKernelArg(kernel_, arg_cnt++, relu_clips[parameter->act_type_].second);
-  ocl_runtime_->RunKernel(kernel_, global_size_, local_size_, nullptr);
+}
+
+void DepthwiseConv2dOpenCLKernel::SetGlobalLocal() {
+  auto out_info = GpuTensorInfo(out_tensors_[0]);
+  // set global
+  size_t CO4 = UP_DIV(out_info.C, C4NUM * block_size_.C);
+  global_size_ = {CO4, (size_t)UP_DIV(out_info.W, block_size_.W),
+                  (size_t)UP_DIV(out_info.H * out_info.N, block_size_.H)};
+  // set local
+  const int max_group_size = ocl_runtime_->DeviceMaxWorkGroupSize();
+  int z = global_size_[0];
+  int y = std::min(max_group_size / z, GetMaxDivisorStrategy0(global_size_[2], 8));
+  int x = std::max(1, std::min(static_cast<int>(global_size_[1]), max_group_size / (y * z)));
+  local_size_ = std::vector<size_t>({static_cast<size_t>(z), static_cast<size_t>(x), static_cast<size_t>(y)});
+
+  OpenCLKernel::AlignGlobalLocal(global_size_, local_size_);
+}
+
+int DepthwiseConv2dOpenCLKernel::Run() {
+  MS_LOG(DEBUG) << this->name() << " Running!";
+  ocl_runtime_->SetKernelArg(kernel_, 0, out_tensors_[0]->data_c());
+  ocl_runtime_->SetKernelArg(kernel_, 1, in_tensors_[0]->data_c());
+  ocl_runtime_->RunKernel(kernel_, global_range_, local_range_, nullptr, &event_);
   return mindspore::lite::RET_OK;
 }
 
-kernel::LiteKernel *OpenCLDepthwiseConv2dKernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                                       const std::vector<lite::Tensor *> &outputs,
-                                                       OpParameter *opParameter, const lite::InnerContext *ctx,
-                                                       const kernel::KernelKey &desc,
-                                                       const mindspore::lite::PrimitiveC *primitive) {
-  auto *kernel =
-    new (std::nothrow) DepthwiseConv2dOpenCLKernel(reinterpret_cast<OpParameter *>(opParameter), inputs, outputs);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "kernel " << opParameter->name_ << "is nullptr.";
-    free(opParameter);
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != mindspore::lite::RET_OK) {
-    delete kernel;
-    MS_LOG(ERROR) << "Init DepthwiseConv2dOpenCLKernel failed!";
-    return nullptr;
-  }
-  return kernel;
-}
-
-REG_KERNEL(kGPU, kNumberTypeFloat16, PrimitiveType_DepthwiseConv2D, OpenCLDepthwiseConv2dKernelCreator)
-REG_KERNEL(kGPU, kNumberTypeFloat32, PrimitiveType_DepthwiseConv2D, OpenCLDepthwiseConv2dKernelCreator)
+REG_KERNEL(kGPU, kNumberTypeFloat16, PrimitiveType_DepthwiseConv2D, OpenCLKernelCreator<DepthwiseConv2dOpenCLKernel>)
+REG_KERNEL(kGPU, kNumberTypeFloat32, PrimitiveType_DepthwiseConv2D, OpenCLKernelCreator<DepthwiseConv2dOpenCLKernel>)
 }  // namespace mindspore::kernel

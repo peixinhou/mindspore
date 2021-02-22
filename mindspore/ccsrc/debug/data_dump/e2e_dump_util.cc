@@ -67,16 +67,13 @@ void E2eDumpUtil::DumpMemToFile(const std::string &file_path, NotNull<const devi
 
 void E2eDumpUtil::DumpGPUMemToFile(const std::string &file_path, const std::string &original_kernel_name,
                                    NotNull<const device::DeviceAddress *> addr, bool trans_flag,
-                                   const ShapeVector &int_shapes, const TypeId &type, size_t slot, Debugger *debugger) {
+                                   const ShapeVector &int_shapes, const TypeId &type, size_t slot,
+                                   const Debugger *debugger) {
 #ifdef ENABLE_DEBUGGER
   auto format = kOpFormat_DEFAULT;
   MS_EXCEPTION_IF_NULL(debugger);
-  DebugServices *debug_services = debugger->debug_services();
-  MS_EXCEPTION_IF_NULL(debug_services);
-  TensorLoader *tensor_loader = debug_services->tensor_loader();
-  MS_EXCEPTION_IF_NULL(tensor_loader);
-  auto ret = tensor_loader->DumpTensorToFile(original_kernel_name, trans_flag, file_path, format, int_shapes, type,
-                                             addr->type_id(), addr->format(), slot);
+  auto ret = debugger->DumpTensorToFile(original_kernel_name, trans_flag, file_path, format, int_shapes, type,
+                                        addr->type_id(), addr->format(), slot);
   if (!ret) {
     MS_LOG(ERROR) << "DumpTensorToFile Failed: flag:" << std::to_string(trans_flag) << ", path:" << file_path
                   << ", host_format:" << format;
@@ -122,6 +119,9 @@ void E2eDumpUtil::DumpOutputImpl(const CNodePtr &node, bool trans_flag, const st
   GetFileKernelName(NOT_NULL(kernel_name));
   auto output_size = AnfAlgo::GetOutputTensorNum(node);
   for (size_t j = 0; j < output_size; ++j) {
+    if (!AnfAlgo::OutputAddrExist(node, j)) {
+      continue;
+    }
     auto addr = AnfAlgo::GetOutputAddr(node, j);
     ShapeVector int_shapes;
     GetDumpIntShape(node, j, trans_flag, NOT_NULL(&int_shapes));
@@ -166,6 +166,9 @@ void E2eDumpUtil::DumpInputImpl(const CNodePtr &node, bool trans_flag, const std
     auto kernel_with_index = AnfAlgo::GetPrevNodeOutput(node, j);
     auto input = kernel_with_index.first;
     auto index = kernel_with_index.second;
+    if (!AnfAlgo::OutputAddrExist(input, index)) {
+      continue;
+    }
     auto addr = AnfAlgo::GetOutputAddr(input, index);
 
     std::string tensor_name;
@@ -314,9 +317,9 @@ bool E2eDumpUtil::DumpData(const session::KernelGraph *graph, uint32_t device_id
   dump_json_parser.UpdateDumpIter();
   auto dump_flag = dump_json_parser.e2e_dump_enabled();
   if (!dump_flag) {
-    MS_LOG(INFO) << "E2e dump is disabled, skip dump step";
     return true;
   }
+  MS_LOG(INFO) << "E2e dump data start";
 
   if (dump_json_parser.iteration() != 0) {
     if (dump_json_parser.cur_dump_iter() != dump_json_parser.iteration()) {

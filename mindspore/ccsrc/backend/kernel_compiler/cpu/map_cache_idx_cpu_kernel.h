@@ -23,11 +23,8 @@
 #include "backend/kernel_compiler/cpu/cpu_kernel.h"
 #include "backend/kernel_compiler/cpu/cpu_kernel_factory.h"
 
-#define NULLTAG 0
-
 namespace mindspore {
 namespace kernel {
-
 class MapCacheIdxCPUKernel : public CPUKernel {
  public:
   MapCacheIdxCPUKernel() = default;
@@ -45,6 +42,7 @@ class MapCacheIdxCPUKernel : public CPUKernel {
   size_t batch_size_{1};
   size_t hashmap_length_{1};
   TypeId dtype_{kTypeUnknown};
+  CNodePtr node_ = nullptr;
 };
 
 MS_REG_CPU_KERNEL(MapCacheIdx,
@@ -98,7 +96,6 @@ MS_REG_CPU_KERNEL(MapCacheIdx,
                     .AddOutputAttr(kNumberTypeInt32)
                     .AddOutputAttr(kNumberTypeInt32),
                   MapCacheIdxCPUKernel);
-
 }  // namespace kernel
 }  // namespace mindspore
 

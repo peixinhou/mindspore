@@ -39,8 +39,10 @@ Status CacheService::DoServiceStart() {
   if (cache_mem_sz_ > 0) {
     auto avail_mem = CacheServerHW::GetTotalSystemMemory();
     if (cache_mem_sz_ > avail_mem) {
-      // Output a warning that we use more than recommended. If we fail to allocate, we will fail anyway.
-      MS_LOG(WARNING) << "Requesting cache size " << cache_mem_sz_ << " while available system memory " << avail_mem;
+      // Return an error if we use more than recommended memory.
+      std::string errMsg = "Requesting cache size " + std::to_string(cache_mem_sz_) +
+                           " while available system memory " + std::to_string(avail_mem);
+      return Status(StatusCode::kMDOutOfMemory, __LINE__, __FILE__, errMsg);
     }
     memory_cap_ratio = static_cast<float>(cache_mem_sz_) / avail_mem;
   }
@@ -68,15 +70,16 @@ Status CacheService::DoServiceStop() {
 Status CacheService::CacheRow(const std::vector<const void *> &buf, row_id_type *row_id_generated) {
   SharedLock rw(&rw_lock_);
   RETURN_UNEXPECTED_IF_NULL(row_id_generated);
-  if (st_ == CacheServiceState::kFetchPhase) {
+  if (HasBuildPhase() && st_ != CacheServiceState::kBuildPhase) {
     // For this kind of cache service, once we are done with the build phase into fetch phase, we can't
     // allow other to cache more rows.
-    RETURN_STATUS_UNEXPECTED("Can't accept cache request in fetch phase");
+    RETURN_STATUS_UNEXPECTED("Can't accept cache request in non-build phase. Current phase: " +
+                             std::to_string(static_cast<int>(st_.load())));
   }
   if (st_ == CacheServiceState::kNoLocking) {
     // We ignore write this request once we turn off locking on the B+ tree. So we will just
     // return out of memory from now on.
-    return Status(StatusCode::kOutOfMemory);
+    return Status(StatusCode::kMDOutOfMemory);
   }
   try {
     // The first buffer is a flatbuffer which describes the rest of the buffers follow
@@ -116,9 +119,19 @@ Status CacheService::CacheRow(const std::vector<const void *> &buf, row_id_type 
     }
     // Now we cache the buffer.
     Status rc = cp_->Insert(*row_id_generated, all_data);
-    if (rc == Status(StatusCode::kDuplicateKey)) {
+    if (rc == Status(StatusCode::kMDDuplicateKey)) {
       MS_LOG(DEBUG) << "Ignoring duplicate key.";
     } else {
+      if (HasBuildPhase()) {
+        // For cache service that has a build phase, record the error in the state
+        // so other clients can be aware of the new state. There is nothing one can
+        // do to resume other than to drop the cache.
+        if (rc == StatusCode::kMDNoSpace) {
+          st_ = CacheServiceState::kNoSpace;
+        } else if (rc == StatusCode::kMDOutOfMemory) {
+          st_ = CacheServiceState::kOutOfMemory;
+        }
+      }
       RETURN_IF_NOT_OK(rc);
     }
     return Status::OK();
@@ -130,15 +143,16 @@ Status CacheService::CacheRow(const std::vector<const void *> &buf, row_id_type 
 Status CacheService::FastCacheRow(const ReadableSlice &src, row_id_type *row_id_generated) {
   SharedLock rw(&rw_lock_);
   RETURN_UNEXPECTED_IF_NULL(row_id_generated);
-  if (st_ == CacheServiceState::kFetchPhase) {
+  if (HasBuildPhase() && st_ != CacheServiceState::kBuildPhase) {
     // For this kind of cache service, once we are done with the build phase into fetch phase, we can't
     // allow other to cache more rows.
-    RETURN_STATUS_UNEXPECTED("Can't accept cache request in fetch phase");
+    RETURN_STATUS_UNEXPECTED("Can't accept cache request in non-build phase. Current phase: " +
+                             std::to_string(static_cast<int>(st_.load())));
   }
   if (st_ == CacheServiceState::kNoLocking) {
     // We ignore write this request once we turn off locking on the B+ tree. So we will just
     // return out of memory from now on.
-    return Status(StatusCode::kOutOfMemory);
+    return Status(StatusCode::kMDOutOfMemory);
   }
   try {
     // If we don't need to generate id, we need to find it from the buffer.
@@ -158,9 +172,19 @@ Status CacheService::FastCacheRow(const ReadableSlice &src, row_id_type *row_id_
     }
     // Now we cache the buffer.
     Status rc = cp_->Insert(*row_id_generated, {src});
-    if (rc == Status(StatusCode::kDuplicateKey)) {
+    if (rc == Status(StatusCode::kMDDuplicateKey)) {
       MS_LOG(DEBUG) << "Ignoring duplicate key.";
     } else {
+      if (HasBuildPhase()) {
+        // For cache service that has a build phase, record the error in the state
+        // so other clients can be aware of the new state. There is nothing one can
+        // do to resume other than to drop the cache.
+        if (rc == StatusCode::kMDNoSpace) {
+          st_ = CacheServiceState::kNoSpace;
+        } else if (rc == StatusCode::kMDOutOfMemory) {
+          st_ = CacheServiceState::kOutOfMemory;
+        }
+      }
       RETURN_IF_NOT_OK(rc);
     }
     return Status::OK();
@@ -202,13 +226,18 @@ Status CacheService::GetStat(CacheService::ServiceStat *out) {
   SharedLock rw(&rw_lock_);
   RETURN_UNEXPECTED_IF_NULL(out);
   out->stat_ = cp_->GetStat();
-  out->state_ = static_cast<ServiceStat::state_type>(st_);
+  out->state_ = static_cast<ServiceStat::state_type>(st_.load());
   return Status::OK();
 }
 
 Status CacheService::PreBatchFetch(connection_id_type connection_id, const std::vector<row_id_type> &v,
                                    const std::shared_ptr<flatbuffers::FlatBufferBuilder> &fbb) {
   SharedLock rw(&rw_lock_);
+  if (HasBuildPhase() && st_ != CacheServiceState::kFetchPhase) {
+    // For this kind of cache service, we can't fetch yet until we are done with caching all the rows.
+    RETURN_STATUS_UNEXPECTED("Can't accept fetch request in non-fetch phase. Current phase: " +
+                             std::to_string(static_cast<int>(st_.load())));
+  }
   std::vector<flatbuffers::Offset<DataLocatorMsg>> datalocator_v;
   datalocator_v.reserve(v.size());
   for (auto row_id : v) {
@@ -223,76 +252,6 @@ Status CacheService::PreBatchFetch(connection_id_type connection_id, const std::
   auto offset_final = bld.Finish();
   fbb->Finish(offset_final);
   return Status::OK();
-}
-
-Status CacheService::BatchFetch(const std::shared_ptr<flatbuffers::FlatBufferBuilder> &fbb, WritableSlice *out) const {
-  RETURN_UNEXPECTED_IF_NULL(out);
-  SharedLock rw(&rw_lock_);
-  if (st_ == CacheServiceState::kBuildPhase) {
-    // For this kind of cache service, we can't fetch yet until we are done with caching all the rows.
-    RETURN_STATUS_UNEXPECTED("Can't accept cache request in fetch phase");
-  }
-  CacheServer &cs = CacheServer::GetInstance();
-  int32_t numQ = cs.GetNumGrpcWorkers();
-  auto rng = GetRandomDevice();
-  std::uniform_int_distribution<session_id_type> distribution(0, numQ - 1);
-  int32_t qID = distribution(rng);
-  std::vector<CacheServerRequest *> cache_rq_list;
-  auto p = flatbuffers::GetRoot<BatchDataLocatorMsg>(fbb->GetBufferPointer());
-  const auto num_elements = p->rows()->size();
-  auto connection_id = p->connection_id();
-  cache_rq_list.reserve(num_elements);
-  int64_t data_offset = (num_elements + 1) * sizeof(int64_t);
-  auto *offset_array = reinterpret_cast<int64_t *>(out->GetMutablePointer());
-  offset_array[0] = data_offset;
-  for (auto i = 0; i < num_elements; ++i) {
-    auto data_locator = p->rows()->Get(i);
-    auto node_id = data_locator->node_id();
-    size_t sz = data_locator->size();
-    void *source_addr = reinterpret_cast<void *>(data_locator->addr());
-    auto key = data_locator->key();
-    // Please read the comment in CacheServer::BatchFetchRows where we allocate
-    // the buffer big enough so each thread (which we are going to dispatch) will
-    // not run into false sharing problem. We are going to round up sz to 4k.
-    auto sz_4k = round_up_4K(sz);
-    offset_array[i + 1] = offset_array[i] + sz_4k;
-    if (sz > 0) {
-      WritableSlice row_data(*out, offset_array[i], sz);
-      // Get a request and send to the proper worker (at some numa node) to do the fetch.
-      worker_id_t worker_id = cs.IsNumaAffinityOn() ? cs.GetWorkerByNumaId(node_id) : cs.GetRandomWorker();
-      CacheServerRequest *cache_rq;
-      RETURN_IF_NOT_OK(cs.GetFreeRequestTag(qID++ % numQ, &cache_rq));
-      cache_rq_list.push_back(cache_rq);
-      // Set up all the necessarily field.
-      cache_rq->type_ = BaseRequest::RequestType::kInternalFetchRow;
-      cache_rq->st_ = CacheServerRequest::STATE::PROCESS;
-      cache_rq->rq_.set_connection_id(connection_id);
-      cache_rq->rq_.set_type(static_cast<int16_t>(cache_rq->type_));
-      auto dest_addr = row_data.GetMutablePointer();
-      flatbuffers::FlatBufferBuilder fb2;
-      FetchRowMsgBuilder bld(fb2);
-      bld.add_key(key);
-      bld.add_size(sz);
-      bld.add_source_addr(reinterpret_cast<int64_t>(source_addr));
-      bld.add_dest_addr(reinterpret_cast<int64_t>(dest_addr));
-      auto offset = bld.Finish();
-      fb2.Finish(offset);
-      cache_rq->rq_.add_buf_data(fb2.GetBufferPointer(), fb2.GetSize());
-      RETURN_IF_NOT_OK(cs.PushRequest(worker_id, cache_rq));
-    }
-  }
-  // Now wait for all of them to come back. Let go of the shared lock. We shouldn't be holding
-  // any lock while we can wait for a long time.
-  rw.Unlock();
-  Status rc;
-  for (CacheServerRequest *rq : cache_rq_list) {
-    RETURN_IF_NOT_OK(rq->Wait());
-    if (rq->rc_.IsError() && !rq->rc_.IsInterrupted() && rc.IsOk()) {
-      rc = rq->rc_;
-    }
-    RETURN_IF_NOT_OK(cs.ReturnRequestTag(rq));
-  }
-  return rc;
 }
 
 Status CacheService::InternalFetchRow(const FetchRowMsg *p) {
@@ -337,7 +296,8 @@ Status CacheService::FetchSchema(std::string *out) const {
   SharedLock rw(&rw_lock_);
   if (st_ == CacheServiceState::kBuildPhase) {
     // For this kind of cache service, we can't fetch yet until we are done with caching all the rows.
-    RETURN_STATUS_UNEXPECTED("Can't accept cache request in fetch phase");
+    RETURN_STATUS_UNEXPECTED("Can't accept fetch request in non-fetch phase. Current phase: " +
+                             std::to_string(static_cast<int>(st_.load())));
   }
   RETURN_UNEXPECTED_IF_NULL(out);
   // We are going to use std::string to allocate and hold the result which will be eventually
@@ -347,7 +307,7 @@ Status CacheService::FetchSchema(std::string *out) const {
   if (!mem.empty()) {
     *out = std::move(mem);
   } else {
-    return Status(StatusCode::kFileNotExist, __LINE__, __FILE__, "No schema has been cached");
+    return Status(StatusCode::kMDFileNotExist, __LINE__, __FILE__, "No schema has been cached");
   }
   return Status::OK();
 }
@@ -358,6 +318,7 @@ Status CacheService::BuildPhaseDone() {
     UniqueLock rw(&rw_lock_);
     st_ = CacheServiceState::kFetchPhase;
     cp_->SetLocking(false);
+    MS_LOG(WARNING) << "Locking mode is switched off.";
     return Status::OK();
   } else {
     RETURN_STATUS_UNEXPECTED("Not a cache that has a build phase");

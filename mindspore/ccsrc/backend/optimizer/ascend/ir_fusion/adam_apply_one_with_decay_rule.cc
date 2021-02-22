@@ -21,6 +21,7 @@
 #include "backend/session/anf_runtime_algorithm.h"
 #include "ir/primitive.h"
 #include "backend/optimizer/common/helper.h"
+#include "utils/trace_base.h"
 
 namespace mindspore {
 namespace opt {
@@ -58,10 +59,10 @@ const BaseRef AdamApplyOneWithDecayRuleCond1::DefinePattern() const {
   VectorRef mul3({prim::kPrimMul, mul3_x_, square0});
   VectorRef add1({add1_var_, mul2, mul3});
   VectorRef sqrt0({sqrt, add1});
-  VectorRef add2({prim::kPrimTensorAdd, add2_y_, sqrt0});
+  VectorRef add2({prim::kPrimAdd, add2_y_, sqrt0});
   VectorRef mul4({prim::kPrimMul, mul4_x_, input3_});
   VectorRef real_div0({real_div, add0, add2});
-  VectorRef add3({prim::kPrimTensorAdd, mul4, real_div0});
+  VectorRef add3({prim::kPrimAdd, mul4, real_div0});
   VectorRef mul5({prim::kPrimMul, input4_, add3});
   VectorRef sub0({prim::kPrimSub, input3_, mul5});
   return sub0;
@@ -78,10 +79,10 @@ const BaseRef AdamApplyOneWithDecayRuleCond2::DefinePattern() const {
   VectorRef mul3({prim::kPrimMul, mul3_x_, square0});
   VectorRef add1({add1_var_, mul2, mul3});
   VectorRef sqrt0({sqrt, add1});
-  VectorRef add2({prim::kPrimTensorAdd, sqrt0, add2_y_});
+  VectorRef add2({prim::kPrimAdd, sqrt0, add2_y_});
   VectorRef mul4({prim::kPrimMul, input3_, mul4_x_});
   VectorRef real_div0({real_div, add0, add2});
-  VectorRef add3({prim::kPrimTensorAdd, mul4, real_div0});
+  VectorRef add3({prim::kPrimAdd, mul4, real_div0});
   VectorRef mul5({prim::kPrimMul, add3, input4_});
   VectorRef sub0({prim::kPrimSub, input3_, mul5});
   return sub0;
@@ -98,10 +99,10 @@ const BaseRef AdamApplyOneWithDecayRuleCond3::DefinePattern() const {
   VectorRef mul3({prim::kPrimMul, square0, mul3_x_});
   VectorRef add1({add1_var_, mul2, mul3});
   VectorRef sqrt0({sqrt, add1});
-  VectorRef add2({prim::kPrimTensorAdd, sqrt0, add2_y_});
+  VectorRef add2({prim::kPrimAdd, sqrt0, add2_y_});
   VectorRef mul4({prim::kPrimMul, mul4_x_, input3_});
   VectorRef real_div0({real_div, add0, add2});
-  VectorRef add3({prim::kPrimTensorAdd, mul4, real_div0});
+  VectorRef add3({prim::kPrimAdd, mul4, real_div0});
   VectorRef mul5({prim::kPrimMul, add3, input4_});
   VectorRef sub0({prim::kPrimSub, input3_, mul5});
   return sub0;
@@ -118,10 +119,10 @@ const BaseRef AdamApplyOneWithDecayRuleCond4::DefinePattern() const {
   VectorRef mul3({prim::kPrimMul, mul3_x_, square0});
   VectorRef add1({add1_var_, mul2, mul3});
   VectorRef sqrt0({sqrt, add1});
-  VectorRef add2({prim::kPrimTensorAdd, add2_y_, sqrt0});
+  VectorRef add2({prim::kPrimAdd, add2_y_, sqrt0});
   VectorRef mul4({prim::kPrimMul, mul4_x_, input3_});
   VectorRef real_div0({real_div, add0, add2});
-  VectorRef add3({prim::kPrimTensorAdd, mul4, real_div0});
+  VectorRef add3({prim::kPrimAdd, mul4, real_div0});
   VectorRef mul5({prim::kPrimMul, add3, input4_});
   VectorRef sub0({prim::kPrimSub, input3_, mul5});
   return sub0;
@@ -138,10 +139,10 @@ const BaseRef AdamApplyOneWithDecayRuleCond5::DefinePattern() const {
   VectorRef mul3({prim::kPrimMul, mul3_x_, square0});
   VectorRef add1({add1_var_, mul2, mul3});
   VectorRef sqrt0({sqrt, add1});
-  VectorRef add2({prim::kPrimTensorAdd, sqrt0, add2_y_});
+  VectorRef add2({prim::kPrimAdd, sqrt0, add2_y_});
   VectorRef mul4({prim::kPrimMul, mul4_x_, input3_});
   VectorRef real_div0({real_div, add0, add2});
-  VectorRef add3({prim::kPrimTensorAdd, mul4, real_div0});
+  VectorRef add3({prim::kPrimAdd, mul4, real_div0});
   VectorRef mul5({prim::kPrimMul, add3, input4_});
   VectorRef sub0({prim::kPrimSub, input3_, mul5});
   return sub0;
@@ -158,10 +159,10 @@ const BaseRef AdamApplyOneWithDecayAssignRuleCond1::DefinePattern() const {
   VectorRef mul3({prim::kPrimMul, mul3_x_, square0});
   VectorRef add1({add1_var_, mul2, mul3});
   VectorRef sqrt0({sqrt, add1});
-  VectorRef add2({prim::kPrimTensorAdd, add2_y_, sqrt0});
+  VectorRef add2({prim::kPrimAdd, add2_y_, sqrt0});
   VectorRef mul4({prim::kPrimMul, mul4_x_, input3_});
   VectorRef real_div0({real_div, add0, add2});
-  VectorRef add3({prim::kPrimTensorAdd, mul4, real_div0});
+  VectorRef add3({prim::kPrimAdd, mul4, real_div0});
   VectorRef mul5({prim::kPrimMul, input4_, add3});
   VectorRef sub0({sub0_var_, input3_, mul5});
   VectorRef assign0 = VectorRef({prim::kPrimAssign, input3_, sub0});
@@ -183,10 +184,10 @@ const BaseRef AdamApplyOneWithDecayAssignRuleCond2::DefinePattern() const {
   VectorRef mul3({prim::kPrimMul, mul3_x_, square0});
   VectorRef add1({add1_var_, mul2, mul3});
   VectorRef sqrt0({sqrt, add1});
-  VectorRef add2({prim::kPrimTensorAdd, sqrt0, add2_y_});
+  VectorRef add2({prim::kPrimAdd, sqrt0, add2_y_});
   VectorRef mul4({prim::kPrimMul, input3_, mul4_x_});
   VectorRef real_div0({real_div, add0, add2});
-  VectorRef add3({prim::kPrimTensorAdd, mul4, real_div0});
+  VectorRef add3({prim::kPrimAdd, mul4, real_div0});
   VectorRef mul5({prim::kPrimMul, add3, input4_});
   VectorRef sub0({sub0_var_, input3_, mul5});
   VectorRef assign0 = VectorRef({prim::kPrimAssign, input3_, sub0});
@@ -208,10 +209,10 @@ const BaseRef AdamApplyOneWithDecayAssignRuleCond3::DefinePattern() const {
   VectorRef mul3({prim::kPrimMul, square0, mul3_x_});
   VectorRef add1({add1_var_, mul2, mul3});
   VectorRef sqrt0({sqrt, add1});
-  VectorRef add2({prim::kPrimTensorAdd, sqrt0, add2_y_});
+  VectorRef add2({prim::kPrimAdd, sqrt0, add2_y_});
   VectorRef mul4({prim::kPrimMul, mul4_x_, input3_});
   VectorRef real_div0({real_div, add0, add2});
-  VectorRef add3({prim::kPrimTensorAdd, mul4, real_div0});
+  VectorRef add3({prim::kPrimAdd, mul4, real_div0});
   VectorRef mul5({prim::kPrimMul, add3, input4_});
   VectorRef sub0({sub0_var_, input3_, mul5});
   VectorRef assign0 = VectorRef({prim::kPrimAssign, input3_, sub0});
@@ -233,10 +234,10 @@ const BaseRef AdamApplyOneWithDecayAssignRuleCond4::DefinePattern() const {
   VectorRef mul3({prim::kPrimMul, mul3_x_, square0});
   VectorRef add1({add1_var_, mul2, mul3});
   VectorRef sqrt0({sqrt, add1});
-  VectorRef add2({prim::kPrimTensorAdd, add2_y_, sqrt0});
+  VectorRef add2({prim::kPrimAdd, add2_y_, sqrt0});
   VectorRef mul4({prim::kPrimMul, mul4_x_, input3_});
   VectorRef real_div0({real_div, add0, add2});
-  VectorRef add3({prim::kPrimTensorAdd, mul4, real_div0});
+  VectorRef add3({prim::kPrimAdd, mul4, real_div0});
   VectorRef mul5({prim::kPrimMul, add3, input4_});
   VectorRef sub0({sub0_var_, input3_, mul5});
   VectorRef assign0 = VectorRef({prim::kPrimAssign, input3_, sub0});
@@ -258,10 +259,10 @@ const BaseRef AdamApplyOneWithDecayAssignRuleCond5::DefinePattern() const {
   VectorRef mul3({prim::kPrimMul, mul3_x_, square0});
   VectorRef add1({add1_var_, mul2, mul3});
   VectorRef sqrt0({sqrt, add1});
-  VectorRef add2({prim::kPrimTensorAdd, sqrt0, add2_y_});
+  VectorRef add2({prim::kPrimAdd, sqrt0, add2_y_});
   VectorRef mul4({prim::kPrimMul, mul4_x_, input3_});
   VectorRef real_div0({real_div, add0, add2});
-  VectorRef add3({prim::kPrimTensorAdd, mul4, real_div0});
+  VectorRef add3({prim::kPrimAdd, mul4, real_div0});
   VectorRef mul5({prim::kPrimMul, add3, input4_});
   VectorRef sub0({sub0_var_, input3_, mul5});
   VectorRef assign0 = VectorRef({prim::kPrimAssign, input3_, sub0});
@@ -281,7 +282,8 @@ const AnfNodePtr AdamApplyOneWithDecayRule::Process(const FuncGraphPtr &graph, c
   if (AnfAlgo::CheckPrimitiveType(node, prim::kPrimDepend)) {
     auto iter_sub0 = (*equiv).find(sub0_var_);
     if (iter_sub0 == (*equiv).end()) {
-      MS_LOG(EXCEPTION) << "The equiv map is expected to contains the sub0 var after matched.";
+      MS_LOG(EXCEPTION) << "The equiv map is expected to contains the sub0 var after matched."
+                        << " trace: " << trace::DumpSourceLines(node);
     }
     sub0 = utils::cast<AnfNodePtr>(iter_sub0->second);
   }
@@ -296,11 +298,13 @@ const AnfNodePtr AdamApplyOneWithDecayRule::Process(const FuncGraphPtr &graph, c
 
   auto iter_add0 = (*equiv).find(add0_var_);
   if (iter_add0 == (*equiv).end()) {
-    MS_LOG(EXCEPTION) << "The equiv map is expected to contains the add0 var after matched.";
+    MS_LOG(EXCEPTION) << "The equiv map is expected to contains the add0 var after matched."
+                      << " trace: " << trace::DumpSourceLines(node);
   }
   auto iter_add1 = (*equiv).find(add1_var_);
   if (iter_add1 == (*equiv).end()) {
-    MS_LOG(EXCEPTION) << "The equiv map is expected to contains the add1 var after matched.";
+    MS_LOG(EXCEPTION) << "The equiv map is expected to contains the add1 var after matched."
+                      << " trace: " << trace::DumpSourceLines(node);
   }
   auto add0 = utils::cast<AnfNodePtr>(iter_add0->second);
   MS_EXCEPTION_IF_NULL(add0);

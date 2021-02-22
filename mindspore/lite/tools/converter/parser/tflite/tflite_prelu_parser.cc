@@ -21,38 +21,25 @@
 
 namespace mindspore {
 namespace lite {
-STATUS TflitePReLUParser::Parse(TfliteTensorsInfo *tensors_info, const std::unique_ptr<tflite::OperatorT> &tflite_op,
-                                const std::unique_ptr<tflite::ModelT> &tflite_model,
-                                const std::unique_ptr<tflite::SubGraphT> &tflite_subgraph, schema::CNodeT *op) {
-  MS_LOG(DEBUG) << "parse TflitePReLUParser";
-  MS_ASSERT(tflite_op != nullptr);
-  MS_ASSERT(tflite_model != nullptr);
-  MS_ASSERT(tflite_subgraph != nullptr);
-  if (op == nullptr) {
-    MS_LOG(ERROR) << "op is null";
-    return RET_NULL_PTR;
-  }
-  op->primitive = std::make_unique<schema::PrimitiveT>();
-  if (op->primitive == nullptr) {
-    MS_LOG(ERROR) << "op->primitive is null";
-    return RET_NULL_PTR;
+PrimitiveC *TflitePReLUParser::ParseLitePrimitive(const std::unique_ptr<tflite::OperatorT> &tflite_op,
+                                                  const std::unique_ptr<tflite::ModelT> &tflite_model) {
+  auto primitive = std::make_unique<schema::PrimitiveT>();
+  if (primitive == nullptr) {
+    MS_LOG(ERROR) << "primitive is null";
+    return nullptr;
   }
 
   std::unique_ptr<schema::PReLUT> attr = std::make_unique<schema::PReLUT>();
   if (attr == nullptr) {
     MS_LOG(ERROR) << "new op failed";
-    return RET_NULL_PTR;
+    return nullptr;
   }
   attr->channelShared = true;
-  op->primitive->value.type = schema::PrimitiveType_PReLU;
-  op->primitive->value.value = attr.release();
-
-  AddOpInput(op, tensors_info, tflite_op->inputs[0], tflite_subgraph->tensors.size(), schema::Format::Format_NHWC);
-  AddOpInput(op, tensors_info, tflite_op->inputs[1], tflite_subgraph->tensors.size(), schema::Format::Format_NHWC);
-  AddOpOutput(op, tensors_info, tflite_op->outputs[0], tflite_subgraph->tensors.size(), schema::Format::Format_NHWC);
-  return RET_OK;
+  primitive->value.type = schema::PrimitiveType_PReLU;
+  primitive->value.value = attr.release();
+  return PrimitiveC::Create(primitive.release());
 }
 
-TfliteNodeRegister g_tflitePReLUParser("PRELU", new TflitePReLUParser());
+TfliteNodeRegister g_tflitePReLUParser(tflite::BuiltinOperator_PRELU, new TflitePReLUParser());
 }  // namespace lite
 }  // namespace mindspore

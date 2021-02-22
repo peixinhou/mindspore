@@ -34,6 +34,7 @@ from ...ops.operations import _quant_ops as Q
 
 __all__ = [
     'FakeQuantWithMinMaxObserver',
+    'Conv2dBnFoldQuantOneConv',
     'Conv2dBnFoldQuant',
     'Conv2dBnWithoutFoldQuant',
     'Conv2dQuant',
@@ -98,8 +99,8 @@ class BatchNormFoldCell(Cell):
             else:
                 batch_mean = P.ZerosLike()(variance)
                 batch_std = P.OnesLike()(variance)
-                running_mean = P.TensorAdd()(mean, 0.)
-                running_std = P.Sqrt()(P.TensorAdd()(variance, self.epsilon))
+                running_mean = P.Add()(mean, 0.)
+                running_std = P.Sqrt()(P.Add()(variance, self.epsilon))
         return batch_mean, batch_std, running_mean, running_std
 
 
@@ -110,12 +111,13 @@ def _partial_init(cls_or_self, **kwargs):
     This can be useful when there is a need to create classes with the same
     constructor arguments, but different instances.
 
-    Example::
+    Examples:
         >>> Foo.partial_init = classmethod(_partial_init)
         >>> foo_builder = Foo.partial_init(a=3, b=4).partial_init(answer=42)
         >>> foo_instance1 = foo_builder()
         >>> foo_instance2 = foo_builder()
-        >>> id(foo_instance1) == id(foo_instance2)
+        >>> result = (id(foo_instance1) == id(foo_instance2))
+        >>> print(result)
         False
     """
 
@@ -155,7 +157,7 @@ class _Observer(Cell):
         self.quant_dtype = quant_dtype
 
     def extend_repr(self):
-        s = f"dtype={self.dtype}"
+        s = f"quant_dtype={self.quant_dtype}"
         return s
 
     def construct(self):
@@ -208,7 +210,62 @@ class UniformQuantObserver(_Observer):
 
 class FakeQuantWithMinMaxObserver(UniformQuantObserver):
     r"""
-    Quantization aware op. This OP provides the fake quantization observer function on data with min and max.
+    Quantization aware operation which provides the fake quantization observer function on data with min and max.
+
+    The running min/max :math:`x_{min}` and :math:`x_{max}` are computed as:
+
+    .. math::
+
+        \begin{array}{ll} \\
+            x_{min} =
+            \begin{cases}
+                \min(\min(X), 0)
+                  & \text{ if } ema = \text{False} \\
+                \min((1 - c) \min(X) + \text{c } x_{min}, 0)
+                  & \text{ if } \text{otherwise}
+            \end{cases}\\
+            x_{max} =
+            \begin{cases}
+                \max(\max(X), 0)
+                  & \text{ if } ema = \text{False} \\
+                \max((1 - c) \max(X) + \text{c } x_{max}, 0)
+                  & \text{ if } \text{otherwise}
+            \end{cases}
+        \end{array}
+
+    where X is the input tensor, and :math:`c` is the `ema_decay`.
+
+    The scale and zero point zp is computed as:
+
+    .. math::
+
+        \begin{array}{ll} \\
+            scale =
+            \begin{cases}
+                \frac{x_{max} - x_{min}}{Q_{max} - Q_{min}}
+                  & \text{ if } symmetric = \text{False} \\
+                \frac{2\max(x_{max}, \left | x_{min} \right |) }{Q_{max} - Q_{min}}
+                  & \text{ if } \text{otherwise}
+            \end{cases}\\
+            zp\_min = Q_{min} - \frac{x_{min}}{scale} \\
+            zp = \left \lfloor \min(Q_{max}, \max(Q_{min}, zp\_min)) + 0.5 \right \rfloor
+        \end{array}
+
+    where :math:`Q_{max}` and :math:`Q_{min}` is decided by quant_dtype, for example, if quant_dtype=INT8,
+    then :math:`Q_{max} = 127` and :math:`Q_{min} = -128`.
+
+    The fake quant output is computed as:
+
+    .. math::
+
+        \begin{array}{ll} \\
+            u_{min} = (Q_{min} - zp) * scale \\
+            u_{max} = (Q_{max} - zp) * scale \\
+            u_X = \left \lfloor \frac{\min(u_{max}, \max(u_{min}, X)) - u_{min}}{scale}
+            + 0.5 \right \rfloor \\
+            output = u_X * scale + u_{min}
+        \end{array}
+
 
     Args:
         min_init (int, float): The initialized min value. Default: -6.
@@ -232,9 +289,10 @@ class FakeQuantWithMinMaxObserver(UniformQuantObserver):
     Examples:
         >>> fake_quant = nn.FakeQuantWithMinMaxObserver()
         >>> input = Tensor(np.array([[1, 2, 1], [-2, 0, -1]]), mindspore.float32)
-        >>> result = fake_quant(input)
-        >>> result
-        [[0.9882355, 1.9764705, 0.9882355], [-1.9764705, 0. , -0.9882355]]
+        >>> output = fake_quant(input)
+        >>> print(output)
+        [[ 0.9882355  1.9764705  0.9882355]
+         [-1.9764705  0.        -0.9882355]]
     """
 
     def __init__(self,
@@ -270,7 +328,7 @@ class FakeQuantWithMinMaxObserver(UniformQuantObserver):
         self.narrow_range = narrow_range
         self.is_ascend = context.get_context('device_target') == "Ascend"
 
-        # init tensor min and max for fake quant op
+        # init tensor min and max for fake quantized operation
         if self.per_channel:
             min_array = np.array([self.min_init] * self.num_channels).astype(np.float32)
             max_array = np.array([self.max_init] * self.num_channels).astype(np.float32)
@@ -317,8 +375,8 @@ class FakeQuantWithMinMaxObserver(UniformQuantObserver):
     def construct(self, x):
         if self.training:
             min_up, max_up = self.ema_update(x, self.minq, self.maxq)
-            P.Assign()(self.minq, min_up)
-            P.Assign()(self.maxq, max_up)
+            self.minq = min_up
+            self.maxq = max_up
             out = self.fake_quant_train(x, self.minq, self.maxq)
         else:
             out = self.fake_quant_infer(x, self.minq, self.maxq)
@@ -330,11 +388,12 @@ QuantConfig = namedtuple("QuantConfig", ['weight', 'activation'])
 quant_config_default = QuantConfig(weight=FakeQuantWithMinMaxObserver, activation=FakeQuantWithMinMaxObserver)
 
 
-class Conv2dBnFoldQuant(Cell):
+class Conv2dBnFoldQuantOneConv(Cell):
     r"""
-    2D convolution with BatchNormal op folded construct.
+    2D convolution which use the convolution layer statistics once to calculate BatchNormal operation folded construct.
 
-    This part is a more detailed overview of Conv2d op.
+    This part is a more detailed overview of Conv2d operation. For more detials about Quantilization,
+    please refer to :class:`mindspore.nn.FakeQuantWithMinMaxObserver`.
 
     Args:
         in_channels (int): The number of input channel :math:`C_{in}`.
@@ -345,6 +404,9 @@ class Conv2dBnFoldQuant(Cell):
         padding (int): Implicit paddings on both sides of the input. Default: 0.
         eps (float): Parameters for BatchNormal. Default: 1e-5.
         momentum (float): Parameters for BatchNormal op. Default: 0.997.
+        dilation (int): Specifies the dilation rate to use for dilated convolution. Default: 1.
+        group (int): Splits filter into groups, `in_ channels` and `out_channels` must be
+            divisible by the number of groups. Default: 1.
         has_bias (bool): Specifies whether the layer uses a bias vector. Default: False.
         weight_init (Union[Tensor, str, Initializer, numbers.Number]): Initializer for the
             convolution kernel. Default: 'normal'.
@@ -359,10 +421,10 @@ class Conv2dBnFoldQuant(Cell):
         var_init (Union[Tensor, str, Initializer, numbers.Number]): Initializer for the
             variance vector. Default: 'ones'.
         fake (bool): Whether Conv2dBnFoldQuant Cell adds FakeQuantWithMinMaxObserver. Default: True.
-        quant_config (QuantConfig): Configs the oberser types and quant configs of weight and activation. Default:
-            both set to default FakeQuantWithMinMaxObserver.
+        quant_config (QuantConfig): Configures the oberser types and quant settings of weight and activation. Can be
+            generated by compression.quant.create_quant_config method.
+            Default: both set to default FakeQuantWithMinMaxObserver.
         quant_dtype (QuantDtype): Specifies the FakeQuant datatype. Default: QuantDtype.INT8.
-        freeze_bn (int): The quantization freeze BatchNormal op is according to the global step. Default: 100000.
 
     Inputs:
         - **input** (Tensor) - Tensor of shape :math:`(N, C_{in}, H_{in}, W_{in})`.
@@ -373,10 +435,215 @@ class Conv2dBnFoldQuant(Cell):
     Examples:
         >>> qconfig = compression.quant.create_quant_config()
         >>> conv2d_bnfold = nn.Conv2dBnFoldQuant(1, 6, kernel_size=(2, 2), stride=(1, 1), pad_mode="valid",
-        >>>                                      quant_config=qconfig)
+        ...                                      quant_config=qconfig)
         >>> input = Tensor(np.random.randint(-2, 2, (2, 1, 3, 3)), mindspore.float32)
         >>> result = conv2d_bnfold(input)
-        >>> result.shape
+        >>> output = result.shape
+        >>> print(output)
+        (2, 6, 2, 2)
+    """
+
+    def __init__(self,
+                 in_channels,
+                 out_channels,
+                 kernel_size,
+                 stride=1,
+                 pad_mode='same',
+                 padding=0,
+                 dilation=1,
+                 group=1,
+                 eps=1e-5,
+                 momentum=0.997,
+                 has_bias=False,
+                 weight_init='normal',
+                 bias_init='zeros',
+                 beta_init='zeros',
+                 gamma_init='ones',
+                 mean_init='zeros',
+                 var_init='ones',
+                 fake=True,
+                 quant_config=quant_config_default,
+                 quant_dtype=QuantDtype.INT8):
+        """Initialize Conv2dBnFoldQuant layer"""
+        super(Conv2dBnFoldQuantOneConv, self).__init__()
+        self.in_channels = Validator.check_positive_int(in_channels)
+        self.out_channels = Validator.check_positive_int(out_channels)
+        self.kernel_size = twice(kernel_size)
+        self.stride = twice(stride)
+        self.pad_mode = pad_mode
+        self.padding = padding
+        self.dilation = twice(dilation)
+        self.group = group
+        self.eps = eps
+        self.momentum = momentum
+        self.has_bias = has_bias
+        self.fake = fake
+        self.quant_config = quant_config
+        self.quant_dtype = quant_dtype
+        data_format = 'NCHW'
+        self.format = Validator.check_string(data_format, ['NCHW', 'NHWC'], 'format', self.cls_name)
+        self._target = context.get_context("device_target")
+        self.is_graph_mode = context.get_context("mode") == context.GRAPH_MODE
+        if context.get_context("enable_ge"):
+            self.is_ge_backend = True
+        else:
+            self.is_ge_backend = False
+        self.enable_default_train = self.is_graph_mode and \
+                                    (self.is_ge_backend or self._target == "Ascend")
+
+        # initialize convolution op and Parameter
+        self.conv = P.Conv2D(out_channel=out_channels,
+                             kernel_size=self.kernel_size,
+                             pad_mode=pad_mode,
+                             pad=padding,
+                             stride=self.stride,
+                             dilation=self.dilation,
+                             group=group)
+        weight_shape = [out_channels, in_channels // group, *self.kernel_size]
+        channel_axis = 0
+        self.channel_axis = channel_axis
+        self.weight = Parameter(initializer(weight_init, weight_shape), name='weight')
+        self.bias_add = P.BiasAdd()
+        if Validator.check_bool(has_bias):
+            self.bias = Parameter(initializer(bias_init, [out_channels]), name='bias')
+        else:
+            self.bias = None
+
+        # initialize BatchNorm Parameter
+        self.gamma = Parameter(initializer(gamma_init, [out_channels]), name='gamma')
+        self.beta = Parameter(initializer(beta_init, [out_channels]), name='beta')
+        self.moving_mean = Parameter(initializer(mean_init, [out_channels]), name='moving_mean', requires_grad=False)
+        self.moving_variance = Parameter(initializer(var_init, [out_channels]), name='moving_variance',
+                                         requires_grad=False)
+
+        # initialize fake ops
+        self.fake_quant_weight = quant_config.weight(min_init=-6,
+                                                     max_init=6,
+                                                     ema=False,
+                                                     channel_axis=channel_axis,
+                                                     num_channels=out_channels,
+                                                     quant_dtype=quant_dtype)
+        if self._target == "Ascend":
+            self.bn_train = P.BatchNorm(is_training=True,
+                                        epsilon=self.eps,
+                                        momentum=self.momentum)
+        if self._target == "GPU":
+            self.bn_train = P.FusedBatchNormEx(mode=1,
+                                               epsilon=self.eps,
+                                               momentum=self.momentum,
+                                               data_format=self.format)
+        if self._target == "CPU":
+            self.bn_train = P.FusedBatchNorm(mode=1,
+                                             epsilon=self.eps,
+                                             momentum=self.momentum)
+        self.bn_infer = P.BatchNorm(is_training=False, epsilon=self.eps, data_format=self.format)
+        data_parallel_strategy = ((1,), (1,))
+        data_parallel_strategy_one = ((1,), ())
+        self.sub_mean = P.Sub().shard(data_parallel_strategy)
+        self.sub_var = P.Sub().shard(data_parallel_strategy)
+        self.mul_mean = P.Mul().shard(data_parallel_strategy_one)
+        self.mul_var = P.Mul().shard(data_parallel_strategy_one)
+        self.assign_sub_mean = P.AssignSub().shard(data_parallel_strategy)
+        self.assign_sub_var = P.AssignSub().shard(data_parallel_strategy)
+        self.reshape = P.Reshape()
+
+    def extend_repr(self):
+        s = 'in_channels={}, out_channels={}, kernel_size={}, stride={}, ' \
+            'pad_mode={}, padding={}, dilation={}, group={}, ' \
+            'fake={}, momentum={}, quant_delay={}'.format(self.in_channels, self.out_channels,
+                                                          self.kernel_size, self.stride,
+                                                          self.pad_mode, self.padding, self.dilation,
+                                                          self.group,
+                                                          self.fake, self.momentum,
+                                                          self.fake_quant_weight.quant_delay)
+        return s
+
+    def construct(self, x):
+        running_std = P.Sqrt()(P.Add()(self.moving_variance, self.eps))
+        scale_factor = self.gamma / running_std
+        if self.channel_axis:
+            scale_factor = self.reshape(scale_factor, (1, -1, 1, 1))
+        else:
+            scale_factor = self.reshape(scale_factor, (-1, 1, 1, 1))
+        weight = self.weight * scale_factor
+        if self.fake:
+            weight = self.fake_quant_weight(weight)
+        conv = self.conv(x, weight)
+        scale_factor = self.reshape(scale_factor, (1, -1, 1, 1))
+        if self.enable_default_train:
+            scale_factor = P.Reciprocal()(scale_factor)
+            conv_orig = conv * scale_factor
+        else:
+            conv_orig = conv / scale_factor
+        if self.training:
+            return self.bn_train(conv_orig,
+                                 self.gamma,
+                                 self.beta,
+                                 self.moving_mean,
+                                 self.moving_variance)[0]
+
+        return self.bn_infer(conv_orig,
+                             self.gamma,
+                             self.beta,
+                             self.moving_mean,
+                             self.moving_variance)[0]
+
+
+class Conv2dBnFoldQuant(Cell):
+    r"""
+    2D convolution with BatchNormal operation folded construct.
+
+    This part is a more detailed overview of Conv2d operation. For more detials about Quantilization,
+    please refer to :class:`mindspore.nn.FakeQuantWithMinMaxObserver`.
+
+    Args:
+        in_channels (int): The number of input channel :math:`C_{in}`.
+        out_channels (int): The number of output channel :math:`C_{out}`.
+        kernel_size (Union[int, tuple]): Specifies the height and width of the 2D convolution window.
+        stride (int): Specifies stride for all spatial dimensions with the same value.
+        pad_mode (str): Specifies padding mode. The optional values are "same", "valid", "pad". Default: "same".
+        padding (int): Implicit paddings on both sides of the input. Default: 0.
+        eps (float): Parameters for BatchNormal. Default: 1e-5.
+        momentum (float): Parameters for BatchNormal op. Default: 0.997.
+        dilation (int): Specifies the dilation rate to use for dilated convolution. Default: 1.
+        group (int): Splits filter into groups, `in_ channels` and `out_channels` must be
+            divisible by the number of groups. Default: 1.
+        has_bias (bool): Specifies whether the layer uses a bias vector. Default: False.
+        weight_init (Union[Tensor, str, Initializer, numbers.Number]): Initializer for the
+            convolution kernel. Default: 'normal'.
+        bias_init (Union[Tensor, str, Initializer, numbers.Number]): Initializer for the
+            bias vector. Default: 'zeros'.
+        beta_init (Union[Tensor, str, Initializer, numbers.Number]): Initializer for the
+            beta vector. Default: 'zeros'.
+        gamma_init (Union[Tensor, str, Initializer, numbers.Number]): Initializer for the
+            gamma vector. Default: 'ones'.
+        mean_init (Union[Tensor, str, Initializer, numbers.Number]): Initializer for the
+            mean vector. Default: 'zeros'.
+        var_init (Union[Tensor, str, Initializer, numbers.Number]): Initializer for the
+            variance vector. Default: 'ones'.
+        fake (bool): Whether Conv2dBnFoldQuant Cell adds FakeQuantWithMinMaxObserver. Default: True.
+        quant_config (QuantConfig): Configures the oberser types and quant settings of weight and activation. Can be
+            generated by compression.quant.create_quant_config method.
+            Default: both set to default FakeQuantWithMinMaxObserver.
+        quant_dtype (QuantDtype): Specifies the FakeQuant datatype. Default: QuantDtype.INT8.
+        freeze_bn (int): The quantization freeze BatchNormal op is according to the global step. Default: 100000.
+
+    Inputs:
+        - **input** (Tensor) - Tensor of shape :math:`(N, C_{in}, H_{in}, W_{in})`.
+
+    Outputs:
+        Tensor of shape :math:`(N, C_{out}, H_{out}, W_{out})`.
+
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
+    Examples:
+        >>> qconfig = compression.quant.create_quant_config()
+        >>> conv2d_bnfold = nn.Conv2dBnFoldQuant(1, 6, kernel_size=(2, 2), stride=(1, 1), pad_mode="valid",
+        ...                                      quant_config=qconfig)
+        >>> input = Tensor(np.random.randint(-2, 2, (2, 1, 3, 3)), mindspore.float32)
+        >>> output = conv2d_bnfold(input)
+        >>> print(output.shape)
         (2, 6, 2, 2)
     """
 
@@ -404,8 +671,8 @@ class Conv2dBnFoldQuant(Cell):
                  freeze_bn=100000):
         """Initialize Conv2dBnFoldQuant layer"""
         super(Conv2dBnFoldQuant, self).__init__()
-        self.in_channels = in_channels
-        self.out_channels = out_channels
+        self.in_channels = Validator.check_positive_int(in_channels)
+        self.out_channels = Validator.check_positive_int(out_channels)
         self.kernel_size = twice(kernel_size)
         self.stride = twice(stride)
         self.pad_mode = pad_mode
@@ -422,27 +689,15 @@ class Conv2dBnFoldQuant(Cell):
         self.is_gpu = context.get_context('device_target') == "GPU"
 
         # initialize convolution op and Parameter
-        if context.get_context('device_target') == "Ascend" and group > 1:
-            Validator.check_equal_int(group, in_channels, 'group')
-            Validator.check_equal_int(group, out_channels, 'group')
-            self.conv = P.DepthwiseConv2dNative(channel_multiplier=1,
-                                                kernel_size=self.kernel_size,
-                                                pad_mode=pad_mode,
-                                                pad=padding,
-                                                stride=self.stride,
-                                                dilation=self.dilation)
-            weight_shape = [1, in_channels, *self.kernel_size]
-            channel_axis = 1
-        else:
-            self.conv = P.Conv2D(out_channel=out_channels,
-                                 kernel_size=self.kernel_size,
-                                 pad_mode=pad_mode,
-                                 pad=padding,
-                                 stride=self.stride,
-                                 dilation=self.dilation,
-                                 group=group)
-            weight_shape = [out_channels, in_channels // group, *self.kernel_size]
-            channel_axis = 0
+        self.conv = P.Conv2D(out_channel=out_channels,
+                             kernel_size=self.kernel_size,
+                             pad_mode=pad_mode,
+                             pad=padding,
+                             stride=self.stride,
+                             dilation=self.dilation,
+                             group=group)
+        weight_shape = [out_channels, in_channels // group, *self.kernel_size]
+        channel_axis = 0
         self.weight = Parameter(initializer(weight_init, weight_shape), name='weight')
         self.bias_add = P.BiasAdd()
         if Validator.check_bool(has_bias):
@@ -510,14 +765,14 @@ class Conv2dBnFoldQuant(Cell):
             if self.training:
                 out = self.batchnorm_fold2_train(out, self.beta, self.gamma,
                                                  batch_std, batch_mean, running_std, running_mean, self.step)
-                F.control_depend(out, self.assignadd(self.step, self.one))
+                self.assignadd(self.step, self.one)
             else:
                 out = self.batchnorm_fold2_infer(out, self.beta, self.gamma,
                                                  batch_std, batch_mean, running_std, running_mean, self.step)
         else:
             if self.training:
                 out = self.batchnorm_fold2_train(out, self.beta, self.gamma, batch_std, batch_mean, running_std)
-                F.control_depend(out, self.assignadd(self.step, self.one))
+                self.assignadd(self.step, self.one)
             else:
                 out = self.batchnorm_fold2_infer(out, self.beta, self.gamma, running_std, running_mean, running_std)
         return out
@@ -525,9 +780,10 @@ class Conv2dBnFoldQuant(Cell):
 
 class Conv2dBnWithoutFoldQuant(Cell):
     r"""
-    2D convolution + batchnorm without fold with fake quant construct.
+    2D convolution and batchnorm without fold with fake quantized construct.
 
-    This part is a more detailed overview of Conv2d op.
+    This part is a more detailed overview of Conv2d operation. For more detials about Quantilization,
+    please refer to :class:`mindspore.nn.FakeQuantWithMinMaxObserver`.
 
     Args:
         in_channels (int): The number of input channel :math:`C_{in}`.
@@ -545,8 +801,9 @@ class Conv2dBnWithoutFoldQuant(Cell):
         weight_init (Union[Tensor, str, Initializer, numbers.Number]): Initializer for the convolution kernel.
             Default: 'normal'.
         bias_init (Union[Tensor, str, Initializer, numbers.Number]): Initializer for the bias vector. Default: 'zeros'.
-        quant_config (QuantConfig): Configs the oberser types and quant configs of weight and activation. Default:
-            both set to default FakeQuantWithMinMaxObserver.
+        quant_config (QuantConfig): Configures the oberser types and quant settings of weight and activation. Can be
+            generated by compression.quant.create_quant_config method.
+            Default: both set to default FakeQuantWithMinMaxObserver.
         quant_dtype (QuantDtype): Specifies the FakeQuant datatype. Default: QuantDtype.INT8.
 
     Inputs:
@@ -555,13 +812,16 @@ class Conv2dBnWithoutFoldQuant(Cell):
     Outputs:
         Tensor of shape :math:`(N, C_{out}, H_{out}, W_{out})`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> qconfig = compression.quant.create_quant_config()
         >>> conv2d_no_bnfold = nn.Conv2dBnWithoutFoldQuant(1, 6, kernel_size=(2, 2), stride=(1, 1), pad_mode="valid",
-        >>>                                                quant_config=qconfig)
+        ...                                                quant_config=qconfig)
         >>> input = Tensor(np.random.randint(-2, 2, (2, 1, 3, 3)), mstype.float32)
-        >>> result = conv2d_no_bnfold(input)
-        >>> result.shape
+        >>> output = conv2d_no_bnfold(input)
+        >>> print(output.shape)
         (2, 6, 2, 2)
     """
 
@@ -598,28 +858,16 @@ class Conv2dBnWithoutFoldQuant(Cell):
         else:
             self.bias = None
         # initialize convolution op and Parameter
-        if context.get_context('device_target') == "Ascend" and group > 1:
-            Validator.check_equal_int(group, in_channels, 'group')
-            Validator.check_equal_int(group, out_channels, 'group')
-            self.conv = P.DepthwiseConv2dNative(channel_multiplier=1,
-                                                kernel_size=self.kernel_size,
-                                                pad_mode=pad_mode,
-                                                pad=padding,
-                                                stride=self.stride,
-                                                dilation=self.dilation)
-            weight_shape = [1, in_channels, *self.kernel_size]
-            channel_axis = 1
-        else:
-            self.conv = P.Conv2D(out_channel=self.out_channels,
-                                 kernel_size=self.kernel_size,
-                                 mode=1,
-                                 pad_mode=self.pad_mode,
-                                 pad=self.padding,
-                                 stride=self.stride,
-                                 dilation=self.dilation,
-                                 group=self.group)
-            weight_shape = [out_channels, in_channels // group, *self.kernel_size]
-            channel_axis = 0
+        self.conv = P.Conv2D(out_channel=self.out_channels,
+                             kernel_size=self.kernel_size,
+                             mode=1,
+                             pad_mode=self.pad_mode,
+                             pad=self.padding,
+                             stride=self.stride,
+                             dilation=self.dilation,
+                             group=self.group)
+        weight_shape = [out_channels, in_channels // group, *self.kernel_size]
+        channel_axis = 0
         self.weight = Parameter(initializer(weight_init, weight_shape), name='weight')
         self.fake_quant_weight = quant_config.weight(min_init=-6,
                                                      max_init=6,
@@ -648,9 +896,10 @@ class Conv2dBnWithoutFoldQuant(Cell):
 
 class Conv2dQuant(Cell):
     r"""
-    2D convolution with fake quant op layer.
+    2D convolution with fake quantized operation layer.
 
-    This part is a more detailed overview of Conv2d op.
+    This part is a more detailed overview of Conv2d operation. For more detials about Quantilization,
+    please refer to :class:`mindspore.nn.FakeQuantWithMinMaxObserver`.
 
     Args:
         in_channels (int): The number of input channel :math:`C_{in}`.
@@ -666,8 +915,9 @@ class Conv2dQuant(Cell):
         weight_init (Union[Tensor, str, Initializer, numbers.Number]): Initializer for the convolution kernel.
             Default: 'normal'.
         bias_init (Union[Tensor, str, Initializer, numbers.Number]): Initializer for the bias vector. Default: 'zeros'.
-        quant_config (QuantConfig): Configs the oberser types and quant configs of weight and activation. Default:
-            both set to default FakeQuantWithMinMaxObserver.
+        quant_config (QuantConfig): Configures the oberser types and quant settings of weight and activation. Can be
+            generated by compression.quant.create_quant_config method.
+            Default: both set to default FakeQuantWithMinMaxObserver.
         quant_dtype (QuantDtype): Specifies the FakeQuant datatype. Default: QuantDtype.INT8.
 
     Inputs:
@@ -676,13 +926,16 @@ class Conv2dQuant(Cell):
     Outputs:
         Tensor of shape :math:`(N, C_{out}, H_{out}, W_{out})`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> qconfig = compression.quant.create_quant_config()
         >>> conv2d_quant = nn.Conv2dQuant(1, 6, kernel_size= (2, 2), stride=(1, 1), pad_mode="valid",
-        >>>                               quant_config=qconfig)
+        ...                               quant_config=qconfig)
         >>> input = Tensor(np.random.randint(-2, 2, (2, 1, 3, 3)), mindspore.float32)
-        >>> result = conv2d_quant(input)
-        >>> result.shape
+        >>> output = conv2d_quant(input)
+        >>> print(output.shape)
         (2, 6, 2, 2)
     """
 
@@ -728,10 +981,11 @@ class Conv2dQuant(Cell):
                              stride=self.stride,
                              dilation=self.dilation,
                              group=self.group)
+        channel_axis = 0
         self.fake_quant_weight = quant_config.weight(min_init=-6,
                                                      max_init=6,
                                                      ema=False,
-                                                     channel_axis=0,
+                                                     channel_axis=channel_axis,
                                                      num_channels=out_channels,
                                                      quant_dtype=quant_dtype)
 
@@ -753,9 +1007,10 @@ class Conv2dQuant(Cell):
 
 class DenseQuant(Cell):
     r"""
-    The fully connected layer with fake quant op.
+    The fully connected layer with fake quantized operation.
 
-    This part is a more detailed overview of Dense op.
+    This part is a more detailed overview of Dense operation. For more detials about Quantilization,
+    please refer to :class:`mindspore.nn.FakeQuantWithMinMaxObserver`.
 
     Args:
         in_channels (int): The dimension of the input space.
@@ -767,8 +1022,9 @@ class DenseQuant(Cell):
         has_bias (bool): Specifies whether the layer uses a bias vector. Default: True.
         activation (Union[str, Cell, Primitive]): The regularization function applied to the output of the layer,
             eg. 'relu'. Default: None.
-        quant_config (QuantConfig): Configs the oberser types and quant configs of weight and activation. Default:
-            both set to default FakeQuantWithMinMaxObserver.
+        quant_config (QuantConfig): Configures the oberser types and quant settings of weight and activation. Can be
+            generated by compression.quant.create_quant_config method.
+            Default: both set to default FakeQuantWithMinMaxObserver.
         quant_dtype (QuantDtype): Specifies the FakeQuant datatype. Default: QuantDtype.INT8.
 
     Inputs:
@@ -777,12 +1033,16 @@ class DenseQuant(Cell):
     Outputs:
         Tensor of shape :math:`(N, C_{out}, H_{out}, W_{out})`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> qconfig = compression.quant.create_quant_config()
         >>> dense_quant = nn.DenseQuant(3, 6, quant_config=qconfig)
         >>> input = Tensor(np.random.randint(-2, 2, (2, 3)), mindspore.float32)
         >>> result = dense_quant(input)
-        >>> result.shape
+        >>> output = result.shape
+        >>> print(output)
         (2, 6)
     """
 
@@ -801,7 +1061,7 @@ class DenseQuant(Cell):
         self.has_bias = Validator.check_bool(has_bias)
 
         if isinstance(weight_init, Tensor):
-            if weight_init.dim() != 2 or weight_init.shape[0] != out_channels or \
+            if weight_init.ndim != 2 or weight_init.shape[0] != out_channels or \
                     weight_init.shape[1] != in_channels:
                 raise ValueError("weight_init shape error")
 
@@ -810,7 +1070,7 @@ class DenseQuant(Cell):
 
         if self.has_bias:
             if isinstance(bias_init, Tensor):
-                if bias_init.dim() != 1 or bias_init.shape[0] != out_channels:
+                if bias_init.ndim != 1 or bias_init.shape[0] != out_channels:
                     raise ValueError("bias_init shape error")
 
             self.bias = Parameter(initializer(
@@ -853,7 +1113,8 @@ class DenseQuant(Cell):
 
 class _QuantActivation(Cell):
     r"""
-    Base class for quantization aware training activation function. Add Fake Quant OP after activation OP.
+    Base class for quantization aware training activation function. Add fake quantized operation
+    after activation operation.
     """
 
     def get_origin(self):
@@ -864,31 +1125,37 @@ class ActQuant(_QuantActivation):
     r"""
     Quantization aware training activation function.
 
-    Add the fake quant op to the end of activation op, by which the output of activation op will be truncated.
-    Please check `FakeQuantWithMinMaxObserver` or other observer for more details.
+    Add the fake quantized operation to the end of activation operation, by which the output of activation operation
+    will be truncated. For more detials about Quantilization,
+    please refer to :class:`mindspore.nn.FakeQuantWithMinMaxObserver`.
 
     Args:
         activation (Cell): Activation cell.
         ema (bool): The exponential Moving Average algorithm updates min and max. Default: False.
         ema_decay (float): Exponential Moving Average algorithm parameter. Default: 0.999.
-        fake_before (bool): Whether add fake quant operation before activation. Default: False.
-        quant_config (QuantConfig): Configs the oberser types and quant configs of weight and activation. Default:
-            both set to default FakeQuantWithMinMaxObserver.
+        fake_before (bool): Whether add fake quantized operation before activation. Default: False.
+        quant_config (QuantConfig): Configures the oberser types and quant settings of weight and activation. Can be
+            generated by compression.quant.create_quant_config method.
+            Default: both set to default FakeQuantWithMinMaxObserver.
         quant_dtype (QuantDtype): Specifies the FakeQuant datatype. Default: QuantDtype.INT8.
 
     Inputs:
-        - **input** (Tensor) - The input of ReLU6Quant.
+        - **input** (Tensor) - The input of ActQuant.
 
     Outputs:
         Tensor, with the same type and shape as the `input`.
+
+    Supported Platforms:
+        ``Ascend`` ``GPU``
 
     Examples:
         >>> qconfig = compression.quant.create_quant_config()
         >>> act_quant = nn.ActQuant(nn.ReLU(), quant_config=qconfig)
         >>> input = Tensor(np.array([[1, 2, -1], [-2, 0, -1]]), mindspore.float32)
-        >>> result = act_quant(input)
-        >>> result
-        [[0.9882355, 1.9764705, 0.], [0., 0., 0.]]
+        >>> output = act_quant(input)
+        >>> print(output)
+        [[0.9882355 1.9764705 0.       ]
+         [0.        0.        0.       ]]
     """
 
     def __init__(self,
@@ -926,14 +1193,16 @@ class ActQuant(_QuantActivation):
 
 class TensorAddQuant(Cell):
     r"""
-    Add Fake Quant OP after TensorAdd OP.
+    Add fake quantized operation after TensorAdd operation.
 
-    This part is a more detailed overview of TensorAdd op.
+    This part is a more detailed overview of TensorAdd operation. For more detials about Quantilization,
+    please refer to :class:`mindspore.nn.FakeQuantWithMinMaxObserver`.
 
     Args:
         ema_decay (float): Exponential Moving Average algorithm parameter. Default: 0.999.
-        quant_config (QuantConfig): Configs the oberser types and quant configs of weight and activation. Default:
-            both set to default FakeQuantWithMinMaxObserver.
+        quant_config (QuantConfig): Configures the oberser types and quant settings of weight and activation. Can be
+            generated by compression.quant.create_quant_config method.
+            Default: both set to default FakeQuantWithMinMaxObserver.
         quant_dtype (QuantDtype): Specifies the FakeQuant datatype. Default: QuantDtype.INT8.
 
     Inputs:
@@ -943,14 +1212,18 @@ class TensorAddQuant(Cell):
     Outputs:
         Tensor, with the same type and shape as the `input_x1`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> qconfig = compression.quant.create_quant_config()
         >>> add_quant = nn.TensorAddQuant(quant_config=qconfig)
         >>> input_x1 = Tensor(np.array([[1, 2, 1], [-2, 0, -1]]), mindspore.float32)
         >>> input_x2 = Tensor(np.ones((2, 3)), mindspore.float32)
-        >>> result = add_quant(input_x1, input_x2)
-        >>> result
-        [[1.9764705, 3.011765, 1.9764705], [-0.9882355, 0.9882355, 0.]]
+        >>> output = add_quant(input_x1, input_x2)
+        >>> print(output)
+        [[ 1.9764705  3.011765   1.9764705]
+         [-0.9882355  0.9882355  0.       ]]
     """
 
     def __init__(self,
@@ -963,7 +1236,7 @@ class TensorAddQuant(Cell):
                                                       ema=True,
                                                       ema_decay=ema_decay,
                                                       quant_dtype=quant_dtype)
-        self.add = P.TensorAdd()
+        self.add = P.Add()
 
     def construct(self, x1, x2):
         x = self.add(x1, x2)
@@ -973,14 +1246,16 @@ class TensorAddQuant(Cell):
 
 class MulQuant(Cell):
     r"""
-    Add Fake Quant OP after Mul OP.
+    Add fake quantized operation after `Mul` operation.
 
-    This part is a more detailed overview of Mul op.
+    This part is a more detailed overview of `Mul` operation. For more detials about Quantilization,
+    please refer to :class:`mindspore.nn.FakeQuantWithMinMaxObserver`.
 
     Args:
         ema_decay (float): Exponential Moving Average algorithm parameter. Default: 0.999.
-        quant_config (QuantConfig): Configs the oberser types and quant configs of weight and activation. Default:
-            both set to default FakeQuantWithMinMaxObserver.
+        quant_config (QuantConfig): Configures the oberser types and quant settings of weight and activation. Can be
+            generated by compression.quant.create_quant_config method.
+            Default: both set to default FakeQuantWithMinMaxObserver.
         quant_dtype (QuantDtype): Specifies the FakeQuant datatype. Default: QuantDtype.INT8.
 
     Inputs:
@@ -990,14 +1265,18 @@ class MulQuant(Cell):
     Outputs:
         Tensor, with the same type and shape as the `input_x1`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> qconfig = compression.quant.create_quant_config()
         >>> mul_quant = nn.MulQuant(quant_config=qconfig)
         >>> input_x1 = Tensor(np.array([[1, 2, 1], [-2, 0, -1]]), mindspore.float32)
         >>> input_x2 = Tensor(np.ones((2, 3)) * 2, mindspore.float32)
-        >>> result = mul_quant(input_x1, input_x2)
-        >>> result
-        [[1.9764705, 4.0000005, 1.9764705], [-4., 0., -1.9764705]]
+        >>> output = mul_quant(input_x1, input_x2)
+        >>> print(output)
+        [[ 1.9764705  4.0000005  1.9764705]
+         [-4.         0.        -1.9764705]]
     """
 
     def __init__(self,
@@ -1096,7 +1375,7 @@ class QuantMindirBlock(Cell):
 
        Args:
         core_op (Cell): The operation cell.
-        weight (Tensor): The weigth of the cell.
+        weight (Tensor): The weight of the cell.
         bias (Tensor): The bias of the cell. Default: None.
         activation (str): The regularization function applied to the output of the layer, eg. 'relu'. Default: None.
         param_dict (dict): The information of the cell.

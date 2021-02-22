@@ -343,7 +343,7 @@ bool PreProcessImageData(const LiteMat &lite_mat_bgr, LiteMat *lite_norm_mat_ptr
  */
 extern "C"
 JNIEXPORT jlong JNICALL
-Java_com_mindspore_himindsporedemo_gallery_classify_TrackingMobile_loadModel(JNIEnv *env,
+Java_com_mindspore_classification_gallery_classify_TrackingMobile_loadModel(JNIEnv *env,
                          jobject thiz,
                          jobject model_buffer,
                          jint num_thread) {
@@ -371,7 +371,7 @@ Java_com_mindspore_himindsporedemo_gallery_classify_TrackingMobile_loadModel(JNI
   mindspore::lite::Context *context = new mindspore::lite::Context;
   context->thread_num_ = num_thread;
   context->device_list_[0].device_info_.cpu_device_info_.cpu_bind_mode_ = mindspore::lite::NO_BIND;
-  context->device_list_[0].device_info_.cpu_device_info_.enable_float16_ = true;
+  context->device_list_[0].device_info_.cpu_device_info_.enable_float16_ = false;
   context->device_list_[0].device_type_ = mindspore::lite::DT_CPU;
 
   labelNet->CreateSessionMS(modelBuffer, bufferLen, context);
@@ -396,7 +396,7 @@ Java_com_mindspore_himindsporedemo_gallery_classify_TrackingMobile_loadModel(JNI
  * sending a picture to the model and run inference.
  */
 extern "C" JNIEXPORT jstring JNICALL
-Java_com_mindspore_himindsporedemo_gallery_classify_TrackingMobile_runNet(JNIEnv *env, jclass type,
+Java_com_mindspore_classification_gallery_classify_TrackingMobile_runNet(JNIEnv *env, jclass type,
                       jlong netEnv,
                       jobject srcBitmap) {
   LiteMat lite_mat_bgr, lite_norm_mat_cut;
@@ -469,7 +469,7 @@ Java_com_mindspore_himindsporedemo_gallery_classify_TrackingMobile_runNet(JNIEnv
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
-Java_com_mindspore_himindsporedemo_gallery_classify_TrackingMobile_unloadModel(JNIEnv *env,
+Java_com_mindspore_classification_gallery_classify_TrackingMobile_unloadModel(JNIEnv *env,
                            jclass type,
                            jlong netEnv) {
   MS_PRINT("MindSpore release net.");

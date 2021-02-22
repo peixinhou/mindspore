@@ -24,6 +24,7 @@
 #include "backend/kernel_compiler/gpu/gpu_kernel.h"
 #include "backend/kernel_compiler/gpu/gpu_kernel_factory.h"
 #include "backend/kernel_compiler/gpu/cuda_impl/float_status_impl.cuh"
+#include "backend/kernel_compiler/gpu/cuda_impl/slice_impl.cuh"
 
 namespace mindspore {
 namespace kernel {
@@ -45,7 +46,8 @@ class FloatStatusGpuKernel : public GpuKernel {
 
     switch (kernel_name_) {
       case OP_STATUS: {
-        T *output = GetDeviceAddress<T>(outputs, 0);
+        float *output = GetDeviceAddress<float>(outputs, 0);
+        FillDeviceArray(outputs[0]->size / sizeof(float), output, 0.0f, reinterpret_cast<cudaStream_t>(stream_ptr));
         CalFloatStatus(input_size_ / sizeof(T), input, output, reinterpret_cast<cudaStream_t>(stream_ptr));
         break;
       }
@@ -88,7 +90,7 @@ class FloatStatusGpuKernel : public GpuKernel {
       kernel_name_ = iter->second;
     }
     if (kernel_name_ == OP_STATUS) {
-      output_size_ = sizeof(T);
+      output_size_ = sizeof(float);
     } else {
       output_size_ = input_size_ / sizeof(T) * sizeof(bool);
     }

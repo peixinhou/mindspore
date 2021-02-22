@@ -24,18 +24,17 @@ from .optimizer import Optimizer
 _momentum_opt = C.MultitypeFuncGraph("momentum_opt")
 
 
-@_momentum_opt.register("Function", "Tensor", "Tensor", "Tensor", "Tensor", "Tensor", "Bool")
-def _tensor_run_opt_ext(opt, momentum, learning_rate, gradient, weight, moment, ps_parameter):
+@_momentum_opt.register("Function", "Tensor", "Tensor", "Tensor", "Tensor", "Tensor", "Bool", "Bool")
+def _tensor_run_opt_ext(opt, momentum, learning_rate, gradient, weight, moment, ps_parameter, cache_enable):
     """Apply momentum optimizer to the weight parameter using Tensor."""
-    success = True
-    if ps_parameter:
+    if ps_parameter and not cache_enable:
         op_shape = P.Shape()
         _ps_pull = P.Pull()
         _ps_push = P.Push("ApplyMomentum", [])
         shapes = (op_shape(learning_rate), op_shape(gradient), op_shape(momentum))
-        success = F.depend(success, _ps_pull(_ps_push((learning_rate, gradient, momentum), shapes), weight))
+        success = F.depend(True, _ps_pull(_ps_push((learning_rate, gradient, momentum), shapes), weight))
     else:
-        success = F.depend(success, opt(weight, moment, learning_rate, gradient, momentum))
+        success = F.depend(True, opt(weight, moment, learning_rate, gradient, momentum))
     return success
 
 
@@ -45,25 +44,27 @@ class Momentum(Optimizer):
 
     Refer to the paper on the importance of initialization and momentum in deep learning for more details.
 
+    .. math::
+            v_{t} = v_{t-1} \ast u + gradients
+
+    If use_nesterov is True:
+
+        .. math::
+                p_{t} =  p_{t-1} - (grad \ast lr + v_{t} \ast u \ast lr)
+
+    If use_nesterov is Flase:
+
+        .. math::
+                p_{t} = p_{t-1} - lr \ast v_{t}
+
+    Here: where grad, lr, p, v and u denote the gradients, learning_rate, params, moments, and momentum respectively.
+
     Note:
         When separating parameter groups, the weight decay in each group will be applied on the parameters if the
         weight decay is positive. When not separating parameter groups, the `weight_decay` in the API will be applied
         on the parameters without 'beta' or 'gamma' in their names if `weight_decay` is positive.
 
         To improve parameter groups performance, the customized order of parameters can be supported.
-
-    .. math::
-            v_{t} = v_{t-1} \ast u + gradients
-
-    If use_nesterov is True:
-        .. math::
-                p_{t} =  p_{t-1} - (grad \ast lr + v_{t} \ast u \ast lr)
-
-    If use_nesterov is Flase:
-        .. math::
-                p_{t} = p_{t-1} - lr \ast v_{t}
-
-    Here: where grad, lr, p, v and u denote the gradients, learning_rate, params, moments, and momentum respectively.
 
     Args:
         params (Union[list[Parameter], list[dict]]): When the `params` is a list of `Parameter` which will be updated,
@@ -103,6 +104,10 @@ class Momentum(Optimizer):
 
     Raises:
         ValueError: If the momentum is less than 0.0.
+        TypeError: If the momentum is not a float or use_nesterov is not a bool.
+
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
 
     Examples:
         >>> net = Net()
@@ -113,8 +118,8 @@ class Momentum(Optimizer):
         >>> conv_params = list(filter(lambda x: 'conv' in x.name, net.trainable_params()))
         >>> no_conv_params = list(filter(lambda x: 'conv' not in x.name, net.trainable_params()))
         >>> group_params = [{'params': conv_params, 'weight_decay': 0.01},
-        >>>                 {'params': no_conv_params, 'lr': 0.01},
-        >>>                 {'order_params': net.trainable_params()}]
+        ...                 {'params': no_conv_params, 'lr': 0.01},
+        ...                 {'order_params': net.trainable_params()}]
         >>> optim = nn.Momentum(group_params, learning_rate=0.1, momentum=0.9, weight_decay=0.0)
         >>> # The conv_params's parameters will use a learning rate of default value 0.1 and a weight decay of 0.01.
         >>> # The no_conv_params's parameters will use a learning rate of 0.01 and a weight decay of default value 0.0.
@@ -143,8 +148,8 @@ class Momentum(Optimizer):
         lr = self.get_lr()
         if self.is_group_lr:
             success = self.hyper_map(F.partial(_momentum_opt, self.opt, self.momentum), lr, gradients, params, moments,
-                                     self.ps_parameters)
+                                     self.ps_parameters, self.cache_enable)
         else:
             success = self.hyper_map(F.partial(_momentum_opt, self.opt, self.momentum, lr), gradients, params, moments,
-                                     self.ps_parameters)
+                                     self.ps_parameters, self.cache_enable)
         return success

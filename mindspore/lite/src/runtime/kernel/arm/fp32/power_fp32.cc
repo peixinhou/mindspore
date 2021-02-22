@@ -57,6 +57,9 @@ int PowerCPUKernel::RunImpl(int task_id) {
   auto size = in_tensors_.at(0)->ElementsNum();
   int stride = UP_DIV(size, thread_count_);
   int len = MSMIN(stride, size - stride * task_id);
+  if (len <= 0) {
+    return RET_OK;
+  }
   float *exp_addr = nullptr;
   bool broadcast = true;
   if (in_tensors_.size() == 2) {
@@ -74,4 +77,5 @@ int PowerCPUKernel::RunImpl(int task_id) {
   return RET_OK;
 }
 
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Power, LiteKernelCreator<PowerCPUKernel>)
 }  // namespace mindspore::kernel

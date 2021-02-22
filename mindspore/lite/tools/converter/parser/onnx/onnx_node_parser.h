@@ -20,12 +20,13 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "src/ops/primitive_c.h"
 #include "google/protobuf/message.h"
 #include "proto/onnx.pb.h"
 #include "include/errorcode.h"
 #include "src/common/log_adapter.h"
 #include "schema/inner/model_generated.h"
-
+#include "ir/dtype/type_id.h"
 namespace mindspore {
 namespace lite {
 class OnnxNodeParser {
@@ -34,7 +35,8 @@ class OnnxNodeParser {
 
   virtual ~OnnxNodeParser() = default;
 
-  virtual STATUS Parse(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node, schema::CNodeT *op) = 0;
+  virtual lite::PrimitiveC *ParseLitePrimitive(const onnx::GraphProto &onnx_graph,
+                                               const onnx::NodeProto &onnx_node) = 0;
 
   static STATUS GetTensorDataFromOnnx(const onnx::TensorProto &onnx_tensor, std::vector<float> *value, int *type);
 

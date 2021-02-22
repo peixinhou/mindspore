@@ -40,9 +40,9 @@ const AnfNodePtr ReplaceAddNFusion::Process(const FuncGraphPtr &graph, const Anf
   auto B = AnfAlgo::GetInputNode(utils::cast<CNodePtr>(node), 1);
   MS_EXCEPTION_IF_NULL(A);
   MS_EXCEPTION_IF_NULL(B);
-  int num_input = AnfAlgo::GetNodeAttr<int>(node, "n");
+  int64_t num_input = AnfAlgo::GetNodeAttr<int64_t>(node, "n");
   if (num_input == 2) {
-    auto prim = std::make_shared<Primitive>(prim::kPrimTensorAdd->name());
+    auto prim = std::make_shared<Primitive>(prim::kPrimAdd->name());
     MS_EXCEPTION_IF_NULL(prim);
     std::vector<AnfNodePtr> inputs = {NewValueNode(prim), A, B};
     auto add_new = graph->NewCNode(inputs);

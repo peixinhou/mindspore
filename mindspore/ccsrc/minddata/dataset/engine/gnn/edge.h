@@ -35,10 +35,11 @@ class Edge {
   // Constructor
   // @param EdgeIdType id - edge id
   // @param EdgeType type - edge type
+  // @param WeightType weight - edge weight
   // @param std::shared_ptr<Node> src_node - source node
   // @param std::shared_ptr<Node> dst_node - destination node
-  Edge(EdgeIdType id, EdgeType type, std::shared_ptr<Node> src_node, std::shared_ptr<Node> dst_node)
-      : id_(id), type_(type), src_node_(src_node), dst_node_(dst_node) {}
+  Edge(EdgeIdType id, EdgeType type, WeightType weight, std::shared_ptr<Node> src_node, std::shared_ptr<Node> dst_node)
+      : id_(id), type_(type), weight_(weight), src_node_(src_node), dst_node_(dst_node) {}
 
   virtual ~Edge() = default;
 
@@ -48,10 +49,13 @@ class Edge {
   // @return NodeIdType - Returned edge type
   EdgeType type() const { return type_; }
 
+  // @return WeightType - Returned edge weight
+  WeightType weight() const { return weight_; }
+
   // Get the feature of a edge
   // @param FeatureType feature_type - type of feature
   // @param std::shared_ptr<Feature> *out_feature - Returned feature
-  // @return Status - The error code return
+  // @return Status The status code returned
   virtual Status GetFeatures(FeatureType feature_type, std::shared_ptr<Feature> *out_feature) = 0;
 
   // Get nodes on the edge
@@ -71,12 +75,13 @@ class Edge {
 
   // Update feature of edge
   // @param std::shared_ptr<Feature> feature -
-  // @return Status - The error code return
+  // @return Status The status code returned
   virtual Status UpdateFeature(const std::shared_ptr<Feature> &feature) = 0;
 
  protected:
   EdgeIdType id_;
   EdgeType type_;
+  WeightType weight_;
   std::shared_ptr<Node> src_node_;
   std::shared_ptr<Node> dst_node_;
 };

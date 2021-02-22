@@ -1,5 +1,5 @@
 /**
- * Copyright 2020 Huawei Technologies Co., Ltd
+ * Copyright 2020-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -70,9 +70,9 @@ class ConcatOp : public PipelineOp {
   // @note The builder class should be used to call it
   // @param op_connector_size - connector size
   explicit ConcatOp(int32_t op_connector_size);
-  explicit ConcatOp(int32_t op_connector_size, std::shared_ptr<SamplerRT> sampler,
-                    std::vector<std::pair<int, int>> children_flag_and_nums,
-                    std::vector<std::pair<int, int>> children_start_end_index);
+  ConcatOp(int32_t op_connector_size, const std::shared_ptr<SamplerRT> &sampler,
+           const std::vector<std::pair<int, int>> &children_flag_and_nums,
+           const std::vector<std::pair<int, int>> &children_start_end_index);
 
   // Destructor
   ~ConcatOp() = default;
@@ -94,7 +94,7 @@ class ConcatOp : public PipelineOp {
 
   // All dataset ops operate by launching a thread (see ExecutionTree). This class functor will
   // provide the master loop that drives the logic for performing the work
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status operator()() override;
 
   // Op name getter
@@ -105,16 +105,10 @@ class ConcatOp : public PipelineOp {
   // @return - Status
   Status ComputeColMap() override;
 
-  /// \brief Base-class override for NodePass pre-visit acceptor
-  /// \param[in] p The node to visit
-  /// \param[out] modified Indicator if the node was modified
-  /// \return Status of the node visit
-  Status PreAccept(NodePass *p, bool *modified) override;
-
-  /// \brief Base-class override for GetDatasetSize
-  /// \param[out] dataset_size the size of the dataset
-  /// \return Status of the function
-  Status GetDatasetSize(int64_t *dataset_size) override;
+  /// \brief Gets the number of classes
+  /// \param[out] num_classes the number of classes
+  /// \return Status - The status code return
+  Status GetNumClasses(int64_t *num_classes) override;
 
  private:
   Status Verify(int32_t id, const std::unique_ptr<DataBuffer> &buf);

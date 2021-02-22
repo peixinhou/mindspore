@@ -109,10 +109,10 @@ Status MatMulBase::GetAttrs() {
   auto field_size_iter = attrs_.find(FIELD_SIZE);
   if (field_size_iter != attrs_.end()) {
     MS_EXCEPTION_IF_NULL(field_size_iter->second);
-    if (field_size_iter->second->isa<Int32Imm>()) {
-      field_size_ = field_size_iter->second->cast<Int32ImmPtr>()->value();
+    if (field_size_iter->second->isa<Int64Imm>()) {
+      field_size_ = field_size_iter->second->cast<Int64ImmPtr>()->value();
     } else {
-      MS_LOG(ERROR) << name_ << " : The value of field_size is not int.";
+      MS_LOG(ERROR) << name_ << " : The value of field_size is not int64_t.";
       return FAILED;
     }
   }
@@ -206,32 +206,6 @@ Status MatMulBase::InferDevMatrixShape() {
 
   SetDevMatrixShape(mat_a_strategy, mat_b_strategy, transpose_b_, &dev_matrix_shape_);
   origin_dev_matrix_shape_ = dev_matrix_shape_;
-  return SUCCESS;
-}
-
-// all-reduce weight's grad
-Status MatMulBase::InferMirrorOps() {
-  mirror_ops_.clear();
-
-  Shape mat_b_tensor_map = inputs_tensor_map_[1];
-  std::vector<Group> mat_b_group;
-  if (CreateGroupByTensorMap(mat_b_tensor_map, &mat_b_group) != SUCCESS) {
-    return FAILED;
-  }
-
-  OperatorVector op_for_inputs;  // op_for_inputs is empty
-  OperatorVector op_for_weight;
-
-  if (mat_b_group.empty()) {
-    MS_LOG(INFO) << name_ << " : The mirror ops is empty.";
-    return SUCCESS;
-  } else {
-    op_for_weight = CreateMirrorOps(mat_b_group[0].name(), mat_b_group[0].GetDevNum());
-    mirror_ops_.push_back(op_for_inputs);
-    mirror_ops_.push_back(op_for_weight);
-    MS_LOG(INFO) << name_ << " : Create the mirror ops for weight success, group is " << mat_b_group[0].name();
-  }
-
   return SUCCESS;
 }
 
@@ -421,7 +395,7 @@ Status MatMulBase::SwapLastTwoElements(mindspore::parallel::Shape *const input) 
   return SUCCESS;
 }
 
-Status MatMulBase::GenerateStrategies(int32_t stage_id) {
+Status MatMulBase::GenerateStrategies(int64_t stage_id) {
   if (GetAttrs() != SUCCESS) {
     MS_LOG(ERROR) << name_ << " : GetAttrs failed.";
     return FAILED;
@@ -456,9 +430,9 @@ Status MatMulBase::GenerateStrategies(int32_t stage_id) {
     combined_shape = input1_shape;
     combined_shape.push_back(input0_shape[input0_shape.size() - 2]);
   }
-  std::function<void(uint32_t, size_t)> recursive = [&stage_id, &dev_num, &combined_partitions, &combined_shape,
+  std::function<void(uint64_t, size_t)> recursive = [&stage_id, &dev_num, &combined_partitions, &combined_shape,
                                                      &input1_shape_size, &recursive, &input0_shape_size,
-                                                     this](uint32_t current_index, size_t n) {
+                                                     this](uint64_t current_index, size_t n) {
     // Finishing the recursive steps, if the strategy is valid, then calculate the cost
     // for this operator under the strategy.
     if (current_index == combined_shape.size()) {
@@ -474,8 +448,8 @@ Status MatMulBase::GenerateStrategies(int32_t stage_id) {
     } else {
       MS_LOG(DEBUG) << name_ << " : The value input0_shape_size: " << input0_shape_size
                     << ", input1_shape_size: " << input1_shape_size;
-      for (uint32_t i = 1; i <= n; i *= 2) {
-        if (n % i == 0 && IntToSize(combined_shape[current_index]) % i == 0) {
+      for (uint64_t i = 1; i <= n; i *= 2) {
+        if (n % i == 0 && LongToSize(combined_shape[current_index]) % i == 0) {
           combined_partitions.push_back(i);
           recursive(current_index + 1, n / i);
           combined_partitions.pop_back();
@@ -490,7 +464,7 @@ Status MatMulBase::GenerateStrategies(int32_t stage_id) {
   return Status::SUCCESS;
 }
 
-Status MatMulBase::PrepareStrategy(int32_t stage_id, size_t dev_num,
+Status MatMulBase::PrepareStrategy(int64_t stage_id, size_t dev_num,
                                    mindspore::parallel::Dimensions combined_partitions, size_t input0_shape_size,
                                    size_t input1_shape_size, mindspore::parallel::StrategyPtr *const sp) {
   int64_t product =
@@ -592,8 +566,8 @@ Status MatMulBase::CheckForTensorSliceValid() const {
   }
   for (auto &one_input_tensor : inputs_tensor_info_) {
     auto slice_shape = one_input_tensor.slice_shape();
-    if ((IntToSize(slice_shape[LAST_INDEX(slice_shape.size())]) % TENSOR_SLICE_ALIGNMENT_SIZE != 0) ||
-        (IntToSize(slice_shape[SECOND_FROM_END(slice_shape.size())]) % TENSOR_SLICE_ALIGNMENT_SIZE != 0)) {
+    if ((LongToSize(slice_shape[LAST_INDEX(slice_shape.size())]) % TENSOR_SLICE_ALIGNMENT_SIZE != 0) ||
+        (LongToSize(slice_shape[SECOND_FROM_END(slice_shape.size())]) % TENSOR_SLICE_ALIGNMENT_SIZE != 0)) {
       return FAILED;
     }
   }
@@ -601,10 +575,8 @@ Status MatMulBase::CheckForTensorSliceValid() const {
 }
 
 std::shared_ptr<Strategys> BatchMatMulInfo::GenerateBatchStrategies() {
-  CheckGlobalDeviceManager();
-  size_t dev_num = g_device_manager->GetDeviceListByStageId(0).size();
   Dimensions batch_strategy(inputs_shape_[1].size() - 1, 1);
-  batch_strategy.insert(batch_strategy.begin(), SizeToLong(dev_num));
+  batch_strategy.insert(batch_strategy.begin(), stage_device_size_);
   Strategys strategy_v = {batch_strategy, batch_strategy};
   return std::make_shared<Strategys>(strategy_v);
 }
@@ -624,7 +596,7 @@ Status MatMulBase::SetCostUnderStrategy(const mindspore::parallel::StrategyPtr &
   std::vector<TensorInfo> relica_inputs_tensor_vector;
   InitTensorInfoForCost(&relica_inputs_tensor_vector);
 
-  int32_t stage_id = strategy->GetInputStage();
+  int64_t stage_id = strategy->GetInputStage();
   // Here, we use the origin outputs_, because we only use the slice size of the output tensor.
   // It does not matter whether the output tensor is transposed or not.
   double computation_cost =

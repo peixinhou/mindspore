@@ -24,11 +24,9 @@ import numpy as np
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 
-from mindspore import Tensor
 from mindspore.context import ParallelMode
 from mindspore import context
 from mindspore.train.serialization import load_checkpoint, load_param_into_net
-import mindspore as ms
 
 from src.yolo import YOLOV3DarkNet53
 from src.logger import get_logger
@@ -89,7 +87,7 @@ class DetectionEngine:
 
     def _nms(self, predicts, threshold):
         """Calculate NMS."""
-        # conver xywh -> xmin ymin xmax ymax
+        # convert xywh -> xmin ymin xmax ymax
         x1 = predicts[:, 0]
         y1 = predicts[:, 1]
         x2 = x1 + predicts[:, 2]
@@ -113,8 +111,8 @@ class DetectionEngine:
             intersect_area = intersect_w * intersect_h
             ovr = intersect_area / (areas[i] + areas[order[1:]] - intersect_area)
 
-            indexs = np.where(ovr <= threshold)[0]
-            order = order[indexs + 1]
+            indexes = np.where(ovr <= threshold)[0]
+            order = order[indexes + 1]
         return reserved_boxes
 
     def write_result(self):
@@ -181,7 +179,7 @@ class DetectionEngine:
 
                 x_top_left = x - w / 2.
                 y_top_left = y - h / 2.
-                # creat all False
+                # create all False
                 flag = np.random.random(cls_emb.shape) > sys.maxsize
                 for i in range(flag.shape[0]):
                     c = cls_argmax[i]
@@ -297,7 +295,6 @@ def test():
     # init detection engine
     detection = DetectionEngine(args)
 
-    input_shape = Tensor(tuple(config.test_img_shape), ms.float32)
     args.logger.info('Start inference....')
     for i, data in enumerate(ds.create_dict_iterator(num_epochs=1)):
         image = data["image"]
@@ -305,7 +302,7 @@ def test():
         image_shape = data["image_shape"]
         image_id = data["img_id"]
 
-        prediction = network(image, input_shape)
+        prediction = network(image)
         output_big, output_me, output_small = prediction
         output_big = output_big.asnumpy()
         output_me = output_me.asnumpy()
@@ -324,7 +321,7 @@ def test():
     eval_result = detection.get_eval_result()
 
     cost_time = time.time() - start_time
-    args.logger.info('\n=============coco eval reulst=========\n' + eval_result)
+    args.logger.info('\n=============coco eval result=========\n' + eval_result)
     args.logger.info('testing cost time {:.2f}h'.format(cost_time / 3600.))
 
 

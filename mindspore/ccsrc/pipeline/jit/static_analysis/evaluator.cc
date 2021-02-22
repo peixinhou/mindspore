@@ -17,6 +17,7 @@
 #include "pipeline/jit/static_analysis/evaluator.h"
 
 #include <algorithm>
+#include <utility>
 #include <unordered_set>
 
 #include "ir/func_graph_cloner.h"
@@ -65,33 +66,6 @@ AnalysisContextPtr BaseFuncGraphEvaluator::MakeContext(const AnalysisEnginePtr &
   return context;
 }
 
-static std::vector<AnfNodePtr> FastShadowSort(const AnfNodePtr &ret_node) {
-  auto current_func_graph = ret_node->func_graph();
-  MS_EXCEPTION_IF_NULL(current_func_graph);
-
-  std::vector<AnfNodePtr> sorted_nodes;
-  auto seen = NewSeenGeneration();
-  std::size_t index = 0;
-  sorted_nodes.emplace_back(ret_node);
-  while (index < sorted_nodes.size()) {
-    auto current = sorted_nodes[index];
-    index++;
-    MS_EXCEPTION_IF_NULL(current);
-    if (current->isa<CNode>()) {
-      auto &inputs = current->cast<CNodePtr>()->inputs();
-      for (auto it = inputs.begin(); it != inputs.end(); it++) {
-        AnfNodePtr input = *it;
-        if (input != nullptr && input->isa<CNode>() && input->seen_ != seen &&
-            input->func_graph() == current_func_graph) {
-          sorted_nodes.emplace_back(input);
-          input->seen_ = seen;
-        }
-      }
-    }
-  }
-  return sorted_nodes;
-}
-
 EvalResultPtr BaseFuncGraphEvaluator::Eval(AnalysisEnginePtr engine, const AbstractBasePtrList &args_spec_list) {
   FuncGraphPtr fg = GetFuncGraph(engine, args_spec_list);
   MS_EXCEPTION_IF_NULL(fg);
@@ -123,25 +97,53 @@ EvalResultPtr BaseFuncGraphEvaluator::Eval(AnalysisEnginePtr engine, const Abstr
                       << MsContext::GetInstance()->get_param<uint32_t>(MS_CTX_MAX_CALL_DEPTH)
                       << ", please call 'context.set_context(max_call_depth=value)' to adjust this value.";
   }
-  std::vector<AnfNodePtr> nodes = FastShadowSort(func_node);
-  for (auto it = nodes.crbegin(); it != nodes.crend(); it++) {
-    const auto &node = *it;
+  // Analysis for isolate nodes first, as some validation check in FuncGraph is isolate nodes;
+  for (const auto &node : fg->GetIsolateNodesInOrder()) {
+    AnfNodeConfigPtr node_conf = engine->MakeConfig(node, graph_context_);
+    MS_LOG(DEBUG) << "Analysis isolate_node begin, func graph: " << fg.get() << fg->ToString()
+                  << ", node_conf: " << node_conf->ToString();
+    auto isolate_base = engine->GetEvaluatedValue(node_conf)->abstract();
+    MS_LOG(DEBUG) << "Analysis isolate_node end, func graph: " << fg.get() << fg->ToString()
+                  << ", node_conf: " << node_conf->ToString() << ", abstract: " << isolate_base->ToString();
+  }
+
+  const auto &all_nodes = TopoSort(func_node, SuccIncoming, [&fg](const AnfNodePtr &node) -> IncludeType {
+    if (node->func_graph() != fg || node->isa<ValueNode>()) {
+      return EXCLUDE;
+    }
+    return FOLLOW;
+  });
+  bool isolate_node_propagate_flag = false;
+  for (const auto &node : all_nodes) {
     AnfNodeConfigPtr node_conf = engine->MakeConfig(node, graph_context_);
     MS_LOG(DEBUG) << "Analysis node begin, func graph: " << fg.get() << fg->ToString()
                   << ", node_conf: " << node_conf->ToString();
-    ret_base = engine->GetEvaluatedValue(node_conf)->abstract();
+    auto node_eval_result = engine->GetEvaluatedValue(node_conf);
+    ret_base = node_eval_result->abstract();
     MS_LOG(DEBUG) << "Analysis node end, func graph: " << fg.get() << fg->ToString()
                   << ", node_conf: " << node_conf->ToString() << ", abstract: " << ret_base->ToString();
+    if (node->isa<CNode>()) {
+      isolate_node_propagate_flag |= node_eval_result->HasIsolateNodesPropagateCNodeFlag();
+      MS_LOG(DEBUG) << "Check isolate_nodes flag for node: " << node->DebugString()
+                    << ", abstract: " << ret_base->ToString()
+                    << ", flag: " << node_eval_result->HasIsolateNodesPropagateCNodeFlag();
+    }
   }
   engine->DecreaseFunctionCallDepth();
 
   MS_EXCEPTION_IF_NULL(ret_base);
   MS_LOG(DEBUG) << "BaseFuncGraph " << fg->ToString() << " eval end, evaluated abstract: " << ret_base->ToString()
                 << ", is stub: " << fg->stub();
+
   if (fg->stub()) {
-    return std::make_shared<EvalResult>(std::make_shared<AbstractUndetermined>(), nullptr);
+    ret_base = std::make_shared<AbstractUndetermined>();
   }
-  return std::make_shared<EvalResult>(ret_base, nullptr);
+  auto eval_result = std::make_shared<EvalResult>(ret_base, std::make_shared<AttrValueMap>());
+  if (isolate_node_propagate_flag) {
+    eval_result->SetIsolateNodesPropagateCNodeFlag(true);
+    eval_result->SetIsolateNodesPropagateFuncGraphFlag(true);
+  }
+  return eval_result;
 }
 
 AbstractBasePtrList FuncGraphEvaluator::NormalizeArgs(const AbstractBasePtrList &args_spec_list) const {
@@ -230,9 +232,8 @@ FuncGraphPtr FuncGraphEvaluator::GetFuncGraph(AnalysisEnginePtr engine, const Ab
   if (iter == func_graph_cache_.end()) {
     auto fg = func_graph();
     MS_EXCEPTION_IF_NULL(fg);
-    TraceManager::DebugTrace(std::make_shared<TraceEvaluatorGenGraph>(fg->debug_info()));
+    TraceGuard guard(std::make_shared<TraceEvaluatorGenGraph>(fg->debug_info()));
     FuncGraphPtr generated_graph = fg->GenerateGraph(args_spec_list);
-    TraceManager::EndTrace();
     func_graph_cache_[args_spec_list] = generated_graph;
     MS_EXCEPTION_IF_NULL(engine);
     engine->func_graph_manager()->AddFuncGraph(generated_graph);
@@ -259,9 +260,8 @@ FuncGraphPtr MetaFuncGraphEvaluator::GetFuncGraph(AnalysisEnginePtr engine, cons
   MS_EXCEPTION_IF_NULL(meta_func_graph_);
   FuncGraphPtr generated_func_graph = nullptr;
   if (this->bound_node() != nullptr) {
-    TraceManager::DebugTrace(std::make_shared<TraceGenMetaFuncGraph>(bound_node()->debug_info()));
+    TraceGuard trace_guard(std::make_shared<TraceGenMetaFuncGraph>(bound_node()->debug_info()));
     generated_func_graph = meta_func_graph_->GenerateFuncGraph(args_spec_list);
-    TraceManager::EndTrace();
   } else {
     generated_func_graph = meta_func_graph_->GenerateFuncGraph(args_spec_list);
   }

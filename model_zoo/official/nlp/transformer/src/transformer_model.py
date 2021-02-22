@@ -51,8 +51,6 @@ class TransformerConfig:
                                  model. Default: 128.
         initializer_range (float): Initialization value of TruncatedNormal. Default: 0.02.
         label_smoothing (float): label smoothing setting. Default: 0.1
-        input_mask_from_dataset (bool): Specifies whether to use the input mask that loaded from
-                                 dataset. Default: True.
         beam_width (int): beam width setting. Default: 4
         max_decode_length (int): max decode length in evaluation. Default: 80
         length_penalty_weight (float): normalize scores of translations according to their length. Default: 1.0
@@ -73,7 +71,6 @@ class TransformerConfig:
                  max_position_embeddings=128,
                  initializer_range=0.02,
                  label_smoothing=0.1,
-                 input_mask_from_dataset=True,
                  beam_width=4,
                  max_decode_length=80,
                  length_penalty_weight=1.0,
@@ -92,7 +89,6 @@ class TransformerConfig:
         self.max_position_embeddings = max_position_embeddings
         self.initializer_range = initializer_range
         self.label_smoothing = label_smoothing
-        self.input_mask_from_dataset = input_mask_from_dataset
         self.beam_width = beam_width
         self.max_decode_length = max_decode_length
         self.length_penalty_weight = length_penalty_weight
@@ -119,11 +115,10 @@ class EmbeddingLookup(nn.Cell):
         self.vocab_size = vocab_size
         self.embedding_size = embedding_size
         self.use_one_hot_embeddings = use_one_hot_embeddings
-        self.embedding_table = Parameter(normal_weight([vocab_size, embedding_size], embedding_size),
-                                         name='embedding_table')
+        self.embedding_table = Parameter(normal_weight([vocab_size, embedding_size], embedding_size))
         self.expand = P.ExpandDims()
         self.shape_flat = (-1,)
-        self.gather = P.GatherV2()
+        self.gather = P.Gather()
         self.one_hot = P.OneHot()
         self.on_value = Tensor(1.0, mstype.float32)
         self.off_value = Tensor(0.0, mstype.float32)
@@ -193,7 +188,7 @@ class EmbeddingPostprocessor(nn.Cell):
         super(EmbeddingPostprocessor, self).__init__()
         self.scores_mul = Tensor([math.sqrt(float(embedding_size))], dtype=mstype.float32)
         self.multiply = P.Mul()
-        self.add = P.TensorAdd()
+        self.add = P.Add()
         self.dropout = nn.Dropout(1 - dropout_prob, dtype=mstype.float32)
         self.use_dropout = dropout_prob > 0
         self.expand_dims = P.ExpandDims()
@@ -251,12 +246,12 @@ class LayerPreprocess(nn.Cell):
 
 class LayerPostprocess(nn.Cell):
     """
-    postprocess ouput of each layer.
+    postprocess output of each layer.
     """
     def __init__(self,
                  dropout_prob=0.1):
         super(LayerPostprocess, self).__init__()
-        self.add = P.TensorAdd()
+        self.add = P.Add()
         self.dropout = nn.Dropout(1 - dropout_prob)
         self.use_dropout = dropout_prob > 0
 
@@ -362,7 +357,7 @@ class MultiheadAttention(nn.Cell):
         if self.has_attention_mask:
             self.expand_dims = P.ExpandDims()
             self.sub = P.Sub()
-            self.add = P.TensorAdd()
+            self.add = P.Add()
             self.cast = P.Cast()
             self.get_dtype = P.DType()
 
@@ -1014,7 +1009,6 @@ class TransformerModel(nn.Cell):
             config.hidden_dropout_prob = 0.0
             config.attention_probs_dropout_prob = 0.0
 
-        self.input_mask_from_dataset = config.input_mask_from_dataset
         self.batch_size = config.batch_size
         self.hidden_size = config.hidden_size
         self.num_hidden_layers = config.num_hidden_layers

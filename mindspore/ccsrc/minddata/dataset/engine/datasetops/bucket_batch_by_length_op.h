@@ -107,15 +107,10 @@ class BucketBatchByLengthOp : public PipelineOp {
 
   // Might need to batch remaining buckets after receiving eoe, so override this method.
   // @param int32_t workerId
-  // @return Status - The error code returned
+  // @return Status The status code returned
   Status EoeReceived(int32_t) override;
 
   std::string Name() const override { return kBucketBatchByLengthOp; }
-
-  /// \brief Base-class override for GetDatasetSize
-  /// \param[out] dataset_size the size of the dataset
-  /// \return Status of the function
-  Status GetDatasetSize(int64_t *dataset_size) override;
 
   // << Stream output operator overload
   // @notes This allows you to write the debug print info using stream operators
@@ -128,7 +123,7 @@ class BucketBatchByLengthOp : public PipelineOp {
   }
 
   // Main loop of batch
-  // @return Status - The error code returned
+  // @return Status The status code returned
   Status operator()() override;
 
  private:

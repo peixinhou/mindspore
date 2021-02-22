@@ -1,5 +1,5 @@
 /**
- * Copyright 2019 Huawei Technologies Co., Ltd
+ * Copyright 2019-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,29 +13,23 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include "minddata/dataset/engine/datasetops/map_op/map_op.h"
 #include <algorithm>
 #include <cstring>
-#include <iostream>
 #include <memory>
 #include <vector>
-#include "minddata/dataset/core/config_manager.h"
 
 #include "minddata/dataset/callback/callback_param.h"
+#include "minddata/dataset/core/config_manager.h"
 #include "minddata/dataset/core/constants.h"
 #include "minddata/dataset/core/global_context.h"
 #include "minddata/dataset/engine/data_buffer.h"
 #include "minddata/dataset/engine/datasetops/map_op/cpu_map_job.h"
 #include "minddata/dataset/engine/datasetops/map_op/gpu_map_job.h"
-#include "minddata/dataset/engine/datasetops/map_op/map_op.h"
 #include "minddata/dataset/engine/execution_tree.h"
-#include "minddata/dataset/engine/opt/pass.h"
 #include "minddata/dataset/kernels/tensor_op.h"
+#include "minddata/dataset/util/log_adapter.h"
 #include "minddata/dataset/util/task_manager.h"
-#ifndef ENABLE_ANDROID
-#include "utils/log_adapter.h"
-#else
-#include "mindspore/lite/src/common/log_adapter.h"
-#endif
 
 namespace mindspore {
 namespace dataset {
@@ -49,8 +43,8 @@ MapOp::Builder::Builder() {
 // Check if the required parameters are set by the builder.
 Status MapOp::Builder::sanityCheck() const {
   if (build_tensor_funcs_.empty()) {
-    return Status(StatusCode::kUnexpectedError, __LINE__, __FILE__,
-                  "Building a MapOp that has not provided any function/operation to apply");
+    return Status(StatusCode::kMDUnexpectedError, __LINE__, __FILE__,
+                  "Building a MapOp without providing any function/operation to apply");
   }
   return Status::OK();
 }
@@ -60,7 +54,7 @@ Status MapOp::Builder::Build(std::shared_ptr<MapOp> *ptr) {
   RETURN_IF_NOT_OK(sanityCheck());
   *ptr = std::make_shared<MapOp>(std::move(build_in_col_names_), std::move(build_out_col_names_),
                                  std::move(build_tensor_funcs_), build_num_workers_, build_op_connector_size_);
-  (*ptr)->callback_manager_.AddCallbacks(std::move(builder_callbacks_));
+  (*ptr)->AddCallbacks(std::move(builder_callbacks_));
   return Status::OK();
 }
 
@@ -127,26 +121,13 @@ Status MapOp::GenerateWorkerJob(const std::unique_ptr<MapWorkerJob> *worker_job)
     // In the future, we will have heuristic or control from user to select target device
     MapTargetDevice target_device = MapTargetDevice::kCpu;
 
-    switch (target_device) {
-      case MapTargetDevice::kCpu:
-        // If there is no existing map_job, we will create one.
-        // map_job could be nullptr when we are at the first tensor op or when the target device of the prev op
-        // is different with that of the current op.
-        if (map_job == nullptr) {
-          map_job = std::make_shared<CpuMapJob>();
-        }
-        map_job->AddOperation(tfuncs_[i]);
-        break;
-
-      case MapTargetDevice::kGpu:
-        break;
-
-      case MapTargetDevice::kDvpp:
-        break;
-
-      default:
-        break;
+    // If there is no existing map_job, we will create one.
+    // map_job could be nullptr when we are at the first tensor op or when the target device of the prev op
+    // is different with that of the current op.
+    if (map_job == nullptr) {
+      map_job = std::make_shared<CpuMapJob>();
     }
+    map_job->AddOperation(tfuncs_[i]);
 
     // Push map_job into worker_job if one of the two conditions is true:
     // 1) It is the last tensor operation in tfuncs_
@@ -175,7 +156,7 @@ Status MapOp::operator()() {
   }
 
   // The operator class just starts off threads by calling the tree_ function
-  rc = tree_->LaunchWorkers(num_workers_, std::bind(&MapOp::WorkerEntry, this, std::placeholders::_1));
+  rc = tree_->LaunchWorkers(num_workers_, std::bind(&MapOp::WorkerEntry, this, std::placeholders::_1), NameWithID());
   // Synchronize with TaskManager
   TaskManager::FindMe()->Post();
   RETURN_IF_NOT_OK(rc);
@@ -306,6 +287,14 @@ Status MapOp::WorkerCompute(DataBuffer *in_buffer, TensorQTable *new_tensor_tabl
     // From the current row, select the Tensor that need to be passed to TensorOp
     (void)std::transform(to_process_indices_.begin(), to_process_indices_.end(), std::back_inserter(to_process),
                          [&cur_row](const auto &it) { return std::move(cur_row[it]); });
+    to_process.setId(cur_row.getId());
+    std::vector<std::string> cur_row_path = cur_row.getPath();
+    if (cur_row_path.size() > 0) {
+      std::vector<std::string> to_process_path;
+      (void)std::transform(to_process_indices_.begin(), to_process_indices_.end(), std::back_inserter(to_process_path),
+                           [&cur_row_path](const auto &it) { return cur_row_path[it]; });
+      to_process.setPath(to_process_path);
+    }
     job_input_table.push_back(std::move(to_process));
     original_table.push_back(std::move(cur_row));
   }
@@ -360,7 +349,7 @@ Status MapOp::ComputeColMap() {
     RETURN_IF_NOT_OK(InitPrivateVariable(&current_name_id_map));
     // Create the final column name to index mapping in the base class field
     CreateFinalColMap(&current_name_id_map);
-    MS_LOG(DEBUG) << "Column name map for map op set: " << this->ColumnNameMapAsString();
+    MS_LOG(DEBUG) << "Column name map for map op is: " << this->ColumnNameMapAsString();
   } else {
     MS_LOG(WARNING) << "Column name map is already set!";
   }
@@ -370,7 +359,7 @@ Status MapOp::ComputeColMap() {
 // Validating if each of the input_columns exists in the DataBuffer.
 Status MapOp::ValidateInColumns(const std::unordered_map<std::string, int32_t> &col_name_id_map) {
   for (const auto &inCol : in_columns_) {
-    bool found = col_name_id_map.find(inCol) != col_name_id_map.end() ? true : false;
+    bool found = col_name_id_map.find(inCol) != col_name_id_map.end();
     if (!found) {
       std::string err_msg = "input column name: " + inCol + " doesn't exist in the dataset columns.";
       RETURN_STATUS_UNEXPECTED(err_msg);
@@ -454,18 +443,6 @@ void MapOp::CreateFinalColMap(std::unordered_map<std::string, int32_t> *col_name
     // Set the base class final column id map result
     column_name_id_map_ = final_col_name_id_map;
   }
-}
-
-// Visitor accept method for NodePass
-Status MapOp::Accept(NodePass *p, bool *modified) {
-  // Downcast shared pointer then call visitor
-  return p->RunOnNode(shared_from_base<MapOp>(), modified);
-}
-
-// Visitor pre-accept method for NodePass
-Status MapOp::PreAccept(NodePass *p, bool *modified) {
-  // Downcast shared pointer then call visitor
-  return p->PreRunOnNode(shared_from_base<MapOp>(), modified);
 }
 
 Status MapOp::WaitForWorkers() {

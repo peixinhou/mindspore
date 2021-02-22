@@ -25,17 +25,10 @@
 
 namespace mindspore {
 namespace kernel {
-template <typename T>
+template <typename T, typename S>
 class UnsortedSegmentMaxGpuKernel : public GpuKernel {
  public:
-  UnsortedSegmentMaxGpuKernel()
-      : num_segments_(1),
-        inner_size_(1),
-        outer_size_(1),
-        input_size_(1),
-        segment_ids_size_(1),
-        output_size_(1),
-        is_null_input_(false) {}
+  UnsortedSegmentMaxGpuKernel() { ResetResource(); }
   ~UnsortedSegmentMaxGpuKernel() override = default;
 
   const std::vector<size_t> &GetInputSizeList() const override { return input_size_list_; }
@@ -48,10 +41,11 @@ class UnsortedSegmentMaxGpuKernel : public GpuKernel {
       return true;
     }
     T *input_addr = GetDeviceAddress<T>(inputs, 0);
-    int *indices_addr = GetDeviceAddress<int>(inputs, 1);
+    S *indices_addr = GetDeviceAddress<S>(inputs, 1);
     T *output_addr = GetDeviceAddress<T>(outputs, 0);
 
-    CHECK_CUDA_RET_WITH_EXCEPT(cudaMemsetAsync(output_addr, std::numeric_limits<T>::min(), outputs[0]->size,
+    CHECK_CUDA_RET_WITH_EXCEPT(kernel_node_,
+                               cudaMemsetAsync(output_addr, std::numeric_limits<T>::min(), outputs[0]->size,
                                                reinterpret_cast<cudaStream_t>(stream_ptr)),
                                "cudaMemSet Failed");
     CalUnsortedSegmentMax(input_addr, indices_addr, num_segments_, outer_size_, inner_size_, output_addr,
@@ -60,18 +54,29 @@ class UnsortedSegmentMaxGpuKernel : public GpuKernel {
   }
 
   bool Init(const CNodePtr &kernel_node) override {
-    auto input_shapes = AnfAlgo::GetPrevNodeOutputInferShape(kernel_node, 0);
+    kernel_node_ = kernel_node;
+    auto input_shapes = AnfAlgo::GetInputRealDeviceShapeIfExist(kernel_node, 0);
     is_null_input_ = CHECK_NULL_INPUT(input_shapes);
     if (is_null_input_) {
       MS_LOG(WARNING) << "UnsortedSegmentMax input is null";
       InitSizeLists();
       return true;
     }
-    auto segment_ids_shapes = AnfAlgo::GetPrevNodeOutputInferShape(kernel_node, 1);
-    auto output_shapes = AnfAlgo::GetOutputInferShape(kernel_node, 0);  // we get that from computation
+    auto segment_ids_shapes = AnfAlgo::GetInputRealDeviceShapeIfExist(kernel_node, 1);
+    auto output_shapes = AnfAlgo::GetOutputRealDeviceShapeIfExist(kernel_node, 0);
 
+    size_t input_num = AnfAlgo::GetInputTensorNum(kernel_node);
+    if (input_num == 3) {
+      MS_LOG(INFO) << "UnsortedSegmentMax Kernel Input count is 3 - dynamic mode";
+    } else {
+      MS_LOG(INFO) << "UnsortedSegmentMax Kernel Input count is 2";
+    }
+    if (output_shapes.size() < 1) {
+      MS_LOG(EXCEPTION)
+        << "For UnsortedSegmentMax, output shape incorrect rank. Expect Rank at least rank 1, got Rank: "
+        << output_shapes.size() << ".";
+    }
     num_segments_ = output_shapes[0];
-
     input_size_ = 1;
     for (size_t i = 0; i < input_shapes.size(); i++) {
       input_size_ *= input_shapes[i];
@@ -97,6 +102,19 @@ class UnsortedSegmentMaxGpuKernel : public GpuKernel {
     return true;
   }
 
+  void ResetResource() noexcept override {
+    num_segments_ = 1;
+    inner_size_ = 1;
+    outer_size_ = 1;
+    input_size_ = 1;
+    segment_ids_size_ = 1;
+    output_size_ = 1;
+    is_null_input_ = false;
+    input_size_list_.clear();
+    output_size_list_.clear();
+    workspace_size_list_.clear();
+  }
+
  protected:
   void InitSizeLists() override {
     input_size_list_.push_back(input_size_ * sizeof(T));
@@ -105,7 +123,7 @@ class UnsortedSegmentMaxGpuKernel : public GpuKernel {
   }
 
  private:
-  int num_segments_;
+  int64_t num_segments_;
   size_t inner_size_;
   size_t outer_size_;
   size_t input_size_;

@@ -1,4 +1,4 @@
-# Copyright 2020 Huawei Technologies Co., Ltd
+# Copyright 2020-2021 Huawei Technologies Co., Ltd
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -65,11 +65,12 @@ class PrimLib:
     """Prim lib"""
 
     UNKNOWN = 0
-    ELEMWISE = 1
-    BROADCAST = 2
-    REDUCE = 3
-    TRANSFORM = 4
-    CONTROL = 5
+    RESHAPE = 1
+    ELEMWISE = 2
+    BROADCAST = 3
+    REDUCE = 4
+    TRANSFORM = 5
+    CONTROL = 6
 
     class Prim:
         """Prim"""
@@ -80,6 +81,11 @@ class PrimLib:
             self.relation_func = relation_func
             if relation_func is None:
                 self.relation_func = lambda *x: self.default_relation_func[iter_type](self, *x)
+
+        def default_reshape_relation(self, op, input_idx):
+            axis_relation, elem_relation = self.unknown_relation(op, input_idx)
+            elem_relation = [PrimLib.RESHAPE] * len(elem_relation)
+            return axis_relation, elem_relation
 
         def default_elemwise_broadcast_relation(self, op, input_idx):
             """Process elemwise and broadcast relation"""
@@ -116,6 +122,7 @@ class PrimLib:
 
         default_relation_func = [
             unknown_relation,
+            default_reshape_relation,
             default_elemwise_broadcast_relation,
             default_elemwise_broadcast_relation,
             default_reduce_relation,
@@ -124,7 +131,7 @@ class PrimLib:
         ]
 
     primtives = {
-        'TensorAdd': Prim(ELEMWISE),
+        'Add': Prim(ELEMWISE),
         'Abs': Prim(ELEMWISE),
         'Neg': Prim(ELEMWISE),
         'Mul': Prim(ELEMWISE),
@@ -154,7 +161,16 @@ class PrimLib:
         'ControlDepend': Prim(CONTROL),
         'Assign': Prim(ELEMWISE),
         'Tanh': Prim(ELEMWISE),
+        'ExpandDims': Prim(RESHAPE),
+        'InplaceAssign': Prim(ELEMWISE),
         '@ReduceInit': Prim(ELEMWISE),
+        'Reshape': Prim(RESHAPE),
+        'Squeeze': Prim(RESHAPE),
+        'Flatten': Prim(RESHAPE),
+        'FlattenGrad': Prim(RESHAPE),
+        'Transpose': Prim(TRANSFORM),
+        'Tile': Prim(BROADCAST),
+        'BroadcastTo': Prim(BROADCAST),
     }
 
     default_primtive = Prim(UNKNOWN)
@@ -294,11 +310,12 @@ class Operator:
 class Graph:
     """Graph"""
 
-    def __init__(self, name, ops):
+    def __init__(self, name, ops, stitch_info=None):
         self.name = name
         self.ops = ops  # in topo order, can not use set
         self.inputs = []
         self.outputs = []
+        self.stitch_info = stitch_info
 
     def set_processor(self, processor):
         """Set processor"""
@@ -356,6 +373,12 @@ class Graph:
         out_str = ', '.join([repr(t) for t in outputs])
         lines = []
         lines.append("%s(%s) -> %s {" % (self.name, para_str, out_str))
+        if self.stitch_info:
+            if self.stitch_info.stitch_ops:
+                lines.append('  stitch -> ' + str(self.stitch_info.stitch_ops))
+            if self.stitch_info.stitch_atomic_ops:
+                lines.append('  stitch_atomic_ops-> ' + str(self.stitch_info.stitch_atomic_ops))
+
         for op in self.ops:
             lines.append('  ' + str(op))
         lines.append('}')
@@ -389,12 +412,20 @@ class Graph:
                     in_desc.append([{'data_type': t.dtype, 'value': t.value, 'name': '', 'shape': t.shape,
                                      'tensor_name': t.name, 'format': t.data_format}])
             out_desc = [{'data_type': op.output.dtype, 'name': '', 'shape': op.output.shape,
-                         'tensor_name': op.output.name, 'format': t.data_format}]
+                         'tensor_name': op.output.name, 'format': op.output.data_format}]
             op_desc.append({'attr': attrs, 'impl_path': '',
                             'input_desc': in_desc, 'name': op.prim, 'output_desc': out_desc})
+
         graph_desc = {'composite': True, 'composite_graph': '', 'id': 0,
                       'input_desc': input_desc, 'op': self.name, 'op_desc': op_desc, 'output_desc': output_desc,
                       'platform': 'AKG', 'process': self.processor}
+
+        if self.stitch_info and self.stitch_info.stitch_ops:
+            buffer_stitch = {'stitch_op': list(self.stitch_info.stitch_ops)}
+            if self.stitch_info.stitch_atomic_ops:
+                buffer_stitch['stitch_atomic_op'] = list(self.stitch_info.stitch_atomic_ops)
+            graph_desc['buffer_stitch'] = buffer_stitch
+
         return graph_desc
 
 

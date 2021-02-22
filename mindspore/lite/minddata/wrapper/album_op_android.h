@@ -48,20 +48,20 @@ class AlbumOp {
   /// \param[in] file_dir - directory of Album
   /// \param[in] do_decode - decode image files
   /// \param[in] schema_file - schema file
+  /// \param[in] column_names - column name
   /// \param[in] exts - set of file extensions to read, if empty, read everything under the dir
-  /// \param[in] rotate - rotate image exif orientation
   AlbumOp(const std::string &file_dir, bool do_decode, const std::string &schema_file,
-          const std::set<std::string> &exts);
+          const std::vector<std::string> &column_names, const std::set<std::string> &exts);
 
   /// \brief Constructor
   /// \param[in] file_dir - directory of Album
   /// \param[in] do_decode - decode image files
   /// \param[in] schema_file - schema file
+  /// \param[in] column_names - column name
   /// \param[in] exts - set of file extensions to read, if empty, read everything under the dir
   /// \param[in] index - the specific file index
-  /// \param[in] rotate - rotate image exif orientation
   AlbumOp(const std::string &file_dir, bool do_decode, const std::string &schema_file,
-          const std::set<std::string> &exts, uint32_t index);
+          const std::vector<std::string> &column_names, const std::set<std::string> &exts, uint32_t index);
 
   /// \brief Destructor.
   ~AlbumOp() = default;
@@ -79,11 +79,11 @@ class AlbumOp {
   /// \return bool - if file is bad then return false
   bool CheckImageType(const std::string &file_name, bool *valid);
 
-  // Op name getter
-  // @return Name of the current Op
+  /// \brief Name of the current Op
+  /// @return op name
   std::string Name() const { return "AlbumOp"; }
 
-  // Op name DisableRotate
+  /// \brief disable rotate
   // @return
   void DisableRotate() { this->rotate_ = false; }
 
@@ -162,6 +162,10 @@ class AlbumOp {
   /// \param[in] file file path
   int GetOrientation(const std::string &file);
 
+  /// \brief is read column name
+  /// \param[in] column_name
+  bool IsReadColumn(const std::string &column_name);
+
   std::string folder_path_;  // directory of image folder
   bool decode_;
   std::vector<std::string> columns_to_load_;
@@ -175,8 +179,8 @@ class AlbumOp {
   bool sampler_;
   int64_t sampler_index_;
   std::vector<std::string> image_rows_;
-  std::unordered_map<std::string, int32_t> column_name_id_map_;
   bool rotate_;
+  std::vector<std::string> column_names_;
 };
 }  // namespace dataset
 }  // namespace mindspore

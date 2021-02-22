@@ -1,5 +1,5 @@
 /**
- * Copyright 2019 Huawei Technologies Co., Ltd
+ * Copyright 2019-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -133,12 +133,12 @@ class CocoOp : public ParallelOp, public RandomAccessOp {
     }
 
     // Check validity of input args
-    // @return = The error code return
+    // @return Status The status code returned
     Status SanityCheck();
 
     // The builder "Build" method creates the final object.
     // @param std::shared_ptr<CocoOp> *op - DatasetOp
-    // @return - The error code return
+    // @return Status The status code returned
     Status Build(std::shared_ptr<CocoOp> *op);
 
    private:
@@ -173,13 +173,13 @@ class CocoOp : public ParallelOp, public RandomAccessOp {
 
   // Worker thread pulls a number of IOBlock from IOBlock Queue, make a buffer and push it to Connector
   // @param int32_t workerId - id of each worker
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status WorkerEntry(int32_t worker_id) override;
 
   // Main Loop of CocoOp
   // Master thread: Fill IOBlockQueue, then goes to sleep
   // Worker thread: pulls IOBlock from IOBlockQueue, work on it the put buffer to mOutConnector
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status operator()() override;
 
   // A print method typically used for debugging
@@ -203,31 +203,24 @@ class CocoOp : public ParallelOp, public RandomAccessOp {
   static Status GetClassIndexing(const std::string &dir, const std::string &task_type, const std::string &task_mode,
                                  std::vector<std::pair<std::string, std::vector<int32_t>>> *output_class_indexing);
 
-  /// \brief Base-class override for NodePass visitor acceptor
-  /// \param[in] p Pointer to the NodePass to be accepted
-  /// \param[out] modified Indicator if the node was changed at all
-  /// \return Status of the node visit
-  Status Accept(NodePass *p, bool *modified) override;
-
   // Op name getter
   // @return Name of the current Op
   std::string Name() const override { return "CocoOp"; }
 
-  /// \brief Base-class override for GetDatasetSize
-  /// \param[out] dataset_size the size of the dataset
-  /// \return Status of the function
-  Status GetDatasetSize(int64_t *dataset_size) override;
+  /// \brief Gets the class indexing
+  /// \return Status The status code returned
+  Status GetClassIndexing(std::vector<std::pair<std::string, std::vector<int32_t>>> *output_class_indexing) override;
 
  private:
   // Initialize Sampler, calls sampler->Init() within
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status InitSampler();
 
   // Load a tensor row according to image id
   // @param row_id_type row_id - id for this tensor row
   // @param std::string image_id - image id
   // @param TensorRow row - image & target read into this tensor row
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status LoadTensorRow(row_id_type row_id, const std::string &image_id, TensorRow *row);
 
   // Load a tensor row with vector which a vector to a tensor
@@ -236,7 +229,7 @@ class CocoOp : public ParallelOp, public RandomAccessOp {
   // @param std::shared_ptr<Tensor> image - image tensor
   // @param std::shared_ptr<Tensor> coordinate - coordinate tensor
   // @param TensorRow row - image & target read into this tensor row
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status LoadDetectionTensorRow(row_id_type row_id, const std::string &image_id, std::shared_ptr<Tensor> image,
                                 std::shared_ptr<Tensor> coordinate, TensorRow *trow);
 
@@ -246,7 +239,7 @@ class CocoOp : public ParallelOp, public RandomAccessOp {
   // @param std::shared_ptr<Tensor> image - image tensor
   // @param std::shared_ptr<Tensor> coordinate - coordinate tensor
   // @param TensorRow row - image & target read into this tensor row
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status LoadSimpleTensorRow(row_id_type row_id, const std::string &image_id, std::shared_ptr<Tensor> image,
                              std::shared_ptr<Tensor> coordinate, TensorRow *trow);
 
@@ -256,69 +249,69 @@ class CocoOp : public ParallelOp, public RandomAccessOp {
   // @param std::shared_ptr<Tensor> image - image tensor
   // @param std::shared_ptr<Tensor> coordinate - coordinate tensor
   // @param TensorRow row - image & target read into this tensor row
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status LoadMixTensorRow(row_id_type row_id, const std::string &image_id, std::shared_ptr<Tensor> image,
                           std::shared_ptr<Tensor> coordinate, TensorRow *trow);
 
   // @param const std::string &path - path to the image file
   // @param const ColDescriptor &col - contains tensor implementation and datatype
   // @param std::shared_ptr<Tensor> tensor - return
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status ReadImageToTensor(const std::string &path, const ColDescriptor &col, std::shared_ptr<Tensor> *tensor);
 
   // @param const std::vector<uint64_t> &keys - keys in ioblock
   // @param std::unique_ptr<DataBuffer> db
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status LoadBuffer(const std::vector<int64_t> &keys, std::unique_ptr<DataBuffer> *db);
 
   // Read annotation from Annotation folder
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status ParseAnnotationIds();
 
   // @param const std::shared_ptr<Tensor> &sample_ids - sample ids of tensor
   // @param std::vector<int64_t> *keys - image id
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status TraverseSampleIds(const std::shared_ptr<Tensor> &sample_ids, std::vector<int64_t> *keys);
 
   // Called first when function is called
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status LaunchThreadsAndInitOp();
 
   // Reset dataset state
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status Reset() override;
 
   // @param nlohmann::json image_tree - image tree of json
   // @param std::vector<std::string> *image_vec - image id list of json
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status ImageColumnLoad(const nlohmann::json &image_tree, std::vector<std::string> *image_vec);
 
   // @param nlohmann::json categories_tree - categories tree of json
-  // return Status - The error code return
+  // @return Status The status code returned
   Status CategoriesColumnLoad(const nlohmann::json &categories_tree);
 
   // @param nlohmann::json categories_tree - categories tree of json
   // @param const std::string &image_file - current image name in annotation
   // @param const int32_t &id - current unique id of annotation
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status DetectionColumnLoad(const nlohmann::json &annotation_tree, const std::string &image_file, const int32_t &id);
 
   // @param nlohmann::json categories_tree - categories tree of json
   // @param const std::string &image_file - current image name in annotation
   // @param const int32_t &id - current unique id of annotation
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status StuffColumnLoad(const nlohmann::json &annotation_tree, const std::string &image_file, const int32_t &id);
 
   // @param nlohmann::json categories_tree - categories tree of json
   // @param const std::string &image_file - current image name in annotation
   // @param const int32_t &id - current unique id of annotation
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status KeypointColumnLoad(const nlohmann::json &annotation_tree, const std::string &image_file, const int32_t &id);
 
   // @param nlohmann::json categories_tree - categories tree of json
   // @param const std::string &image_file - current image name in annotation
   // @param const int32_t &image_id - current unique id of annotation
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status PanopticColumnLoad(const nlohmann::json &annotation_tree, const std::string &image_file,
                             const int32_t &image_id);
 

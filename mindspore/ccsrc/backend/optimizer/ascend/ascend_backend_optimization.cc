@@ -1,5 +1,5 @@
 /**
- * Copyright 2019 Huawei Technologies Co., Ltd
+ * Copyright 2019-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@
 #include <string>
 #include "backend/optimizer/common/optimizer.h"
 #include "backend/optimizer/ascend/ir_fission/dynamic_rnn_grad_fission_v2.h"
+#include "backend/optimizer/ascend/ir_fission/dynamic_gru_v2_grad_fission.h"
 #include "backend/optimizer/ascend/ir_fission/bn_split.h"
 #include "backend/optimizer/ascend/ir_fission/bn_grad_split.h"
 #include "backend/optimizer/ascend/ir_fission/batch_norm_grad_split.h"
@@ -30,6 +31,8 @@
 #include "backend/optimizer/ascend/ir_fusion/fused_batch_norm_fusion.h"
 #include "backend/optimizer/ascend/ir_fission/layer_norm_grad_split.h"
 #include "backend/optimizer/ascend/ir_fission/unsorted_segment_sum_fission.h"
+#include "backend/optimizer/ascend/ir_fission/gather_v2_ds_fission.h"
+#include "backend/optimizer/ascend/ir_fission/bce_with_logits_loss_fission.h"
 #include "backend/optimizer/pass/communication_op_fusion.h"
 #include "backend/optimizer/ascend/ir_fusion/square_sum_fusion.h"
 #include "backend/optimizer/ascend/ir_fusion/clip_by_norm_no_div_square_sum_fusion.h"
@@ -50,6 +53,8 @@
 #include "backend/optimizer/ascend/ir_fusion/transpose_transdata_fusion.h"
 #include "backend/optimizer/ascend/ir_fission/transdata_split.h"
 #include "backend/optimizer/ascend/ir_fission/topk_split.h"
+#include "backend/optimizer/ascend/ir_fission/lin_space_fission.h"
+#include "backend/optimizer/ascend/ir_fission/space_to_depth_split.h"
 #include "backend/optimizer/ascend/ir_fusion/momentum_lossscale_fusion.h"
 #include "backend/optimizer/ascend/ir_fusion/mul_add_fusion.h"
 #include "backend/optimizer/ascend/ir_fusion/mul_addn_fusion.h"
@@ -61,12 +66,13 @@
 #include "backend/optimizer/ascend/ir_fusion/confusion_mul_grad_fusion.h"
 #include "backend/optimizer/ascend/ir_fusion/softmax_grad_ext_fusion.h"
 #include "backend/optimizer/ascend/format_type/insert_trans_op.h"
+#include "backend/optimizer/ascend/format_type/add_reformat_op.h"
 #include "backend/optimizer/ascend/format_type/dynamic_rnn_grad_reformat.h"
 #include "backend/optimizer/ascend/format_type/insert_transpose_for_basiclstm_op.h"
+#include "backend/optimizer/ascend/format_type/insert_transpose_for_dyanmic_gru_v2.h"
 #include "backend/optimizer/ascend/format_type/rectify_do_mask_kernel_info.h"
 #include "backend/optimizer/ascend/format_type/chang_axis_of_reduce_kernel.h"
-#include "backend/optimizer/ascend/format_type/split_unsupported_transdata.h"
-#include "backend/optimizer/ascend/format_type/insert_reshape_for_extract_image_patches_op.h"
+#include "backend/optimizer/ascend/format_type/convert_cast_format.h"
 #include "backend/optimizer/pass/getitem_tuple.h"
 #include "backend/optimizer/pass/optimize_dependence.h"
 #include "backend/optimizer/pass/erase_visit_attr.h"
@@ -74,7 +80,6 @@
 #include "backend/optimizer/ascend/format_type/convert_unsupported_transnode_to_aicpu.h"
 #include "backend/optimizer/pass/eliminate_redundant_op.h"
 #include "backend/optimizer/pass/common_subexpression_elimination.h"
-#include "backend/optimizer/pass/add_atomic_clean.h"
 #include "backend/optimizer/ascend/format_type/merge_cast_to_op.h"
 #include "backend/optimizer/ascend/format_type/check_consistency.h"
 #include "backend/optimizer/ascend/buffer_fusion/ub_pattern_fusion.h"
@@ -102,6 +107,7 @@
 #include "backend/optimizer/ascend/enhancer/insert_memcpy_async_for_getnext.h"
 #include "backend/optimizer/ascend/ir_fission/batch_norm_grad_infer_fission.h"
 #include "backend/optimizer/ascend/ir_fission/split_fission.h"
+#include "backend/optimizer/ascend/ir_fission/splitv_fission.h"
 #include "backend/optimizer/ascend/format_type/modify_ops_attrs.h"
 #include "backend/optimizer/ascend/format_type/remove_no_use_reshape_op.h"
 #include "backend/optimizer/ascend/ir_fusion/add_input_to_output.h"
@@ -109,14 +115,18 @@
 #include "backend/optimizer/ascend/ir_fission/concat_fission.h"
 #include "backend/optimizer/ascend/ir_fission/pack_fission.h"
 #include "backend/optimizer/ascend/enhancer/concat_outputs_for_all_gather.h"
+#include "backend/optimizer/ascend/enhancer/split_inputs_for_reduce_scatter.h"
 #include "backend/optimizer/ascend/enhancer/add_placeholder_for_dynamic_rnn.h"
+#include "backend/optimizer/ascend/enhancer/add_placeholder_for_dynamic_gru.h"
+#include "backend/optimizer/ascend/enhancer/add_attr_for_3d_graph.h"
+#include "backend/optimizer/ascend/enhancer/split_n_optimizer.h"
 #include "utils/ms_context.h"
-#include "backend/optimizer/graph_kernel/composite_ops_fusion.h"
-#include "backend/optimizer/graph_kernel/basic_ops_fusion.h"
 #include "utils/config_manager.h"
 #include "debug/anf_ir_dump.h"
 #include "debug/dump_proto.h"
-
+#ifdef ENABLE_DUMP_IR
+#include "debug/rdr/running_data_recorder.h"
+#endif
 namespace mindspore {
 namespace opt {
 namespace {
@@ -149,7 +159,6 @@ void AddAscendIRFusionRulesPass(PassManager *ir_fusion_pm) {
 
 void AddAscendIRFusionPass(PassManager *ir_fusion_pm) {
   MS_EXCEPTION_IF_NULL(ir_fusion_pm);
-  ir_fusion_pm->AddPass(std::make_shared<BatchNormBertFission>());
   ir_fusion_pm->AddPass(std::make_shared<SingleBatchNormFission>());
   ir_fusion_pm->AddPass(std::make_shared<BatchNorm2BNInfer>());
   ir_fusion_pm->AddPass(std::make_shared<BatchNormGrad2BNInferGrad>());
@@ -163,6 +172,7 @@ void AddAscendIRFusionPass(PassManager *ir_fusion_pm) {
   ir_fusion_pm->AddPass(std::make_shared<ReshapeTransposeFusion>());
   ir_fusion_pm->AddPass(std::make_shared<TransposeReshapeFusion>());
   ir_fusion_pm->AddPass(std::make_shared<TopKSplit>());
+  ir_fusion_pm->AddPass(std::make_shared<LinSpaceFission>());
   ir_fusion_pm->AddPass(std::make_shared<MomentumLossscaleFusion>());
   ir_fusion_pm->AddPass(std::make_shared<MulAddFusion>());
   ir_fusion_pm->AddPass(std::make_shared<MulAddNFusion>());
@@ -170,34 +180,21 @@ void AddAscendIRFusionPass(PassManager *ir_fusion_pm) {
   ir_fusion_pm->AddPass(std::make_shared<AddnFission>());
   ir_fusion_pm->AddPass(std::make_shared<DereluFusion>());
   ir_fusion_pm->AddPass(std::make_shared<TransposeTransDataFusion>());
+  ir_fusion_pm->AddPass(std::make_shared<InsertPlaceholderForDynamicRNN>());
+  ir_fusion_pm->AddPass(std::make_shared<DynamicRnnGradFissionV2>());
   ir_fusion_pm->AddPass(std::make_shared<SplitFission>());
+  ir_fusion_pm->AddPass(std::make_shared<SplitVFission>());
+  ir_fusion_pm->AddPass(std::make_shared<SpaceToDepthSplit>());
   ir_fusion_pm->AddPass(std::make_shared<TensorScatterUpdateFission>());
   ir_fusion_pm->AddPass(std::make_shared<GetitemTuple>());
   ir_fusion_pm->AddPass(std::make_shared<PackFission>());
   ir_fusion_pm->AddPass(std::make_shared<ConcatFission>());
   ir_fusion_pm->AddPass(std::make_shared<ReduceMinFission>());
   ir_fusion_pm->AddPass(std::make_shared<UnsortSegmentSumFission>());
+  ir_fusion_pm->AddPass(std::make_shared<GatherV2DsFission>());
+  ir_fusion_pm->AddPass(std::make_shared<BCEWithLogitsLossFission>());
 }
 }  // namespace
-
-void RunOpAscendDataLayout(const std::shared_ptr<session::KernelGraph> &kernel_graph) {
-  MS_EXCEPTION_IF_NULL(kernel_graph);
-  auto optimizer = std::make_shared<GraphOptimizer>();
-  auto data_layout_pm = std::make_shared<PassManager>("pynative_transop_pm");
-  data_layout_pm->AddPass(std::make_shared<ChangeAxisOfReduceKernel>());
-  data_layout_pm->AddPass(std::make_shared<RectifyDoMaskKernelInfo>());
-  data_layout_pm->AddPass(std::make_shared<RunOpInsertTransData>());
-  data_layout_pm->AddPass(std::make_shared<GetitemTuple>());
-  data_layout_pm->AddPass(std::make_shared<CommonSubexpressionElimination>());
-  data_layout_pm->AddPass(std::make_shared<EliminateRedundantOp>());
-  data_layout_pm->AddPass(std::make_shared<OptimizeDependence>());
-  data_layout_pm->AddPass(std::make_shared<TransDataSplit>());
-  data_layout_pm->AddPass(std::make_shared<EraseVisitAttr>());
-  optimizer->AddPassManager(data_layout_pm);
-  (void)optimizer->Optimize(kernel_graph);
-  kernel_graph->SetExecOrderByDefault();
-}
-
 void AscendGraphKernelCommonProcess(const std::shared_ptr<session::KernelGraph> &kernel_graph) {
   MS_EXCEPTION_IF_NULL(kernel_graph);
   auto optimizer = std::make_shared<GraphOptimizer>();
@@ -217,11 +214,24 @@ void AscendDataLayout(const std::shared_ptr<session::KernelGraph> &kernel_graph)
   auto data_layout_pm = std::make_shared<PassManager>("transop_pm");
   data_layout_pm->AddPass(std::make_shared<RectifyDoMaskKernelInfo>());
   data_layout_pm->AddPass(std::make_shared<DynamicRNNGradReformat>());
-  data_layout_pm->AddPass(std::make_shared<InsertTransOp>());
-  data_layout_pm->AddPass(std::make_shared<GetitemTuple>());
+  data_layout_pm->AddPass(std::make_shared<ChangeAxisOfReduceKernel>());
+  auto ms_context = MsContext::GetInstance();
+  MS_EXCEPTION_IF_NULL(ms_context);
+  if (ms_context->get_param<int>(MS_CTX_EXECUTION_MODE) == kPynativeMode) {
+    data_layout_pm->AddPass(std::make_shared<RunOpInsertTransData>());
+  } else {
+    data_layout_pm->AddPass(std::make_shared<MergeCastToOp>());
+    data_layout_pm->AddPass(std::make_shared<ConvertCastFormat>());
+    data_layout_pm->AddPass(std::make_shared<EraseVisitAttr>());
+    data_layout_pm->AddPass(std::make_shared<InsertTransOp>());
+    data_layout_pm->AddPass(std::make_shared<GetitemTuple>());
+  }
+  data_layout_pm->AddPass(std::make_shared<EraseVisitAttr>());
+  data_layout_pm->AddPass(std::make_shared<AddIoFormatAttrFor3DGraph>());
   data_layout_pm->AddPass(std::make_shared<CommonSubexpressionElimination>());
   data_layout_pm->AddPass(std::make_shared<RemoveReshapePair>());
   data_layout_pm->AddPass(std::make_shared<EliminateRedundantOp>());
+  data_layout_pm->AddPass(std::make_shared<InsertTransposeForDynamicGRUV2>());
   data_layout_pm->AddPass(std::make_shared<OptimizeDependence>());
   data_layout_pm->AddPass(std::make_shared<TransDataSplit>());
   data_layout_pm->AddPass(std::make_shared<EraseVisitAttr>());
@@ -236,7 +246,6 @@ void AscendMixPrecision(const std::shared_ptr<session::KernelGraph> &kernel_grap
   auto optimizer = std::make_shared<GraphOptimizer>();
   auto mixed_precision_pm = std::make_shared<PassManager>("cast_pm");
   mixed_precision_pm->AddPass(std::make_shared<InsertCast>());
-  mixed_precision_pm->AddPass(std::make_shared<InsertReshapeForExtractImagePatchesOp>());
   mixed_precision_pm->AddPass(std::make_shared<GetitemTuple>());
   mixed_precision_pm->AddPass(std::make_shared<CommonSubexpressionElimination>());
   mixed_precision_pm->AddPass(std::make_shared<EliminateRedundantOp>());
@@ -247,7 +256,6 @@ void AscendMixPrecision(const std::shared_ptr<session::KernelGraph> &kernel_grap
   mixed_precision_pm->AddPass(std::make_shared<MergeCastToOp>());
   mixed_precision_pm->AddPass(std::make_shared<LayerNormBetaGammaBackpropFusion>());
   mixed_precision_pm->AddPass(std::make_shared<EraseVisitAttr>());
-  mixed_precision_pm->AddPass(std::make_shared<SplitUnsupportedTransData>());
   mixed_precision_pm->AddPass(std::make_shared<ConvertUnSupportNodeToAICPU>());
   mixed_precision_pm->AddPass(std::make_shared<RemoveInternalOutputCast>());
   optimizer->AddPassManager(mixed_precision_pm);
@@ -259,6 +267,10 @@ void AscendBackendIRFusionOptimization(const std::shared_ptr<session::KernelGrap
   auto context_ptr = MsContext::GetInstance();
   MS_EXCEPTION_IF_NULL(context_ptr);
   bool save_graphs = context_ptr->get_param<bool>(MS_CTX_SAVE_GRAPHS_FLAG);
+#ifdef ENABLE_DUMP_IR
+  std::string tag = "hwopt_before_graph";
+  mindspore::RDR::RecordAnfGraph(SubModuleId::SM_OPTIMIZER, tag, kernel_graph, false, ".ir;.pb");
+#endif
   if (save_graphs) {
     std::string file_name = "hwopt_d_ir_fusion_before_graph_" + std::to_string(kernel_graph->graph_id()) + ".ir";
     DumpIR(file_name, kernel_graph);
@@ -266,19 +278,12 @@ void AscendBackendIRFusionOptimization(const std::shared_ptr<session::KernelGrap
   }
   auto optimizer = std::make_shared<GraphOptimizer>();
   auto ir_fusion_pm = std::make_shared<PassManager>("ir_fusion_pm");
-  if (context_ptr->get_param<int>(MS_CTX_EXECUTION_MODE) == kPynativeMode) {
-    ir_fusion_pm->AddPass(std::make_shared<BnSplit>());
-    ir_fusion_pm->AddPass(std::make_shared<BnGradSplit>());
-  } else {
-    ir_fusion_pm->AddPass(std::make_shared<BatchNormGradSplit>());
-    ir_fusion_pm->AddPass(std::make_shared<FusedBatchNormFusion>());
-    ir_fusion_pm->AddPass(std::make_shared<FusedBatchNormMixPrecisionFusion0>());
-    ir_fusion_pm->AddPass(std::make_shared<FusedBatchNormMixPrecisionFusion1>());
-  }
+  ir_fusion_pm->AddPass(std::make_shared<BnSplit>());
+  ir_fusion_pm->AddPass(std::make_shared<BnGradSplit>());
   ir_fusion_pm->AddPass(std::make_shared<LayerNormGradSplit>());
   ir_fusion_pm->AddPass(std::make_shared<InsertPadForNMSWithMask>());
-  ir_fusion_pm->AddPass(std::make_shared<InsertPlaceholderForDynamicRNN>());
-  ir_fusion_pm->AddPass(std::make_shared<DynamicRnnGradFissionV2>());
+  ir_fusion_pm->AddPass(std::make_shared<InsertPlaceholderForDynamicGRUV2>());
+  ir_fusion_pm->AddPass(std::make_shared<DynamicGRUV2GradFission>());
   AddAscendIRFusionRulesPass(ir_fusion_pm.get());
   AddAscendIRFusionPass(ir_fusion_pm.get());
 
@@ -289,7 +294,6 @@ void AscendBackendIRFusionOptimization(const std::shared_ptr<session::KernelGrap
     ir_fusion_pm->AddPass(std::make_shared<EraseVisitAttr>());
   }
   ir_fusion_pm->AddPass(std::make_shared<InsertMemcpyAsyncForHcclOp>());
-  ir_fusion_pm->AddPass(std::make_shared<AddInputToOutput>());
   ir_fusion_pm->AddPass(std::make_shared<InsertTranspose>());
   ir_fusion_pm->AddPass(std::make_shared<GetitemTuple>());
   ir_fusion_pm->AddPass(std::make_shared<EraseVisitAttr>());
@@ -316,12 +320,22 @@ void RunOpAscendBackendIRFusionOptimization(const std::shared_ptr<session::Kerne
   auto optimizer = std::make_shared<GraphOptimizer>();
   auto ir_fusion_pm = std::make_shared<PassManager>("ir_fusion_pm");
   ir_fusion_pm->AddPass(std::make_shared<SplitFission>());
+  ir_fusion_pm->AddPass(std::make_shared<SplitVFission>());
   ir_fusion_pm->AddPass(std::make_shared<BnSplit>());
+  ir_fusion_pm->AddPass(std::make_shared<BnGradSplit>());
   ir_fusion_pm->AddPass(std::make_shared<LayerNormGradSplit>());
   ir_fusion_pm->AddPass(std::make_shared<TopKSplit>());
+  ir_fusion_pm->AddPass(std::make_shared<LinSpaceFission>());
+  ir_fusion_pm->AddPass(std::make_shared<SpaceToDepthSplit>());
   ir_fusion_pm->AddPass(std::make_shared<AddnFission>());
   ir_fusion_pm->AddPass(std::make_shared<InsertPadForNMSWithMask>());
   ir_fusion_pm->AddPass(std::make_shared<TensorScatterUpdateFission>());
+  ir_fusion_pm->AddPass(std::make_shared<InsertPlaceholderForDynamicRNN>());
+  ir_fusion_pm->AddPass(std::make_shared<DynamicGRUV2GradFission>());
+  ir_fusion_pm->AddPass(std::make_shared<InsertPlaceholderForDynamicGRUV2>());
+  ir_fusion_pm->AddPass(std::make_shared<DynamicRnnGradFissionV2>());
+  ir_fusion_pm->AddPass(std::make_shared<EraseVisitAttr>());
+  ir_fusion_pm->AddPass(std::make_shared<BCEWithLogitsLossFission>());
 
   optimizer->AddPassManager(ir_fusion_pm);
   (void)optimizer->Optimize(kernel_graph);
@@ -350,10 +364,12 @@ void AscendBackendOptimization(const std::shared_ptr<session::KernelGraph> &kern
   other_pm->AddPass(std::make_shared<AllGatherFusion>());
   other_pm->AddPass(std::make_shared<ConcatOutputsForAllGather>());
   other_pm->AddPass(std::make_shared<ReduceScatterFusion>());
+  other_pm->AddPass(std::make_shared<SplitInputsForReduceScatter>());
   other_pm->AddPass(std::make_shared<BroadcastFusion>());
   other_pm->AddPass(std::make_shared<InsertMemcpyAsyncForCascade>());
   other_pm->AddPass(std::make_shared<ParameterTransOpFusion>());
   other_pm->AddPass(std::make_shared<RefreshParameterFormat>());
+  other_pm->AddPass(std::make_shared<SplitOpOptimizer>());
   optimizer->AddPassManager(other_pm);
   (void)optimizer->Optimize(kernel_graph);
   kernel_graph->SetExecOrderByDefault();
@@ -369,84 +385,24 @@ void AscendBackendOptimization(const std::shared_ptr<session::KernelGraph> &kern
       ConfigManager::GetInstance().iter_num() > 1) {
     other2_pm->AddPass(std::make_shared<GetnextMemcpyElimination>());
   }
+  other2_pm->AddPass(std::make_shared<AddReFormatOp>());
   other2_pm->AddPass(std::make_shared<CheckConsistency>());
   optimizer2->AddPassManager(other2_pm);
   (void)optimizer2->Optimize(kernel_graph);
   kernel_graph->SetExecOrderByDefault();
-
+#ifdef ENABLE_DUMP_IR
+  std::string tag = "hwopt_after_graph";
+  mindspore::RDR::RecordAnfGraph(SubModuleId::SM_OPTIMIZER, tag, kernel_graph, true, ".ir;.pb");
+  const std::vector<CNodePtr> &exec_order = kernel_graph->execution_order();
+  std::vector<CNodePtr> graph_exec_order(exec_order);
+  tag = "graph_exec_order";
+  mindspore::RDR::RecordGraphExecOrder(SubModuleId::SM_OPTIMIZER, tag, std::move(graph_exec_order));
+#endif
   if (save_graphs) {
     std::string file_name = "hwopt_d_end_graph_" + std::to_string(kernel_graph->graph_id()) + ".ir";
-    DumpIR(file_name, kernel_graph, true);
+    DumpIR(file_name, kernel_graph, true, kWholeStack);
     DumpIRProto(kernel_graph, "after_hwopt_" + std::to_string(kernel_graph->graph_id()));
     kernel_graph->DumpFuncGraph("hwopt_d_end");
-  }
-}
-
-void AscendBackendGraphKernelOpt(const std::shared_ptr<session::KernelGraph> &kernel_graph,
-                                 bool is_before_kernel_select) {
-  auto context_ptr = MsContext::GetInstance();
-  MS_EXCEPTION_IF_NULL(context_ptr);
-  if (!(context_ptr->get_param<bool>(MS_CTX_ENABLE_GRAPH_KERNEL))) {
-    return;
-  }
-  bool save_graphs = context_ptr->get_param<bool>(MS_CTX_SAVE_GRAPHS_FLAG);
-  if (save_graphs) {
-    std::string file_name = "hwopt_d_graph_kernel_opt_before_graph_" + std::to_string(!is_before_kernel_select) + "_" +
-                            std::to_string(kernel_graph->graph_id()) + ".ir";
-    DumpIR(file_name, kernel_graph);
-  }
-
-  // Fuse graph kernels with basic ops
-  static_cast<void>(FuseCompositeOps(kernel_graph, is_before_kernel_select));
-
-  if (save_graphs) {
-    std::string file_name = "hwopt_d_graph_kernel_opt_end_graph_" + std::to_string(!is_before_kernel_select) + "_" +
-                            std::to_string(kernel_graph->graph_id()) + ".ir";
-    DumpIR(file_name, kernel_graph, true);
-  }
-}
-
-void AscendBackendFuseBasicOpt(const std::shared_ptr<session::KernelGraph> &kernel_graph,
-                               bool is_before_kernel_select) {
-  auto context_ptr = MsContext::GetInstance();
-  MS_EXCEPTION_IF_NULL(context_ptr);
-  if (!(context_ptr->get_param<bool>(MS_CTX_ENABLE_GRAPH_KERNEL))) {
-    return;
-  }
-  bool save_graphs = context_ptr->get_param<bool>(MS_CTX_SAVE_GRAPHS_FLAG);
-  if (save_graphs) {
-    std::string file_name = "hwopt_fuse_basic_opt_before_graph_" + std::to_string(!is_before_kernel_select) + "_" +
-                            std::to_string(kernel_graph->graph_id()) + ".ir";
-    DumpIR(file_name, kernel_graph, true);
-  }
-
-  // Fuse basic ops with basic ops
-  static_cast<void>(FuseBasicOps(kernel_graph, is_before_kernel_select));
-
-  if (save_graphs) {
-    std::string file_name = "hwopt_fuse_basic_opt_end_graph_" + std::to_string(!is_before_kernel_select) + "_" +
-                            std::to_string(kernel_graph->graph_id()) + ".ir";
-    DumpIR(file_name, kernel_graph, true);
-  }
-}
-
-void AscendBackendAddAtomicClean(const std::shared_ptr<session::KernelGraph> &kernel_graph) {
-  auto context_ptr = MsContext::GetInstance();
-  MS_EXCEPTION_IF_NULL(context_ptr);
-  if (!(context_ptr->get_param<bool>(MS_CTX_ENABLE_GRAPH_KERNEL))) {
-    return;
-  }
-  bool save_graphs = context_ptr->get_param<bool>(MS_CTX_SAVE_GRAPHS_FLAG);
-  if (save_graphs) {
-    std::string file_name = "hwopt_d_add_atomic_clean_before_graph_" + std::to_string(kernel_graph->graph_id()) + ".ir";
-    DumpIR(file_name, kernel_graph);
-  }
-
-  AddAtomicClean(kernel_graph);
-
-  if (save_graphs) {
-    std::string file_name = "hwopt_d_end_graph_" + std::to_string(kernel_graph->graph_id()) + ".ir";
-    DumpIR(file_name, kernel_graph, true);
   }
 }
 

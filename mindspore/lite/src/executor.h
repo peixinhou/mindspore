@@ -38,5 +38,15 @@ class Executor {
   static int CheckInputs(const std::vector<Tensor *> &in_tensors);
 };
 
+class CpuExecutor : public Executor {
+ public:
+  CpuExecutor() = default;
+  virtual ~CpuExecutor() = default;
+
+  int Run(std::vector<Tensor *> &in_tensors, std::vector<Tensor *> &out_tensors,
+          std::vector<kernel::LiteKernel *> &kernels, Allocator *allocator = nullptr,
+          const KernelCallBack &before = nullptr, const KernelCallBack &after = nullptr) override;
+};
+
 }  // namespace mindspore::lite
 #endif

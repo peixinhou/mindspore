@@ -25,73 +25,93 @@ using mindspore::kernel::KERNEL_ARCH::kGPU;
 using mindspore::lite::KernelRegistrar;
 using mindspore::lite::RET_ERROR;
 using mindspore::lite::RET_OK;
+using mindspore::schema::PrimitiveType_ExpandDims;
 using mindspore::schema::PrimitiveType_Reshape;
 using mindspore::schema::PrimitiveType_Squeeze;
+using mindspore::schema::PrimitiveType_Unsqueeze;
 
 namespace mindspore::kernel {
 
-int ReshapeOpenCLKernel::Init() {
+int ReshapeOpenCLKernel::CheckSpecs() {
   if ((in_tensors_.size() != 1 && in_tensors_.size() != 2) || out_tensors_.size() != 1) {
-    MS_LOG(ERROR) << "Invalid input size: " << in_tensors_.size() << ", output size: " << out_tensors_.size();
+    MS_LOG(ERROR) << "Reshape input output size unsupported.";
     return RET_ERROR;
   }
+  if (in_tensors_[0]->data_type() != kNumberTypeFloat32 && in_tensors_[0]->data_type() != kNumberTypeFloat16 &&
+      in_tensors_[0]->data_type() != kNumberTypeInt32) {
+    MS_LOG(ERROR) << "Unsupported data type " << in_tensors_[0]->data_type();
+    return RET_ERROR;
+  }
+  if (in_tensors_[0]->shape().size() > 4) {
+    MS_LOG(ERROR) << "Reshape input size should in 0-4, actual: " << in_tensors_[0]->shape();
+    return RET_ERROR;
+  }
+  if (out_tensors_[0]->shape().size() > 4) {
+    MS_LOG(ERROR) << "Reshape output size should in 1-4, actual: " << out_tensors_[0]->shape();
+    return RET_ERROR;
+  }
+  return RET_OK;
+}
+
+void ReshapeOpenCLKernel::SetConstArgs() {
+  auto in = GpuTensorInfo(in_tensors_.front());
+  auto out = GpuTensorInfo(out_tensors_.front());
+  cl_int4 src_size = {cl_int(in.C), cl_int(in.W), cl_int(in.H), cl_int(in.N)};
+  cl_int4 dst_size = {cl_int(out.width), cl_int(out.height), cl_int(out.C), cl_int(out.C * out.W)};
+
+  int arg_idx = 2;
+  ocl_runtime_->SetKernelArg(kernel_, arg_idx++, src_size);
+  ocl_runtime_->SetKernelArg(kernel_, arg_idx++, dst_size);
+}
+
+void ReshapeOpenCLKernel::SetGlobalLocal() {
+  auto out = GpuTensorInfo(out_tensors_.front());
+  local_size_ = {};
+  global_size_ = {out.width, out.height};
+  OpenCLKernel::AlignGlobalLocal(global_size_, local_size_);
+}
+
+int ReshapeOpenCLKernel::Prepare() {
   std::string kernel_name = "reshape_NHWC4";
-  if (out_tensors_[0]->shape().size() != 2 && out_tensors_[0]->shape().size() != 4) {
-    MS_LOG(ERROR) << "Reshape output size should in 2,4";
-    return RET_ERROR;
-  }
 #ifdef PROGRAM_WITH_IL
   kernel_ = ocl_runtime_->GetKernelFromBinary(kernel_name);
 #else
-  std::set<std::string> build_options;
   std::string source = reshape_source;
   std::string program_name = "reshape";
   ocl_runtime_->LoadSource(program_name, source);
-  ocl_runtime_->BuildKernel(kernel_, program_name, kernel_name, build_options);
+  ocl_runtime_->BuildKernel(kernel_, program_name, kernel_name, {}, out_tensors_[0]->data_type());
 #endif
+
+  SetGlobalLocal();
+  SetConstArgs();
   MS_LOG(DEBUG) << kernel_name << " Init Done!";
   return RET_OK;
 }
 
 int ReshapeOpenCLKernel::Run() {
   MS_LOG(DEBUG) << this->name() << " Running!";
-  auto in = Image2DInfo(in_tensors_.front());
-  auto out = Image2DInfo(out_tensors_.front());
-
-  std::vector<size_t> local = {};
-  std::vector<size_t> global{out.width, out.height};
-  cl_int4 src_size = {cl_int(in.C), cl_int(in.W), cl_int(in.H), cl_int(in.N)};
-  cl_int4 dst_size = {cl_int(out.width), cl_int(out.height), cl_int(out.C), cl_int(out.C * out.W)};
-
-  int arg_idx = 0;
-  ocl_runtime_->SetKernelArg(kernel_, arg_idx++, in_tensors_[0]->data_c());
-  ocl_runtime_->SetKernelArg(kernel_, arg_idx++, out_tensors_[0]->data_c());
-  ocl_runtime_->SetKernelArg(kernel_, arg_idx++, src_size);
-  ocl_runtime_->SetKernelArg(kernel_, arg_idx++, dst_size);
-  ocl_runtime_->RunKernel(kernel_, global, local, nullptr);
+  ocl_runtime_->SetKernelArg(kernel_, 0, in_tensors_[0]->data_c());
+  ocl_runtime_->SetKernelArg(kernel_, 1, out_tensors_[0]->data_c());
+  ocl_runtime_->RunKernel(kernel_, global_range_, local_range_, nullptr, &event_);
   return RET_OK;
 }
 
-kernel::LiteKernel *OpenCLReshapeKernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                               const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter,
-                                               const lite::InnerContext *ctx, const kernel::KernelKey &desc,
-                                               const mindspore::lite::PrimitiveC *primitive) {
-  auto *kernel = new (std::nothrow) ReshapeOpenCLKernel(reinterpret_cast<OpParameter *>(opParameter), inputs, outputs);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "kernel " << opParameter->name_ << " create failed.";
-    free(opParameter);
-    return nullptr;
+int ReshapeOpenCLKernel::PreProcess() {
+  if (Type() == PrimitiveType_Reshape && !infer_shape_flag_) {
+    auto shape_tensor = in_tensors_[1];
+    if (!shape_tensor->IsConst()) {
+      ocl_runtime_->SyncCommandQueue();
+    }
   }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
+  return OpenCLKernel::PreProcess();
 }
 
-REG_KERNEL(kGPU, kNumberTypeFloat32, PrimitiveType_Reshape, OpenCLReshapeKernelCreator)
-REG_KERNEL(kGPU, kNumberTypeFloat16, PrimitiveType_Reshape, OpenCLReshapeKernelCreator)
-REG_KERNEL(kGPU, kNumberTypeFloat32, PrimitiveType_Squeeze, OpenCLReshapeKernelCreator)
-REG_KERNEL(kGPU, kNumberTypeFloat16, PrimitiveType_Squeeze, OpenCLReshapeKernelCreator)
+REG_KERNEL(kGPU, kNumberTypeFloat32, PrimitiveType_Reshape, OpenCLKernelCreator<ReshapeOpenCLKernel>)
+REG_KERNEL(kGPU, kNumberTypeFloat16, PrimitiveType_Reshape, OpenCLKernelCreator<ReshapeOpenCLKernel>)
+REG_KERNEL(kGPU, kNumberTypeFloat32, PrimitiveType_Squeeze, OpenCLKernelCreator<ReshapeOpenCLKernel>)
+REG_KERNEL(kGPU, kNumberTypeFloat16, PrimitiveType_Squeeze, OpenCLKernelCreator<ReshapeOpenCLKernel>)
+REG_KERNEL(kGPU, kNumberTypeFloat32, PrimitiveType_Unsqueeze, OpenCLKernelCreator<ReshapeOpenCLKernel>)
+REG_KERNEL(kGPU, kNumberTypeFloat16, PrimitiveType_Unsqueeze, OpenCLKernelCreator<ReshapeOpenCLKernel>)
+REG_KERNEL(kGPU, kNumberTypeFloat32, PrimitiveType_ExpandDims, OpenCLKernelCreator<ReshapeOpenCLKernel>)
+REG_KERNEL(kGPU, kNumberTypeFloat16, PrimitiveType_ExpandDims, OpenCLKernelCreator<ReshapeOpenCLKernel>)
 }  // namespace mindspore::kernel

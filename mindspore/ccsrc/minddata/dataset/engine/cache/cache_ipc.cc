@@ -25,7 +25,7 @@ Status PortToFtok(int port, SharedMemory::shm_key_t *out) {
   shmkey = ftok(unix_path.data(), 'a');
   if (shmkey == (key_t)-1) {
     std::string errMsg = "Unable to create a ftok token. Errno = " + std::to_string(errno);
-    return Status(errno == ENOENT ? StatusCode::kFileNotExist : StatusCode::kUnexpectedError, errMsg);
+    return Status(errno == ENOENT ? StatusCode::kMDFileNotExist : StatusCode::kMDUnexpectedError, errMsg);
   }
   *out = shmkey;
   return Status::OK();
@@ -53,10 +53,10 @@ Status SharedMessage::Create() {
 
 Status SharedMessage::SendStatus(const Status &rc) {
   CHECK_FAIL_RETURN_UNEXPECTED(msg_qid_ != -1, "Invalid message queue id");
-  StatusMsgBuf msg{
+  CacheMsgBuf msg{
     1,
   };
-  msg.body.status.err_code = static_cast<int32_t>(rc.get_code());
+  msg.body.status.err_code = static_cast<int32_t>(rc.StatusCode());
   auto err = memcpy_s(msg.body.status.err_msg, kSharedMessageSize, rc.ToString().data(), rc.ToString().size());
   CHECK_FAIL_RETURN_UNEXPECTED(err == EOK, "memcpy_s failed. err = " + std::to_string(err));
   msg.body.status.err_msg[rc.ToString().size()] = '\0';
@@ -71,7 +71,7 @@ Status SharedMessage::SendStatus(const Status &rc) {
 Status SharedMessage::ReceiveStatus(Status *rc) {
   RETURN_UNEXPECTED_IF_NULL(rc);
   CHECK_FAIL_RETURN_UNEXPECTED(msg_qid_ != -1, "Invalid message queue id");
-  struct StatusMsgBuf msg {};
+  struct CacheMsgBuf msg {};
   auto err = msgrcv(msg_qid_, reinterpret_cast<void *>(&msg), sizeof(msg.body.status), 0, MSG_NOERROR);
   if (err == -1) {
     std::string errMsg = "Failed to call msgrcv. Errno = " + std::to_string(errno);

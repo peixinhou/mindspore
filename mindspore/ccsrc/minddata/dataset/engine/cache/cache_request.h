@@ -1,5 +1,5 @@
 /**
- * Copyright 2020 Huawei Technologies Co., Ltd
+ * Copyright 2020-2021 Huawei Technologies Co., Ltd
 
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -47,6 +47,12 @@ struct CacheServiceStat {
   int8_t cache_service_state;
 };
 
+struct CacheServerCfgInfo {
+  int32_t num_workers;
+  int8_t log_level;
+  std::string spill_dir;
+};
+
 /// \brief Info structure ListSessionsRequest
 struct SessionCacheInfo {
   session_id_type session_id;
@@ -78,6 +84,9 @@ class BaseRequest {
     kListSessions = 16,
     kConnectReset = 17,
     kInternalFetchRow = 18,
+    kBatchCacheRows = 19,
+    kInternalCacheRow = 20,
+    kGetCacheState = 21,
     // Add new request before it.
     kRequestUnknown = 32767
   };
@@ -88,6 +97,7 @@ class BaseRequest {
   friend class CacheClientRequestTag;
   friend class CacheClient;
   friend class CacheService;
+  friend class CacheServerGreeterImpl;
 
   /// \brief Base class of a cache server request
   /// \param type Type of the request
@@ -121,6 +131,33 @@ class BaseRequest {
   /// \return Status object
   Status Wait();
 
+  /// \brief Return if the request is of row request type
+  /// \return True if the request is row-related request
+  bool IsRowRequest() const {
+    return type_ == RequestType::kBatchCacheRows || type_ == RequestType::kBatchFetchRows ||
+           type_ == RequestType::kInternalCacheRow || type_ == RequestType::kInternalFetchRow ||
+           type_ == RequestType::kCacheRow;
+  }
+
+  /// \brief Return if the request is of admin request type
+  /// \return True if the request is admin-related request
+  bool IsAdminRequest() const {
+    return type_ == RequestType::kCreateCache || type_ == RequestType::kDestroyCache ||
+           type_ == RequestType::kGetStat || type_ == RequestType::kGetCacheState ||
+           type_ == RequestType::kAllocateSharedBlock || type_ == RequestType::kFreeSharedBlock ||
+           type_ == RequestType::kCacheSchema || type_ == RequestType::kFetchSchema ||
+           type_ == RequestType::kBuildPhaseDone || type_ == RequestType::kToggleWriteMode ||
+           type_ == RequestType::kConnectReset || type_ == RequestType::kStopService ||
+           type_ == RequestType::kHeartBeat || type_ == RequestType::kGetCacheMissKeys;
+  }
+
+  /// \brief Return if the request is of session request type
+  /// \return True if the request is session-related request
+  bool IsSessionRequest() const {
+    return type_ == RequestType::kGenerateSessionId || type_ == RequestType::kDropSession ||
+           type_ == RequestType::kListSessions;
+  }
+
  protected:
   CacheRequest rq_;   // This is what we send to the server
   CacheReply reply_;  // This is what the server send back
@@ -133,10 +170,11 @@ class BaseRequest {
 class FreeSharedBlockRequest : public BaseRequest {
  public:
   friend class CacheServer;
-  explicit FreeSharedBlockRequest(connection_id_type connection_id, int64_t addr)
+  explicit FreeSharedBlockRequest(connection_id_type connection_id, int32_t client_id, int64_t addr)
       : BaseRequest(RequestType::kFreeSharedBlock) {
     rq_.set_connection_id(connection_id);
     rq_.add_buf_data(std::to_string(addr));
+    rq_.set_client_id(client_id);
   }
   ~FreeSharedBlockRequest() override = default;
 };
@@ -178,7 +216,7 @@ class CacheRowRequest : public BaseRequest {
   /// the shared memory by sending another request. The following function will generate a suitable
   /// request for the CacheClient to send.
   std::shared_ptr<FreeSharedBlockRequest> GenerateFreeBlockRequest() {
-    return std::make_shared<FreeSharedBlockRequest>(rq_.connection_id(), addr_);
+    return std::make_shared<FreeSharedBlockRequest>(rq_.connection_id(), rq_.client_id(), addr_);
   }
 
  private:
@@ -271,6 +309,24 @@ class GetStatRequest : public BaseRequest {
   CacheServiceStat stat_{};
 };
 
+/// \brief Get the state of a cache service
+class GetCacheStateRequest : public BaseRequest {
+ public:
+  friend class CacheServer;
+  explicit GetCacheStateRequest(connection_id_type connection_id)
+      : BaseRequest(RequestType::kGetCacheState), cache_service_state_(0) {
+    rq_.set_connection_id(connection_id);
+  }
+  ~GetCacheStateRequest() override = default;
+
+  Status PostReply() override;
+
+  auto GetState() const { return cache_service_state_; }
+
+ private:
+  int8_t cache_service_state_;
+};
+
 /// \brief Request to cache a schema
 class CacheSchemaRequest : public BaseRequest {
  public:
@@ -360,17 +416,29 @@ class ListSessionsRequest : public BaseRequest {
 
   std::vector<SessionCacheInfo> GetSessionCacheInfo() { return session_info_list_; }
 
+  std::vector<session_id_type> GetSessionIds() {
+    std::vector<session_id_type> session_ids;
+    for (auto session_info : session_info_list_) {
+      session_ids.push_back(session_info.session_id);
+    }
+    return session_ids;
+  }
+
+  CacheServerCfgInfo GetServerStat() { return server_cfg_; }
+
  private:
   std::vector<SessionCacheInfo> session_info_list_;
+  CacheServerCfgInfo server_cfg_{};
 };
 
 class AllocateSharedBlockRequest : public BaseRequest {
  public:
   friend class CacheServer;
-  explicit AllocateSharedBlockRequest(connection_id_type connection_id, size_t requestedSz)
+  explicit AllocateSharedBlockRequest(connection_id_type connection_id, int32_t client_id, size_t requestedSz)
       : BaseRequest(RequestType::kAllocateSharedBlock) {
     rq_.set_connection_id(connection_id);
     rq_.add_buf_data(std::to_string(requestedSz));
+    rq_.set_client_id(client_id);
   }
   ~AllocateSharedBlockRequest() override = default;
 
@@ -394,6 +462,16 @@ class ToggleWriteModeRequest : public BaseRequest {
   ~ToggleWriteModeRequest() override = default;
 };
 
+class ServerStopRequest : public BaseRequest {
+ public:
+  friend class CacheServer;
+  explicit ServerStopRequest(int32_t qID) : BaseRequest(RequestType::kStopService) {
+    rq_.add_buf_data(std::to_string(qID));
+  }
+  ~ServerStopRequest() = default;
+  Status PostReply() override;
+};
+
 class ConnectResetRequest : public BaseRequest {
  public:
   friend class CacheServer;
@@ -409,6 +487,13 @@ class ConnectResetRequest : public BaseRequest {
     CHECK_FAIL_RETURN_UNEXPECTED(rq_.client_id() != -1, "Invalid client id");
     return Status::OK();
   }
+};
+
+class BatchCacheRowsRequest : public BaseRequest {
+ public:
+  friend class CacheServer;
+  explicit BatchCacheRowsRequest(const CacheClient *cc, int64_t addr, int32_t num_ele);
+  ~BatchCacheRowsRequest() override = default;
 };
 }  // namespace dataset
 }  // namespace mindspore

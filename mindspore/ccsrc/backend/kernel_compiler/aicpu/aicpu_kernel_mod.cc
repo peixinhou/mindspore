@@ -75,8 +75,13 @@ void AicpuOpKernelMod::CreateCpuKernelInfo(const std::vector<AddressPtr> &inputs
   if (kCustAiCpuKernelOps.find(node_name_) != kCustAiCpuKernelOps.end()) {
     node_so_ = CUST_AICPU_OPS_SO_NAME;
     node_name_ = kCustRunApi;
-  } else {
+  } else if (kCacheKernelOps.find(node_name_) != kCacheKernelOps.end()) {
     node_so_ = AICPU_OPS_SO_NAME;
+    node_name_ = kCustRunApi;
+  } else {
+    if (node_so_ != CUST_AICPU_OPS_SO_NAME) {
+      node_so_ = AICPU_OPS_SO_NAME;
+    }
   }
   // InputOutputAddr
   vector<void *> io_addrs;
@@ -139,6 +144,9 @@ bool AicpuOpKernelMod::Launch(const std::vector<AddressPtr> &inputs, const std::
   if (node_name_ == kTopK) {
     node_name_ = kTopKV2;
   }
+  if (node_name_ == kStack) {
+    node_name_ = kPack;
+  }
   MS_LOG(INFO) << "Aicpu launch, node_so_:" << node_so_ << ", node name:" << node_name_
                << ", args_size:" << args_.length();
   if (rtCpuKernelLaunch(reinterpret_cast<const void *>(node_so_.c_str()),
@@ -161,8 +169,13 @@ std::vector<TaskInfoPtr> AicpuOpKernelMod::GenTask(const std::vector<AddressPtr>
   if (kCustAiCpuKernelOps.find(node_name_) != kCustAiCpuKernelOps.end()) {
     node_so_ = CUST_AICPU_OPS_SO_NAME;
     node_name_ = kCustRunApi;
-  } else {
+  } else if (kCacheKernelOps.find(node_name_) != kCacheKernelOps.end()) {
     node_so_ = AICPU_OPS_SO_NAME;
+    node_name_ = kCustRunApi;
+  } else {
+    if (node_so_ != CUST_AICPU_OPS_SO_NAME) {
+      node_so_ = AICPU_OPS_SO_NAME;
+    }
   }
   std::vector<void *> input_data_addrs;
   (void)std::transform(std::begin(inputs), std::end(inputs), std::back_inserter(input_data_addrs),
@@ -174,6 +187,10 @@ std::vector<TaskInfoPtr> AicpuOpKernelMod::GenTask(const std::vector<AddressPtr>
 
   if (node_name_ == kTopK) {
     node_name_ = kTopKV2;
+  }
+
+  if (node_name_ == kStack) {
+    node_name_ = kPack;
   }
 
   AicpuTaskInfoPtr task_info_ptr =

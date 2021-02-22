@@ -16,7 +16,7 @@
 #ifndef MINDSPORE_CCSRC_MINDDATA_DATASET_UTIL_TASK_MANAGER_H_
 #define MINDSPORE_CCSRC_MINDDATA_DATASET_UTIL_TASK_MANAGER_H_
 
-#if !defined(_WIN32) && !defined(_WIN64) && !defined(__ANDROID__) && !defined(ANDROID)
+#if !defined(_WIN32) && !defined(_WIN64) && !defined(__ANDROID__) && !defined(ANDROID) && !defined(__APPLE__)
 #include <semaphore.h>
 #include <signal.h>  // for sig_atomic_t
 #endif
@@ -75,7 +75,8 @@ class TaskManager : public Service {
   // API
   // This takes the same parameter as Task constructor. Take a look
   // of the test-thread.cc for usage.
-  Status CreateAsyncTask(const std::string &my_name, const std::function<Status()> &f, TaskGroup *vg, Task **);
+  Status CreateAsyncTask(const std::string &my_name, const std::function<Status()> &f, TaskGroup *vg, Task **,
+                         int32_t operator_id = -1);
 
   // Same usage as boot thread group
   Status join_all();
@@ -92,7 +93,7 @@ class TaskManager : public Service {
   static void InterruptMaster(const Status &rc = Status::OK());
 
   static void WakeUpWatchDog() {
-#if !defined(_WIN32) && !defined(_WIN64) && !defined(__ANDROID__) && !defined(ANDROID)
+#if !defined(_WIN32) && !defined(_WIN64) && !defined(__ANDROID__) && !defined(ANDROID) && !defined(__APPLE__)
     TaskManager &tm = TaskManager::GetInstance();
     (void)sem_post(&tm.sem_);
 #endif
@@ -100,7 +101,7 @@ class TaskManager : public Service {
 
   void ReturnFreeTask(Task *p) noexcept;
 
-  Status GetFreeTask(const std::string &my_name, const std::function<Status()> &f, Task **p);
+  Status GetFreeTask(const std::string &my_name, const std::function<Status()> &f, Task **p, int32_t operator_id = -1);
 
   Status WatchDog();
 
@@ -113,7 +114,7 @@ class TaskManager : public Service {
   std::shared_ptr<Task> master_;
   List<Task> lru_;
   List<Task> free_lst_;
-#if !defined(_WIN32) && !defined(_WIN64) && !defined(__ANDROID__) && !defined(ANDROID)
+#if !defined(_WIN32) && !defined(_WIN64) && !defined(__ANDROID__) && !defined(ANDROID) && !defined(__APPLE__)
   sem_t sem_;
 #endif
   TaskGroup *watchdog_grp_;
@@ -129,13 +130,16 @@ class TaskGroup : public Service {
   friend class Task;
   friend class TaskManager;
 
-  Status CreateAsyncTask(const std::string &my_name, const std::function<Status()> &f, Task **pTask = nullptr);
+  Status CreateAsyncTask(const std::string &my_name, const std::function<Status()> &f, Task **pTask = nullptr,
+                         int32_t operator_id = -1);
 
   void interrupt_all() noexcept;
 
   Status join_all(Task::WaitFlag wf = Task::WaitFlag::kBlocking);
 
   int size() const noexcept { return grp_list_.count; }
+
+  List<Task> GetTask() const noexcept { return grp_list_; }
 
   Status DoServiceStart() override { return Status::OK(); }
 

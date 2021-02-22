@@ -17,7 +17,7 @@
 #include "src/runtime/kernel/arm/int8/div_int8.h"
 #include <limits>
 #include <algorithm>
-#include "nnacl/arithmetic_common.h"
+#include "nnacl/int8/arithmetic_int8.h"
 #include "src/runtime/runtime_api.h"
 #include "src/kernel_registry.h"
 #include "include/errorcode.h"
@@ -114,9 +114,9 @@ int DivInt8CPUKernel::Run() {
       tile1_data_ = nullptr;
       return RET_ERROR;
     }
-    TileDimensionsUint8(static_cast<uint8_t *>(in_tensors_.at(0)->MutableData()),
-                        static_cast<uint8_t *>(in_tensors_.at(1)->MutableData()),
-                        reinterpret_cast<uint8_t *>(tile0_data_), reinterpret_cast<uint8_t *>(tile1_data_), &tile_para);
+    TileDimensionsInt8(static_cast<int8_t *>(in_tensors_.at(0)->MutableData()),
+                       static_cast<int8_t *>(in_tensors_.at(1)->MutableData()), reinterpret_cast<int8_t *>(tile0_data_),
+                       reinterpret_cast<int8_t *>(tile1_data_), &tile_para);
   }
   auto ret = ParallelLaunch(this->context_->thread_pool_, DivInt8Run, this, op_parameter_->thread_num_);
   if (broadcast_) {
@@ -131,35 +131,5 @@ int DivInt8CPUKernel::Run() {
   return ret;
 }
 
-kernel::LiteKernel *CpuDivInt8KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                            const std::vector<lite::Tensor *> &outputs, OpParameter *parameter,
-                                            const lite::InnerContext *ctx, const KernelKey &desc,
-                                            const mindspore::lite::PrimitiveC *primitive) {
-  if (parameter == nullptr) {
-    MS_LOG(ERROR) << "parameter is nullptr";
-    return nullptr;
-  }
-  if (ctx == nullptr) {
-    MS_LOG(ERROR) << "ctx is nullptr";
-    free(parameter);
-    return nullptr;
-  }
-  MS_ASSERT(desc.type == PrimitiveType_Div);
-  auto *kernel = new (std::nothrow) DivInt8CPUKernel(parameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "kernel is nullptr.";
-    free(parameter);
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed, name: " << parameter->name_
-                  << ", type: " << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(parameter->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
-}
-
-REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Div, CpuDivInt8KernelCreator)
+REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Div, LiteKernelCreator<DivInt8CPUKernel>)
 }  // namespace mindspore::kernel

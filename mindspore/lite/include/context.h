@@ -21,22 +21,9 @@
 #include <memory>
 #include "include/ms_tensor.h"
 #include "include/lite_utils.h"
+#include "include/lite_types.h"
 
 namespace mindspore::lite {
-/// \brief CpuBindMode defined for holding bind cpu strategy argument.
-typedef enum {
-  NO_BIND = 0,    /**< no bind */
-  HIGHER_CPU = 1, /**< bind higher cpu first */
-  MID_CPU = 2     /**< bind middle cpu first */
-} CpuBindMode;
-
-/// \brief DeviceType defined for holding user's preferred backend.
-typedef enum {
-  DT_CPU, /**< CPU device type */
-  DT_GPU, /**< GPU device type */
-  DT_NPU  /**< NPU device type, not supported yet */
-} DeviceType;
-
 /// \brief CpuDeviceInfo defined for CPU's configuration information.
 typedef struct {
   bool enable_float16_ = false; /**< prior enable float16 inference */
@@ -48,10 +35,16 @@ typedef struct {
   bool enable_float16_ = false; /**< prior enable float16 inference */
 } GpuDeviceInfo;
 
+/// \brief NpuDeviceInfo defined for NPU's configuration information.
+typedef struct {
+  int frequency_ = 3; /**< npu frequency inference */
+} NpuDeviceInfo;
+
 /// \brief DeviceInfo defined for backend's configuration information.
 union DeviceInfo {
   CpuDeviceInfo cpu_device_info_;
   GpuDeviceInfo gpu_device_info_;
+  NpuDeviceInfo npu_device_info_;
 };
 
 /// \brief DeviceContext defined for holding backend's configuration information.

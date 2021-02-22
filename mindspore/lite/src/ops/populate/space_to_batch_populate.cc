@@ -18,7 +18,7 @@
 #include "src/common/common.h"
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
-#include "nnacl/fp32/space_to_batch.h"
+#include "nnacl/fp32/space_to_batch_fp32.h"
 
 namespace mindspore {
 namespace lite {
@@ -33,6 +33,7 @@ OpParameter *PopulateSpaceToBatchParameter(const mindspore::lite::PrimitiveC *pr
   memset(space_batch_param, 0, sizeof(SpaceToBatchParameter));
   space_batch_param->op_parameter_.type_ = primitive->Type();
   auto block_sizes = ((mindspore::lite::SpaceToBatch *)primitive)->BlockSizes();
+  space_batch_param->m_ = block_sizes.size();
   if (block_sizes.size() > std::numeric_limits<size_t>::max() / sizeof(int)) {
     MS_LOG(ERROR) << "The value of block_sizes.size() is too big";
     free(space_batch_param);

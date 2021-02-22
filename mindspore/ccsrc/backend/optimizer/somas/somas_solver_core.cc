@@ -56,14 +56,13 @@ Status SomasSolverCore::MemoryAllocationSolver() {
           branching_strategy_ = static_cast<FittingType>(branching_strategy);
           Clean();
           MS_LOG(DEBUG) << "Timing Start " << tensors_.size() << " Tensors";
-          start = std::chrono::system_clock::now();
+          auto start_upper = std::chrono::system_clock::now();
           upperbound_ = FindSolutions();
-          MS_LOG(DEBUG)
-            << "\nElapsed time of upper bound testing: "
-            << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now() - start).count()
-            << " ms";
-          start = std::chrono::system_clock::now();
-
+          MS_LOG(DEBUG) << "Elapsed time of upper bound testing: "
+                        << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now() -
+                                                                                 start_upper)
+                             .count()
+                        << " ms";
           if (upperbound_ > worst) {
             worst = upperbound_;
           }
@@ -130,30 +129,6 @@ Status SomasSolverCore::Verify() {
   return retval;
 }
 
-Status SomasSolverCore::Verify(unordered_map<size_t, SomasSolverTensorDescPtr> *pTensor_map) {
-  Status retval = SUCCESS;
-  if (NULL == pTensor_map) return retval;
-  MS_LOG(INFO) << "Verifying HQ Solution..";
-  MS_LOG(INFO) << "Checking tensors id, sizes..";
-
-  for (auto ptensor : *pTensor_map) {
-    if (tensors_.count(ptensor.first) == 0) {
-      MS_LOG(WARNING) << "HQ Tensor id " << ptensor.first << " does not exists";
-    } else if (tensors_[ptensor.first]->size_ != ptensor.second->size_) {
-      size_t HQ_index = ptensor.first;
-      size_t HQ_size = ptensor.second->size_;
-      size_t index = ptensor.first;
-      size_t size = tensors_[ptensor.first]->size_;
-      MS_LOG(WARNING) << "HQ Tensor Id: " << HQ_index << " with size: " << HQ_size
-                      << " is different from Tensor Id: " << index << " size: " << size;
-    }
-  }
-
-  MS_LOG(INFO) << "Checking HQ Solution..";
-  tensors_ = *pTensor_map;
-  retval = Verify(upperbound_) == 0 ? FAILED : SUCCESS;
-  return retval;
-}
 bool SomasSolverCore::Verify(const size_t &upperbound) {
   auto start = std::chrono::system_clock::now();
   bool retval = true;
@@ -169,16 +144,14 @@ bool SomasSolverCore::Verify(const size_t &upperbound) {
       t2 = t2_.second;
       if (t1->index_ == t2->index_) continue;
       bool blifelong = (t1->lifelong_ || t2->lifelong_) && (t1->index_ != t2->index_);
-      const size_t continuous = 2;
-      const size_t conflict = 1;
-      if ((*constraints_)(t1->index_, t2->index_) == continuous) {  // continuous constraint
-        // t1 must be continous to t2
+      if (t2->right_ == t1) {  // continuous constraint
+        // t1 must be continuous to t2
         bool bcontinuous = t1->offset_ == (t2->offset_ + t2->size_);
         if (!bcontinuous) {
           MS_LOG(WARNING) << "Continuous constraint violation in tensors " << t1->index_ << " and" << t2->index_;
           retval = false;
         }
-      } else if (blifelong || (*constraints_)(t1->index_, t2->index_) == conflict) {  // conflict constraint
+      } else if (blifelong || constraints_[t1->index_].IsBitTrue(t2->index_) == false) {  // conflict constraint
         size_t t1_ub = t1->offset_ + t1->size_;
         size_t t2_ub = t2->offset_ + t2->size_;
         bool b_overlap_lb = ((t2->offset_ >= t1->offset_) && (t2->offset_ < t1_ub));
@@ -254,64 +227,56 @@ void SomasSolverCore::Clean() {
   }
   upperbound_ = SIZE_MAX;
 }
+
+static bool GreaterSizeSmallerIndex(const BlockTensor &t1, const BlockTensor &t2) {
+  return t1.m_size_ > t2.m_size_ ||
+         (t1.m_size_ == t2.m_size_ && t1.m_start_tensor_->index_ < t2.m_start_tensor_->index_);
+}
+#ifdef SOMAS_DEBUG
+static bool GreaterSizeGreaterIndex(const BlockTensor &t1, const BlockTensor &t2) {
+  return t1.m_size_ > t2.m_size_ ||
+         (t1.m_size_ == t2.m_size_ && t1.m_start_tensor_->index_ > t2.m_start_tensor_->index_);
+}
+static bool GreaterSizeSmallerConstraintsSmallerIndex(const BlockTensor &t1, const BlockTensor &t2) {
+  return t1.m_size_ > t2.m_size_ ||
+         (t1.m_size_ == t2.m_size_ && t1.m_start_tensor_->constraints_ < t2.m_start_tensor_->constraints_) ||
+         (t1.m_size_ == t2.m_size_ && t1.m_start_tensor_->constraints_ == t2.m_start_tensor_->constraints_ &&
+          t1.m_start_tensor_->index_ < t2.m_start_tensor_->index_);
+}
+static bool GreaterSizeSmallerConstraintsGreaterIndex(const BlockTensor &t1, const BlockTensor &t2) {
+  return t1.m_size_ > t2.m_size_ ||
+         (t1.m_size_ == t2.m_size_ && t1.m_start_tensor_->constraints_ < t2.m_start_tensor_->constraints_) ||
+         (t1.m_size_ == t2.m_size_ && t1.m_start_tensor_->constraints_ == t2.m_start_tensor_->constraints_ &&
+          t1.m_start_tensor_->index_ > t2.m_start_tensor_->index_);
+}
+static bool GreaterSizeGreaterConstraintsSmallerIndex(const BlockTensor &t1, const BlockTensor &t2) {
+  return t1.m_size_ > t2.m_size_ ||
+         (t1.m_size_ == t2.m_size_ && t1.m_start_tensor_->constraints_ > t2.m_start_tensor_->constraints_) ||
+         (t1.m_size_ == t2.m_size_ && t1.m_start_tensor_->constraints_ == t2.m_start_tensor_->constraints_ &&
+          t1.m_start_tensor_->index_ < t2.m_start_tensor_->index_);
+}
+static bool GreaterSizeGreaterConstraintsGreaterIndex(const BlockTensor &t1, const BlockTensor &t2) {
+  return t1.m_size_ > t2.m_size_ ||
+         (t1.m_size_ == t2.m_size_ && t1.m_start_tensor_->constraints_ > t2.m_start_tensor_->constraints_) ||
+         (t1.m_size_ == t2.m_size_ && t1.m_start_tensor_->constraints_ == t2.m_start_tensor_->constraints_ &&
+          t1.m_start_tensor_->index_ > t2.m_start_tensor_->index_);
+}
+#endif
+
 void SomasSolverCore::SortTensors() {  // need to sort the tensors for Fast Heuristic
   MS_LOG(DEBUG) << "Sorting Blocks of tensor, strategy: " << sorting_[sort_strategy_].c_str();
-  switch (sort_strategy_) {
-    case kGreaterSizeSmallerIndex: {  // size(>), index(<)
-      sort(block_tensors_.begin(), block_tensors_.end(), [](const BlockTensor &t1, const BlockTensor &t2) {
-        return t1.m_size_ > t2.m_size_ ||
-               (t1.m_size_ == t2.m_size_ && t1.m_start_tensor_->index_ < t2.m_start_tensor_->index_);
-      });
-      break;
-    }
+  typedef bool (*SortingFunction)(const BlockTensor &, const BlockTensor &);
+  std::unordered_map<SortingType, SortingFunction> sort_map;
+  sort_map[kGreaterSizeSmallerIndex] = &GreaterSizeSmallerIndex;
 #ifdef SOMAS_DEBUG
-    case kGreaterSizeGreaterIndex: {  // size(>), index(>)
-      sort(block_tensors_.begin(), block_tensors_.end(), [](const BlockTensor &t1, const BlockTensor &t2) {
-        return t1.m_size > t2.m_size ||
-               (t1.m_size == t2.m_size && t1.m_pStartTensor->index_ > t2.m_pStartTensor->index_);
-      });
-      break;
-    }
-    case kGreaterSizeSmallerConstraintsSmallerIndex: {  // size(>), constraints(<), index(<)
-      sort(block_tensors_.begin(), block_tensors_.end(), [](const BlockTensor &t1, const BlockTensor &t2) {
-        return t1.m_size > t2.m_size ||
-               (t1.m_size == t2.m_size && t1.m_pStartTensor->constraints_ < t2.m_pStartTensor->constraints_) ||
-               (t1.m_size == t2.m_size && t1.m_pStartTensor->constraints_ == t2.m_pStartTensor->constraints_ &&
-                t1.m_pStartTensor->index_ < t2.m_pStartTensor->index_);
-      });
-      break;
-    }
-    case kGreaterSizeSmallerConstraintsGreaterIndex: {  // size(>), constraints(<), index(>)
-      sort(block_tensors_.begin(), block_tensors_.end(), [](const BlockTensor &t1, const BlockTensor &t2) {
-        return t1.m_size > t2.m_size ||
-               (t1.m_size == t2.m_size && t1.m_pStartTensor->constraints_ < t2.m_pStartTensor->constraints_) ||
-               (t1.m_size == t2.m_size && t1.m_pStartTensor->constraints_ == t2.m_pStartTensor->constraints_ &&
-                t1.m_pStartTensor->index_ > t2.m_pStartTensor->index_);
-      });
-      break;
-    }
-    case kGreaterSizeGreaterConstraintsSmallerIndex: {  // size(>), constraints(>), index(<)
-      sort(block_tensors_.begin(), block_tensors_.end(), [](const BlockTensor &t1, const BlockTensor &t2) {
-        return t1.m_size > t2.m_size ||
-               (t1.m_size == t2.m_size && t1.m_pStartTensor->constraints_ > t2.m_pStartTensor->constraints_) ||
-               (t1.m_size == t2.m_size && t1.m_pStartTensor->constraints_ == t2.m_pStartTensor->constraints_ &&
-                t1.m_pStartTensor->index_ < t2.m_pStartTensor->index_);
-      });
-      break;
-    }
-    case kGreaterSizeGreaterConstraintsGreaterIndex: {  // // size(>), constraints(>), index(>)
-      sort(block_tensors_.begin(), block_tensors_.end(), [](const BlockTensor &t1, const BlockTensor &t2) {
-        return t1.m_size > t2.m_size ||
-               (t1.m_size == t2.m_size && t1.m_pStartTensor->constraints_ > t2.m_pStartTensor->constraints_) ||
-               (t1.m_size == t2.m_size && t1.m_pStartTensor->constraints_ == t2.m_pStartTensor->constraints_ &&
-                t1.m_pStartTensor->index_ > t2.m_pStartTensor->index_);
-      });
-      break;
-    }
+  sort_map[kGreaterSizeGreaterIndex] = &GreaterSizeGreaterIndex;
+  sort_map[kGreaterSizeSmallerConstraintsSmallerIndex] = &GreaterSizeSmallerConstraintsSmallerIndex;
+  sort_map[kGreaterSizeSmallerConstraintsGreaterIndex] = &GreaterSizeSmallerConstraintsGreaterIndex;
+  sort_map[kGreaterSizeGreaterConstraintsSmallerIndex] = &GreaterSizeGreaterConstraintsSmallerIndex;
+  sort_map[kGreaterSizeGreaterConstraintsGreaterIndex] = &GreaterSizeGreaterConstraintsGreaterIndex;
 #endif
-    case kNumSortingTypes: {  // no sorting case
-      break;
-    }
+  if (sort_strategy_ < kNumSortingTypes) {
+    sort(block_tensors_.begin(), block_tensors_.end(), *(sort_map[sort_strategy_]));
   }
   // log for debug purposes
   for (auto &block : block_tensors_) block.log();
@@ -319,7 +284,7 @@ void SomasSolverCore::SortTensors() {  // need to sort the tensors for Fast Heur
 
 void SomasSolverCore::RestoreSolution(uint32_t sol_id) {
   for (auto block : block_tensors_) {
-    if (block.offsets_.count(sol_id) == 0) assert(0);
+    if (block.offsets_.count(sol_id) == 0) MS_ASSERT(0);
     size_t bestOffset = block.offsets_[sol_id];
     size_t offset = bestOffset;
     SomasSolverTensorDescPtr pTensor = block.m_start_tensor_;
@@ -336,7 +301,7 @@ size_t SomasSolverCore::Search(const std::shared_ptr<FootPrint> &pFootprint) {
   FastHeuristic fh;
   MS_LOG(INFO) << "Calling FastSolver Search for " << block_tensors_.size() << " tensors ";
   auto start = std::chrono::system_clock::now();
-  if (fh.Eval(&block_tensors_, pFootprint, constraints_)) {
+  if (fh.Eval(&block_tensors_, pFootprint, &constraints_)) {
     result = pFootprint->Result();
     auto end = std::chrono::system_clock::now();
     timing_ = std::chrono::duration_cast<std::chrono::milliseconds>((end - start)).count();

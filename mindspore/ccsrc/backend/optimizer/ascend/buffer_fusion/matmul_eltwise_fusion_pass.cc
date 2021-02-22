@@ -1,5 +1,5 @@
 /**
- * Copyright 2020 Huawei Technologies Co., Ltd
+ * Copyright 2020-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,7 +33,10 @@ void MatmulEltwiseFusionPass::MatchMatmulEltwise(const CNodePtr &cnode, const An
   MS_EXCEPTION_IF_NULL(candidate_fusion);
   auto manager = kernel_graph.manager();
   MS_EXCEPTION_IF_NULL(manager);
-  std::vector<int> output_used_num{SizeToInt(manager->node_users()[relu_input].size())};
+  if (fusion_id_allocator->HasFusionIdAttr(relu_input)) {
+    return;
+  }
+  std::vector<int64_t> output_used_num{SizeToLong(manager->node_users()[relu_input].size())};
   AnfAlgo::SetNodeAttr(kAttrOutputUsedNum, MakeValue(output_used_num), relu_input);
   std::unordered_set<AnfNodePtr> record{cnode, relu_input};
   candidate_fusion->push_back(record);

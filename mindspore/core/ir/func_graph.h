@@ -19,6 +19,7 @@
 #ifndef MINDSPORE_CORE_IR_FUNC_GRAPH_H_
 #define MINDSPORE_CORE_IR_FUNC_GRAPH_H_
 
+#include <set>
 #include <map>
 #include <string>
 #include <vector>
@@ -27,12 +28,14 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <functional>
+#include <utility>
 
 #include "ir/anf.h"
 #include "ir/manager.h"
 #include "utils/ordered_set.h"
 #include "utils/ordered_map.h"
 #include "base/base_ref.h"
+#include "base/effect_info.h"
 #include "ir/func_graph_cloner.h"
 #include "abstract/abstract_value.h"
 
@@ -79,6 +82,10 @@ const char FUNC_GRAPH_FLAG_AFTER_BLOCK[] = "after_block";
 const char FUNC_GRAPH_FLAG_CORE[] = "core";
 const char FUNC_GRAPH_ATTR_GRAPH_KERNEL[] = "graph_kernel";
 const char FUNC_GRAPH_FLAG_SPECIALIZE_PARAMETER[] = "spec_param";
+
+const char kFuncGraphFlagUndetermined[] = "Undeterminate";
+const char kFuncGraphFlagBackPropEntry[] = "BackPropEntry";
+const char kFuncGraphFlagReAutoMonad[] = "ReAutoMonad";
 
 namespace abstract {
 class AbstractKeywordArg;
@@ -141,9 +148,7 @@ class FuncGraphBase : public Value {
   MS_DECLARE_PARENT(FuncGraphBase, Value);
 };
 
-extern const char kFuncGraphFlagUndetermined[];
-
-class FuncGraph : public FuncGraphBase {
+class FuncGraph : public FuncGraphBase, public EffectInfoHolder {
  public:
   FuncGraph();
   using Drawer = std::function<void(const std::string &, const FuncGraphPtr &)>;
@@ -169,10 +174,20 @@ class FuncGraph : public FuncGraphBase {
 
   // create a cnode with given inputs, bound to this graph
   virtual CNodePtr NewCNode(const std::vector<AnfNodePtr> &inputs = std::vector<AnfNodePtr>());
-
-  // create a cnode with given inputs, bound to this graph, and set to specific scope
-  CNodePtr NewCNodeWithScope(const std::vector<AnfNodePtr> &inputs, const ScopePtr &scope);
   virtual CNodePtr NewCNode(const PrimitivePtr &primitive, const std::vector<AnfNodePtr> &prim_inputs);
+
+  // create a cnode with given inputs, bound to this graph and push back to order list.
+  CNodePtr NewCNodeInOrder(const std::vector<AnfNodePtr> &inputs = std::vector<AnfNodePtr>());
+  CNodePtr NewCNodeInOrder(const PrimitivePtr &primitive, const std::vector<AnfNodePtr> &prim_inputs);
+
+  // create a cnode with given inputs, bound to this graph and push back to front of order list.
+  CNodePtr NewCNodeInFront(const std::vector<AnfNodePtr> &inputs = std::vector<AnfNodePtr>());
+
+  // create a cnode with given inputs, put it to order list before the position node.
+  CNodePtr NewCNodeBefore(const AnfNodePtr &position, const std::vector<AnfNodePtr> &inputs);
+
+  // create a cnode with given inputs, put it to order list after the position node.
+  CNodePtr NewCNodeAfter(const AnfNodePtr &position, const std::vector<AnfNodePtr> &inputs);
 
   virtual ParameterPtr add_weight(const tensor::MetaTensorPtr &meta_tensor);
   // Functions for handling variable argument, keyword-only arguments and variable keyword argument
@@ -275,12 +290,12 @@ class FuncGraph : public FuncGraphBase {
   bool AddFuncGraphUsed(FuncGraphPtr fg, int count = 1);
   bool DropFuncGraphUsed(FuncGraphPtr fg);
 
-  // get all value nodes of J func graph directly used by this func graph
-  const FuncGraphCounterMap &j_func_graphs();
-  void CopyJFuncGraphs(const FuncGraphPtr &source);
-  void ClearJFuncGraphs();
-  void AddJFuncGraph(FuncGraphPtr fg, int count = 1);
-  void DropJFuncGraph(FuncGraphPtr fg);
+  // get all value nodes in the inputs of J directly used by this func graph
+  const std::unordered_map<AnfNodePtr, int> &j_value_nodes();
+  void CopyJValueNodes(const FuncGraphPtr &source);
+  void ClearJValueNodes();
+  void AddJValueNode(const AnfNodePtr &value_node, int count = 1);
+  void DropJValueNode(const AnfNodePtr &value_node);
 
   // get all func graphs nested used by this func graph
   const FuncGraphSet &func_graphs_used_total();
@@ -330,8 +345,8 @@ class FuncGraph : public FuncGraphBase {
                             const std::vector<AnfNodePtr> &specialized_parameter_list,
                             std::unordered_map<AnfNodePtr, AnfNodePtr> *repl_nodes);
 
-  const std::vector<AnfNodePtr> &paramter_obj_nodes() const { return paramter_obj_nodes_; }
-  void add_parameter_obj_node(const AnfNodePtr &p);
+  const std::vector<AnfNodePtr> &used_global_parameters() const { return used_global_parameters_; }
+  void add_used_global_parameters(const AnfNodePtr &p) { used_global_parameters_.push_back(p); }
 
   std::unordered_map<std::string, ValuePtr> attrs_;
   std::vector<BaseShapePtr> joined_shapes_;
@@ -343,17 +358,46 @@ class FuncGraph : public FuncGraphBase {
   std::list<CNodePtr> GetOrderedCnodes();
   void EraseUnusedNodeInOrder(const AnfNodePtr &n);
   void EraseUnusedNodeInOrder();
-  void CheckOrder();
   void DumpCNodeList();
-  void ReleaseFullOrderToEffectOrder();
-  void SetEffectDepends(const std::vector<AnfNodePtr> &depend_inputs);
-  bool HasEffect(const CNodePtr &cnode);
+  const OrderedSet<CNodePtr> &order_list() const { return order_; }
+
+  void set_order_list(OrderedSet<CNodePtr> &&order_list) { order_ = std::move(order_list); }
+
+  // Add a cnode at the end of order list.
+  void AppendOrderList(const CNodePtr &cnode) { order_.push_back(cnode); }
+
+  // Prepend cnode at the front of order list.
+  void PrependOrderList(const CNodePtr &cnode) { order_.push_front(cnode); }
+
+  // Maintain cnode order list when a cnode is replaced by a new one.
+  void ReplaceInOrder(const AnfNodePtr &old_node, const AnfNodePtr &new_node);
+
+  // Clear cnode order list.
+  void ClearOrderList() { order_.clear(); }
+
+  // Gets nodes that not related to output, e.g. side-effect calls.
+  const std::set<AnfNodePtr> &isolate_nodes() const { return isolate_nodes_; }
+
+  // Add an isolate node.
+  void AddIsolateNode(const AnfNodePtr &node) { isolate_nodes_.insert(node); }
+
+  // Replace an isolate node.
+  void ReplaceIsolateNode(const AnfNodePtr &old_node, const AnfNodePtr &new_node);
+
+  // Clear isolate nodes.
+  void ClearIsolateNodes() { isolate_nodes_.clear(); }
+
+  // Get isolate nodes with order as OrderList.
+  const std::vector<AnfNodePtr> GetIsolateNodesInOrder() const;
 
   bool stub() const { return stub_; }
   void set_stub(bool stub) { stub_ = stub; }
   static void set_drawer(Drawer drawer) { drawer_ = drawer; }
   std::shared_ptr<bool> switch_layer_input() const { return switch_layer_input_; }
   void set_switch_layer_input(std::shared_ptr<bool> switch_layer_input) { switch_layer_input_ = switch_layer_input; }
+  bool ContainMultiTarget() const;
+  int64_t stage() { return stage_; }
+  void set_stage(int64_t stage) { stage_ = stage; }
 
  private:
   // graph is manipulated by manager and others
@@ -372,14 +416,19 @@ class FuncGraph : public FuncGraphBase {
   AnfNodeCounterMap free_variables_;
 
   // all value nodes calling J in the function
-  FuncGraphCounterMap j_func_graphs_;
+  std::unordered_map<AnfNodePtr, int> j_value_nodes_;
 
   // all user value nodes of this func graph, recording by CNode and its input's index
   CNodeIndexCounterMap func_graph_cnodes_index_;
 
   // parameters of this function
   std::vector<AnfNodePtr> parameters_;
-  std::vector<AnfNodePtr> paramter_obj_nodes_;
+
+  // global parameters used by this function.
+  std::vector<AnfNodePtr> used_global_parameters_;
+
+  // isolate nodes, i.e. nodes that not related to output.
+  std::set<AnfNodePtr> isolate_nodes_;
 
   // whether there is a *args and **kwargs, and count kwonlyargs'number
   bool has_vararg_;
@@ -412,12 +461,13 @@ class FuncGraph : public FuncGraphBase {
                              const std::vector<AnfNodePtr> &kwarg_values_tuple_nodes);
 
   // CNode order which relates to origin code order
-  std::list<CNodePtr> order_;
+  OrderedSet<CNodePtr> order_;
   bool stub_;
   inline static Drawer drawer_ = nullptr;
   // Design switch_layer_input as a ptr to
   // share between derived backpropagator and cloned graphs
   std::shared_ptr<bool> switch_layer_input_;
+  int64_t stage_;
   std::unordered_map<AbstractBasePtrList, FuncGraphPtr, abstract::AbstractBasePtrListHasher,
                      abstract::AbstractBasePtrListEqual>
     func_graph_cache_;

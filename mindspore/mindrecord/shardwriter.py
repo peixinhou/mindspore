@@ -23,6 +23,7 @@ from .common.exceptions import MRMOpenError, MRMOpenForAppendError, MRMInvalidHe
 
 __all__ = ['ShardWriter']
 
+
 class ShardWriter:
     """
     Wrapper class which is represent shardWrite class in c++ module.
@@ -192,14 +193,16 @@ class ShardWriter:
         if len(blob_data) == 1:
             values = [v for v in blob_data.values()]
             return bytes(values[0])
+
         # convert int to bytes
         def int_to_bytes(x: int) -> bytes:
             return x.to_bytes(8, 'big')
+
         merged = bytes()
-        for _, v in blob_data.items():
+        for field, v in blob_data.items():
             # convert ndarray to bytes
             if isinstance(v, np.ndarray):
-                v = v.tobytes()
+                v = v.astype(self._header.schema[field]["type"]).tobytes()
             merged += int_to_bytes(len(v))
             merged += v
         return merged
@@ -209,7 +212,7 @@ class ShardWriter:
         Flush data to disk.
 
         Returns:
-            Class MSRStatus, SUCCESS or FAILED.
+            MSRStatus, SUCCESS or FAILED.
 
         Raises:
             MRMCommitError: If failed to flush data to disk.

@@ -1,5 +1,5 @@
 /**
- * Copyright 2020 Huawei Technologies Co., Ltd
+ * Copyright 2020-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,14 +23,16 @@
 #include <vector>
 
 #include "minddata/dataset/engine/datasetops/source/mindrecord_op.h"
-
+#include "minddata/dataset/engine/opt/pass.h"
 #include "minddata/dataset/util/status.h"
+
 namespace mindspore {
 namespace dataset {
 
 MindDataNode::MindDataNode(const std::vector<std::string> &dataset_files, const std::vector<std::string> &columns_list,
                            const std::shared_ptr<SamplerObj> &sampler, nlohmann::json padded_sample, int64_t num_padded)
-    : dataset_file_(std::string()),
+    : MappableSourceNode(),
+      dataset_file_(std::string()),
       dataset_files_(dataset_files),
       search_for_pattern_(false),
       columns_list_(columns_list),
@@ -41,7 +43,8 @@ MindDataNode::MindDataNode(const std::vector<std::string> &dataset_files, const 
 
 MindDataNode::MindDataNode(const std::string &dataset_file, const std::vector<std::string> &columns_list,
                            const std::shared_ptr<SamplerObj> &sampler, nlohmann::json padded_sample, int64_t num_padded)
-    : dataset_file_(dataset_file),
+    : MappableSourceNode(),
+      dataset_file_(dataset_file),
       dataset_files_({}),
       search_for_pattern_(true),
       columns_list_(columns_list),
@@ -50,7 +53,22 @@ MindDataNode::MindDataNode(const std::string &dataset_file, const std::vector<st
       sample_bytes_({}),
       num_padded_(num_padded) {}
 
+std::shared_ptr<DatasetNode> MindDataNode::Copy() {
+  std::shared_ptr<MindDataNode> node;
+  std::shared_ptr<SamplerObj> sampler = (sampler_ == nullptr) ? nullptr : sampler_->SamplerCopy();
+  if (dataset_files_.empty()) {
+    node = std::make_shared<MindDataNode>(dataset_file_, columns_list_, sampler, padded_sample_, num_padded_);
+  } else {
+    node = std::make_shared<MindDataNode>(dataset_files_, columns_list_, sampler, padded_sample_, num_padded_);
+  }
+  node->SetSampleBytes(&sample_bytes_);
+  return node;
+}
+
+void MindDataNode::Print(std::ostream &out) const { out << Name() + "(file:" + dataset_file_ + ",...)"; }
+
 Status MindDataNode::ValidateParams() {
+  RETURN_IF_NOT_OK(DatasetNode::ValidateParams());
   if (!search_for_pattern_ && dataset_files_.size() > 4096) {
     std::string err_msg =
       "MindDataNode: length of dataset_file must be less than or equal to 4096, dataset_file length: " +
@@ -133,12 +151,8 @@ Status MindDataNode::BuildMindDatasetSamplerChain(const std::shared_ptr<SamplerO
 // Helper function to set sample_bytes from py::byte type
 void MindDataNode::SetSampleBytes(std::map<std::string, std::string> *sample_bytes) { sample_bytes_ = *sample_bytes; }
 
-std::vector<std::shared_ptr<DatasetOp>> MindDataNode::Build() {
-  // A vector containing shared pointer to the Dataset Ops that this object will create
-  std::vector<std::shared_ptr<DatasetOp>> node_ops;
-
-  std::vector<std::shared_ptr<ShardOperator>> operators_;
-  RETURN_EMPTY_IF_ERROR(BuildMindDatasetSamplerChain(sampler_, &operators_, num_padded_));
+Status MindDataNode::Build(std::vector<std::shared_ptr<DatasetOp>> *const node_ops) {
+  RETURN_IF_NOT_OK(BuildMindDatasetSamplerChain(sampler_, &operators_, num_padded_));
 
   std::shared_ptr<MindRecordOp> mindrecord_op;
   // If pass a string to MindData(), it will be treated as a pattern to search for matched files,
@@ -154,10 +168,12 @@ std::vector<std::shared_ptr<DatasetOp>> MindDataNode::Build() {
                                                    padded_sample_, sample_bytes_);
   }
 
-  RETURN_EMPTY_IF_ERROR(mindrecord_op->Init());
-  node_ops.push_back(mindrecord_op);
+  RETURN_IF_NOT_OK(mindrecord_op->Init());
+  mindrecord_op->set_total_repeats(GetTotalRepeats());
+  mindrecord_op->set_num_repeats_per_epoch(GetNumRepeatsPerEpoch());
+  node_ops->push_back(mindrecord_op);
 
-  return node_ops;
+  return Status::OK();
 }
 
 // Get the shard id of node
@@ -167,5 +183,39 @@ Status MindDataNode::GetShardId(int32_t *shard_id) {
   return Status::OK();
 }
 
+// Get Dataset size
+Status MindDataNode::GetDatasetSize(const std::shared_ptr<DatasetSizeGetter> &size_getter, bool estimate,
+                                    int64_t *dataset_size) {
+  if (dataset_size_ > 0) {
+    *dataset_size = dataset_size_;
+    return Status::OK();
+  }
+  int64_t num_rows = -1;
+  std::vector<std::shared_ptr<ShardOperator>> operators;
+  RETURN_IF_NOT_OK(BuildMindDatasetSamplerChain(sampler_, &operators, num_padded_));
+
+  if (search_for_pattern_) {
+    dataset_files_ = {dataset_file_};
+  }
+
+  // The last operator is parent sampler
+  std::shared_ptr<ShardOperator> op = operators.back();
+  RETURN_IF_NOT_OK(MindRecordOp::CountTotalRows(dataset_files_, search_for_pattern_, op, &num_rows, num_padded_));
+  *dataset_size = num_rows;
+  dataset_size_ = *dataset_size;
+  return Status::OK();
+}
+
+// Visitor accepting method for IRNodePass
+Status MindDataNode::Accept(IRNodePass *const p, bool *const modified) {
+  // Downcast shared pointer then call visitor
+  return p->Visit(shared_from_base<MindDataNode>(), modified);
+}
+
+// Visitor accepting method for IRNodePass
+Status MindDataNode::AcceptAfter(IRNodePass *p, bool *const modified) {
+  // Downcast shared pointer then call visitor
+  return p->VisitAfter(shared_from_base<MindDataNode>(), modified);
+}
 }  // namespace dataset
 }  // namespace mindspore

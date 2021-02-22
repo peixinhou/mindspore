@@ -42,9 +42,9 @@ int Shape::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> outpu
   auto in_tensor = inputs_.front();
   auto out_tensor = outputs_.front();
   out_tensor->set_data_type(kNumberTypeInt32);
-  out_tensor->set_format(schema::Format::Format_NHWC);
+  out_tensor->set_format(in_tensor->format());
   if (!infer_flag()) {
-    return RET_OK;
+    return RET_INFER_INVALID;
   }
   std::vector<int> out_shape;
   out_shape.push_back(static_cast<int>(in_tensor->shape().size()));

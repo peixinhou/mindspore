@@ -36,7 +36,7 @@ Status PythonSamplerRT::GetNextSample(std::unique_ptr<DataBuffer> *out_buffer) {
       py::gil_scoped_acquire gil_acquire;
       (*out_buffer) = std::make_unique<DataBuffer>(0, DataBuffer::kDeBFlagNone);
       if (Py_IsInitialized() == 0) {
-        return Status(StatusCode::kPythonInterpreterFailure, "Python Interpreter is finalized");
+        return Status(StatusCode::kMDPythonInterpreterFailure, "Python Interpreter is finalized");
       }
       try {
         py::object py_ret = py_sampler_instance.attr("_get_indices")();
@@ -51,9 +51,9 @@ Status PythonSamplerRT::GetNextSample(std::unique_ptr<DataBuffer> *out_buffer) {
           }
         }
       } catch (const py::error_already_set &e) {
-        return Status(StatusCode::kPyFuncException, e.what());
+        return Status(StatusCode::kMDPyFuncException, e.what());
       } catch (const py::cast_error &e) {
-        return Status(StatusCode::kPyFuncException,
+        return Status(StatusCode::kMDPyFuncException,
                       "Invalid data, python sampler iterator should return an integer index.");
       }
     }
@@ -65,6 +65,9 @@ Status PythonSamplerRT::GetNextSample(std::unique_ptr<DataBuffer> *out_buffer) {
 }
 
 Status PythonSamplerRT::InitSampler() {
+  if (is_initialized) {
+    return Status::OK();
+  }
   CHECK_FAIL_RETURN_UNEXPECTED(
     num_rows_ > 0, "Invalid parameter, num_rows must be greater than 0, but got " + std::to_string(num_rows_));
   // Special value of 0 for num_samples means that the user wants to sample the entire set of data.
@@ -75,14 +78,16 @@ Status PythonSamplerRT::InitSampler() {
   {
     py::gil_scoped_acquire gil_acquire;
     if (Py_IsInitialized() == 0) {
-      return Status(StatusCode::kPythonInterpreterFailure, "Python Interpreter is finalized");
+      return Status(StatusCode::kMDPythonInterpreterFailure, "Python Interpreter is finalized");
     }
     try {
       py_sampler_instance.attr("_handshake")(num_rows_, num_samples_);
     } catch (const py::error_already_set &e) {
-      return Status(StatusCode::kPyFuncException, e.what());
+      return Status(StatusCode::kMDPyFuncException, e.what());
     }
   }
+
+  is_initialized = true;
   return Status::OK();
 }
 
@@ -91,12 +96,12 @@ Status PythonSamplerRT::ResetSampler() {
   need_to_reset_ = false;
   py::gil_scoped_acquire gil_acquire;
   if (Py_IsInitialized() == 0) {
-    return Status(StatusCode::kPythonInterpreterFailure, "Python Interpreter is finalized");
+    return Status(StatusCode::kMDPythonInterpreterFailure, "Python Interpreter is finalized");
   }
   try {
     py_sampler_instance.attr("reset")();
   } catch (const py::error_already_set &e) {
-    return Status(StatusCode::kPyFuncException, e.what());
+    return Status(StatusCode::kMDPyFuncException, e.what());
   }
 
   if (HasChildSampler()) {
@@ -106,11 +111,11 @@ Status PythonSamplerRT::ResetSampler() {
   return Status::OK();
 }
 
-void PythonSamplerRT::Print(std::ostream &out, bool show_all) const {
+void PythonSamplerRT::SamplerPrint(std::ostream &out, bool show_all) const {
   out << "\nSampler: PythonSampler";
   if (show_all) {
     // Call the super class for displaying any common detailed info
-    SamplerRT::Print(out, show_all);
+    SamplerRT::SamplerPrint(out, show_all);
     // Then add our own info if any
   }
 }

@@ -342,7 +342,7 @@ class AiCPURegOp(RegOp):
 
 
 class TBERegOp(RegOp):
-    """Class for TBE op info register."""
+    """Class for TBE operator information register."""
 
     def __init__(self, op_name):
         super(TBERegOp, self).__init__(op_name)
@@ -355,6 +355,7 @@ class TBERegOp(RegOp):
         self.reshape_type_ = ''
         self.dynamic_format_ = False
         self.dynamic_shape_ = False
+        self.need_check_supported_ = False
         self.op_pattern_ = ""
 
     def async_flag(self, async_flag):
@@ -445,6 +446,17 @@ class TBERegOp(RegOp):
         self.dynamic_shape_ = dynamic_shape
         return self
 
+    def need_check_supported(self, need_check_supported):
+        """
+        Whether the operator need check supports.
+
+        Args:
+            :param need_check_supported: (bool): Value of need_check_supported. Default: false.
+        """
+        self._is_bool(need_check_supported)
+        self.need_check_supported_ = need_check_supported
+        return self
+
     def op_pattern(self, pattern=None):
         """
         The behavior type of opeator, such as broadcast, reduce and so on.
@@ -522,6 +534,7 @@ class DataType:
     """
 
     None_None = ("", "")
+    None_Default = ("", "DefaultFormat")
     BOOL_None = ("bool", "")
     BOOL_Default = ("bool", "DefaultFormat")
     BOOL_5HD = ("bool", "NC1HWC0")
@@ -631,6 +644,10 @@ class DataType:
     F16_NHWC = ("float16", "NHWC")
     F16_HWCN = ("float16", "HWCN")
     F16_NDHWC = ("float16", "NDHWC")
+    F16_NCDHW = ("float16", "NCDHW")
+    F16_DHWCN = ("float16", "DHWCN")
+    F16_NDC1HWC0 = ("float16", "NDC1HWC0")
+    F16_FRACTAL_Z_3D = ("float16", "FRACTAL_Z_3D")
     F16_FracZNLSTM = ("float16", "FRACTAL_ZN_LSTM")
 
     F32_None = ("float32", "")
@@ -643,6 +660,10 @@ class DataType:
     F32_NHWC = ("float32", "NHWC")
     F32_HWCN = ("float32", "HWCN")
     F32_NDHWC = ("float32", "NDHWC")
+    F32_NCDHW = ("float32", "NCDHW")
+    F32_DHWCN = ("float32", "DHWCN")
+    F32_NDC1HWC0 = ("float32", "NDC1HWC0")
+    F32_FRACTAL_Z_3D = ("float32", "FRACTAL_Z_3D")
     F32_FracZNLSTM = ("float32", "FRACTAL_ZN_LSTM")
 
     F64_None = ("float64", "")

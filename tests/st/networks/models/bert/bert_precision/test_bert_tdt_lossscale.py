@@ -20,7 +20,7 @@ import time
 import numpy as np
 import pytest
 import mindspore.common.dtype as mstype
-import mindspore.dataset.engine.datasets as de
+import mindspore.dataset as ds
 import mindspore.dataset.transforms.c_transforms as C
 from mindspore import context
 from mindspore import log as logger
@@ -34,7 +34,6 @@ import mindspore.nn.learning_rate_schedule as lr_schedules
 from model_zoo.official.nlp.bert.src.bert_for_pre_training import BertNetworkWithLoss
 from model_zoo.official.nlp.bert.src.bert_for_pre_training import BertTrainOneStepWithLossScaleCell
 from model_zoo.official.nlp.bert.src.bert_model import BertConfig
-
 
 _current_dir = os.path.dirname(os.path.realpath(__file__))
 DATA_DIR = ["/home/workspace/mindspore_dataset/bert/example/examples.tfrecord"]
@@ -88,25 +87,26 @@ def me_de_train_dataset(sink_mode=False):
     repeat_count = 1
     sink_size = -1
     batch_size = 16
-    ds = de.TFRecordDataset(DATA_DIR, SCHEMA_DIR, columns_list=["input_ids", "input_mask", "segment_ids",
-                                                                "next_sentence_labels", "masked_lm_positions",
-                                                                "masked_lm_ids", "masked_lm_weights"], shuffle=False)
+    data_set = ds.TFRecordDataset(DATA_DIR, SCHEMA_DIR, columns_list=["input_ids", "input_mask", "segment_ids",
+                                                                      "next_sentence_labels", "masked_lm_positions",
+                                                                      "masked_lm_ids", "masked_lm_weights"],
+                                  shuffle=False)
     type_cast_op = C.TypeCast(mstype.int32)
     new_repeat_count = repeat_count
     if sink_mode:
         sink_size = 100
         new_repeat_count = 3
-    ds = ds.map(operations=type_cast_op, input_columns="masked_lm_ids")
-    ds = ds.map(operations=type_cast_op, input_columns="masked_lm_positions")
-    ds = ds.map(operations=type_cast_op, input_columns="next_sentence_labels")
-    ds = ds.map(operations=type_cast_op, input_columns="segment_ids")
-    ds = ds.map(operations=type_cast_op, input_columns="input_mask")
-    ds = ds.map(operations=type_cast_op, input_columns="input_ids")
+    data_set = data_set.map(operations=type_cast_op, input_columns="masked_lm_ids")
+    data_set = data_set.map(operations=type_cast_op, input_columns="masked_lm_positions")
+    data_set = data_set.map(operations=type_cast_op, input_columns="next_sentence_labels")
+    data_set = data_set.map(operations=type_cast_op, input_columns="segment_ids")
+    data_set = data_set.map(operations=type_cast_op, input_columns="input_mask")
+    data_set = data_set.map(operations=type_cast_op, input_columns="input_ids")
     # apply batch operations
-    ds = ds.batch(batch_size, drop_remainder=True)
-    logger.info("data size: {}".format(ds.get_dataset_size()))
-    logger.info("repeat_count: {}".format(ds.get_repeat_count()))
-    return ds, new_repeat_count, sink_size
+    data_set = data_set.batch(batch_size, drop_remainder=True)
+    logger.info("data size: {}".format(data_set.get_dataset_size()))
+    logger.info("repeat_count: {}".format(data_set.get_repeat_count()))
+    return data_set, new_repeat_count, sink_size
 
 
 def weight_variable(shape):
@@ -155,13 +155,16 @@ class ModelCallback(Callback):
         self.lossscale_list.append(cb_params.net_outputs[2].asnumpy())
         print("epoch: {}, outputs are: {}".format(cb_params.cur_epoch_num, str(cb_params.net_outputs)))
 
+
 class TimeMonitor(Callback):
     """Time Monitor."""
+
     def __init__(self, data_size):
         super(TimeMonitor, self).__init__()
         self.data_size = data_size
         self.epoch_mseconds_list = []
         self.per_step_mseconds_list = []
+
     def epoch_begin(self, run_context):
         self.epoch_time = time.time()
 
@@ -170,18 +173,17 @@ class TimeMonitor(Callback):
         self.epoch_mseconds_list.append(epoch_mseconds)
         self.per_step_mseconds_list.append(epoch_mseconds / self.data_size)
 
-@pytest.mark.level0
-@pytest.mark.platform_arm_ascend_training
-@pytest.mark.platform_x86_ascend_training
-@pytest.mark.env_onecard
-def test_bert_percision():
-    """test bert percision"""
+
+def test_bert_precision(enable_graph_kernel=False):
+    """test bert precision"""
     context.set_context(mode=context.GRAPH_MODE, device_target="Ascend", reserve_class_name_in_scope=False)
-    ds, new_repeat_count, _ = me_de_train_dataset()
+    if enable_graph_kernel:
+        context.set_context(enable_graph_kernel=True)
+    data_set, new_repeat_count, _ = me_de_train_dataset()
     version = os.getenv('VERSION', 'large')
     config = get_config(version=version)
     netwithloss = BertNetworkWithLoss(config, True)
-    lr = BertLearningRate(decay_steps=ds.get_dataset_size()*new_repeat_count,
+    lr = BertLearningRate(decay_steps=data_set.get_dataset_size() * new_repeat_count,
                           learning_rate=5e-5, end_learning_rate=1e-9,
                           power=10.0, warmup_steps=0)
     decay_filter = lambda x: 'layernorm' not in x.name.lower() and 'bias' not in x.name.lower()
@@ -217,14 +219,18 @@ def test_bert_percision():
             else:
                 logger.info("***************** BERT param name is 3 {}".format(name))
                 param.set_data(weight_variable(value.asnumpy().shape))
-    model.train(new_repeat_count, ds, callbacks=callback, dataset_sink_mode=False)
+    model.train(new_repeat_count, data_set, callbacks=callback, dataset_sink_mode=False)
 
     # assertion occurs while the loss value, overflow state or loss_scale value is wrong
     loss_value = np.array(callback.loss_list)
-    assert np.allclose(loss_value[0], 12.2065868, 0, 0.000001)
+    assert np.allclose(loss_value[0], 12.2066, 0, 0.0005)
 
-    expect_loss_value = [12.2065868, 11.8651543, 11.8282356, 11.8266964, 11.8210478, 12.4073524, 12.0055466,
-                         12.6212320, 12.2229223, 12.4272099]
+    if enable_graph_kernel:
+        expect_loss_value = [12.206627, 11.840489, 11.798470, 11.796345, 11.790964, 12.366766, 11.971539, 12.576565,
+                             12.185522, 12.386192]
+    else:
+        expect_loss_value = [12.206587, 11.940709, 11.930911, 11.937369, 11.932178, 12.556069, 12.130172, 12.783402,
+                             12.359581, 12.578078]
     print("loss value: {}".format(loss_value))
     assert np.allclose(loss_value, expect_loss_value, 0, 0.0005)
 
@@ -239,5 +245,17 @@ def test_bert_percision():
     assert np.allclose(loss_scale, expect_loss_scale, 0, 0)
 
 
+@pytest.mark.level0
+@pytest.mark.platform_arm_ascend_training
+@pytest.mark.platform_x86_ascend_training
+@pytest.mark.env_onecard
+def test_bert_precision_graph_kernel_off():
+    test_bert_precision(enable_graph_kernel=False)
+
+
+def test_bert_precision_graph_kernel_on():
+    test_bert_precision(enable_graph_kernel=True)
+
+
 if __name__ == '__main__':
-    test_bert_percision()
+    test_bert_precision(enable_graph_kernel=False)

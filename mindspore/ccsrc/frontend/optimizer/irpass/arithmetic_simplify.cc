@@ -83,7 +83,8 @@ AnfNodePtr ArithmeticSimplify2::operator()(const OptimizerPtr &, const AnfNodePt
 
   // Multiply by zero
   MATCH_REPLACE_IF(node, x * zero_, zero_.WithShapeAs(node),
-                   !zero_.CheckFunc(IsParam, node) && x.GetNode(node)->func_graph() == node->func_graph());
+                   !zero_.CheckFunc(IsParam, node) && !x.CheckFunc(IsLoad, node) &&
+                     x.GetNode(node)->func_graph() == node->func_graph());
   auto zero_prim = PPrimitive(prim::kPrimZerosLike, y);
   MATCH_REPLACE_IF(node, x * zero_prim, zero_.WithShapeAs(node),
                    !zero_prim.CheckFunc(IsParam, node) && x.GetNode(node)->func_graph() == node->func_graph());
@@ -156,7 +157,6 @@ AnfNodePtr AdjustAllReduceMulAdd::operator()(const OptimizerPtr &, const AnfNode
     if (x_shape != z_shape) {
       // AddN requires x_ and z_ have the same shape.
       // If broadcasting TensorAdd is supported then can use this
-      // AnfNodePtr add = NewCNode({NewValueNode(prim::kPrimTensorAdd), z_, x_}, fg);
       return nullptr;
     }
     AnfNodePtr tuple = NewCNode({make_tuple_op_node, z_, x_}, fg);

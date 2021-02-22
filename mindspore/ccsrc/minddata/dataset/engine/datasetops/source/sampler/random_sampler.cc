@@ -28,8 +28,8 @@ RandomSamplerRT::RandomSamplerRT(int64_t num_samples, bool replacement, bool res
       seed_(GetSeed()),
       replacement_(replacement),
       next_id_(0),
-      reshuffle_each_epoch_(reshuffle_each_epoch),
-      dist(nullptr) {}
+      dist(nullptr),
+      reshuffle_each_epoch_(reshuffle_each_epoch) {}
 
 Status RandomSamplerRT::GetNextSample(std::unique_ptr<DataBuffer> *out_buffer) {
   if (next_id_ > num_samples_) {
@@ -69,6 +69,9 @@ Status RandomSamplerRT::GetNextSample(std::unique_ptr<DataBuffer> *out_buffer) {
 }
 
 Status RandomSamplerRT::InitSampler() {
+  if (is_initialized) {
+    return Status::OK();
+  }
   // Special value of 0 for num_samples means that the user wants to sample the entire set of data.
   // If the user asked to sample more rows than exists in the dataset, adjust the num_samples accordingly.
   if (num_samples_ == 0 || num_samples_ > num_rows_) {
@@ -81,7 +84,7 @@ Status RandomSamplerRT::InitSampler() {
   samples_per_buffer_ = samples_per_buffer_ > num_samples_ ? num_samples_ : samples_per_buffer_;
   rnd_.seed(seed_);
 
-  if (replacement_ == false) {
+  if (!replacement_) {
     shuffled_ids_.reserve(num_rows_);
     for (int64_t i = 0; i < num_rows_; i++) {
       shuffled_ids_.push_back(i);
@@ -91,6 +94,7 @@ Status RandomSamplerRT::InitSampler() {
     dist = std::make_unique<std::uniform_int_distribution<int64_t>>(0, num_rows_ - 1);
   }
 
+  is_initialized = true;
   return Status::OK();
 }
 
@@ -104,7 +108,7 @@ Status RandomSamplerRT::ResetSampler() {
 
   rnd_.seed(seed_);
 
-  if (replacement_ == false && reshuffle_each_epoch_) {
+  if (!replacement_ && reshuffle_each_epoch_) {
     std::shuffle(shuffled_ids_.begin(), shuffled_ids_.end(), rnd_);
   }
 
@@ -115,13 +119,32 @@ Status RandomSamplerRT::ResetSampler() {
   return Status::OK();
 }
 
-void RandomSamplerRT::Print(std::ostream &out, bool show_all) const {
+void RandomSamplerRT::SamplerPrint(std::ostream &out, bool show_all) const {
   out << "\nSampler: RandomSampler";
   if (show_all) {
     // Call the super class for displaying any common detailed info
-    SamplerRT::Print(out, show_all);
+    SamplerRT::SamplerPrint(out, show_all);
     // Then add our own info if any
   }
+}
+
+Status RandomSamplerRT::to_json(nlohmann::json *out_json) {
+  nlohmann::json args;
+  args["sampler_name"] = "RandomSampler";
+  args["replacement"] = replacement_;
+  args["num_samples"] = num_samples_;
+  args["reshuffle_each_epoch"] = reshuffle_each_epoch_;
+  if (this->HasChildSampler()) {
+    std::vector<nlohmann::json> children_args;
+    for (auto child : child_) {
+      nlohmann::json child_arg;
+      RETURN_IF_NOT_OK(child->to_json(&child_arg));
+      children_args.push_back(child_arg);
+    }
+    args["child_sampler"] = children_args;
+  }
+  *out_json = args;
+  return Status::OK();
 }
 }  // namespace dataset
 }  // namespace mindspore

@@ -17,7 +17,7 @@
 #include "src/ops/gather_nd.h"
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
-#include "nnacl/fp32/gatherNd.h"
+#include "nnacl/fp32/gatherNd_fp32.h"
 
 namespace mindspore {
 namespace lite {
@@ -30,9 +30,6 @@ OpParameter *PopulateGatherNdParameter(const mindspore::lite::PrimitiveC *primit
   }
   memset(gather_nd_param, 0, sizeof(GatherNdParameter));
   gather_nd_param->op_parameter_.type_ = primitive->Type();
-  auto gatherNd_attr =
-    reinterpret_cast<mindspore::lite::GatherNd *>(const_cast<mindspore::lite::PrimitiveC *>(primitive));
-  gather_nd_param->batchDims_ = gatherNd_attr->GetBatchDims();
   return reinterpret_cast<OpParameter *>(gather_nd_param);
 }
 

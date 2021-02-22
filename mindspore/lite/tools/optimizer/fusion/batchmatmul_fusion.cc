@@ -16,6 +16,7 @@
 #include "tools/optimizer/fusion/batchmatmul_fusion.h"
 #include <memory>
 #include <vector>
+#include <algorithm>
 #include "src/ops/primitive_c.h"
 #include "src/param_value_lite.h"
 #include "schema/inner/model_generated.h"
@@ -91,7 +92,10 @@ STATUS GetRightMatmulInputParamter(const CNodePtr &stack_node, const ParameterPt
   }
   rmatmul_input_shape.insert(rmatmul_input_shape.begin(), joint_fullconnect_size);
   auto type_ptr = TypeIdToType(fc_weight_param->tensor_type());
-  auto abstract_tensor = std::make_shared<abstract::AbstractTensor>(type_ptr, rmatmul_input_shape);
+  std::vector<int64_t> shape_vector;
+  (void)std::transform(rmatmul_input_shape.begin(), rmatmul_input_shape.end(), std::back_inserter(shape_vector),
+                       [](const int32_t &value) { return static_cast<int64_t>(value); });
+  auto abstract_tensor = std::make_shared<abstract::AbstractTensor>(type_ptr, shape_vector);
   rmatmul_input->set_abstract(abstract_tensor);
   rmatmul_input->set_name(stack_node->fullname_with_scope() + "right_parameter");
   ParamValueLitePtr param_value = std::make_shared<ParamValueLite>();
@@ -99,8 +103,7 @@ STATUS GetRightMatmulInputParamter(const CNodePtr &stack_node, const ParameterPt
   param_value->set_tensor_shape(rmatmul_input_shape);
   param_value->set_tensor_type(fc_weight_param->tensor_type());
   param_value->set_format(fc_weight_param->format());
-  param_value->set_tensor_addr(new_tensor_data);
-  param_value->set_tensor_size(joint_fullconnect_size * tensor_size);
+  param_value->SetTensorData(new_tensor_data, joint_fullconnect_size * tensor_size);
   rmatmul_input->set_default_param(param_value);
   return RET_OK;
 }
@@ -195,6 +198,7 @@ const AnfNodePtr BatchMatMulFusion::Process(const FuncGraphPtr &func_graph, cons
   }
   auto matmul_cnode = func_graph->NewCNode(matmul_inputs);
   matmul_cnode->set_fullname_with_scope("matmul_" + stack_cnode->fullname_with_scope());
+  matmul_cnode->set_abstract(stack_cnode->abstract()->Clone());
   MS_LOG(INFO) << "stack node:" << stack_cnode->fullname_with_scope() << " batchmatmul fusion success";
   return matmul_cnode;
 }

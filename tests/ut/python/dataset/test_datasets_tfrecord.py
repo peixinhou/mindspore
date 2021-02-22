@@ -312,6 +312,54 @@ def test_tf_wrong_schema():
     assert exception_occurred, "test_tf_wrong_schema failed."
 
 
+def test_tfrecord_invalid_columns():
+    logger.info("test_tfrecord_columns_list")
+    invalid_columns_list = ["not_exist"]
+    data = ds.TFRecordDataset(FILES, columns_list=invalid_columns_list)
+    with pytest.raises(RuntimeError) as info:
+        _ = data.create_dict_iterator(num_epochs=1, output_numpy=True).__next__()
+    assert "Invalid data, failed to find column name: not_exist" in str(info.value)
+
+
+def test_tfrecord_exception():
+    logger.info("test_tfrecord_exception")
+
+    def exception_func(item):
+        raise Exception("Error occur!")
+    with pytest.raises(RuntimeError) as info:
+        schema = ds.Schema()
+        schema.add_column('col_1d', de_type=mstype.int64, shape=[2])
+        schema.add_column('col_2d', de_type=mstype.int64, shape=[2, 2])
+        schema.add_column('col_3d', de_type=mstype.int64, shape=[2, 2, 2])
+        data = ds.TFRecordDataset(FILES, schema=schema, shuffle=False)
+        data = data.map(operations=exception_func, input_columns=["col_1d"], num_parallel_workers=1)
+        for _ in data.__iter__():
+            pass
+    assert "map operation: [PyFunc] failed. The corresponding data files" in str(info.value)
+
+    with pytest.raises(RuntimeError) as info:
+        schema = ds.Schema()
+        schema.add_column('col_1d', de_type=mstype.int64, shape=[2])
+        schema.add_column('col_2d', de_type=mstype.int64, shape=[2, 2])
+        schema.add_column('col_3d', de_type=mstype.int64, shape=[2, 2, 2])
+        data = ds.TFRecordDataset(FILES, schema=schema, shuffle=False)
+        data = data.map(operations=exception_func, input_columns=["col_2d"], num_parallel_workers=1)
+        for _ in data.__iter__():
+            pass
+    assert "map operation: [PyFunc] failed. The corresponding data files" in str(info.value)
+
+    with pytest.raises(RuntimeError) as info:
+        schema = ds.Schema()
+        schema.add_column('col_1d', de_type=mstype.int64, shape=[2])
+        schema.add_column('col_2d', de_type=mstype.int64, shape=[2, 2])
+        schema.add_column('col_3d', de_type=mstype.int64, shape=[2, 2, 2])
+        data = ds.TFRecordDataset(FILES, schema=schema, shuffle=False)
+        data = data.map(operations=exception_func, input_columns=["col_3d"], num_parallel_workers=1)
+        for _ in data.__iter__():
+            pass
+    assert "map operation: [PyFunc] failed. The corresponding data files" in str(info.value)
+
+
 if __name__ == '__main__':
     test_tfrecord_shape()
     test_tfrecord_read_all_dataset()
@@ -331,3 +379,5 @@ if __name__ == '__main__':
     test_tfrecord_schema_columns_list()
     test_tfrecord_invalid_files()
     test_tf_wrong_schema()
+    test_tfrecord_invalid_columns()
+    test_tfrecord_exception()

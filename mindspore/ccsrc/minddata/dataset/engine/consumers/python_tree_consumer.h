@@ -32,6 +32,8 @@ class PythonIteratorConsumer : public IteratorConsumer {
   /// Constructor which will call the base class default constructor.
   /// \param num_epochs number of epochs. Default to -1 (infinite epochs).
   explicit PythonIteratorConsumer(int32_t num_epochs = -1) : IteratorConsumer(num_epochs) {}
+
+  ~PythonIteratorConsumer() = default;
   /// Returns the next row in a vector format
   /// \param[out] out std::vector of Tensors
   /// \return Status error code
@@ -41,6 +43,29 @@ class PythonIteratorConsumer : public IteratorConsumer {
   /// \param[out] out std::map of string to Tensor
   /// \return Status error code
   Status GetNextAsDict(py::dict *out);
+};
+
+class PythonBuildVocabConsumer : public BuildVocabConsumer {
+ public:
+  Status Start() override;
+};
+
+class PythonSaveToDisk : public SaveToDisk {
+ public:
+  PythonSaveToDisk(const std::string &datasetPath, int32_t numFiles, const std::string &datasetType);
+  ~PythonSaveToDisk() = default;
+  Status Save() override;
+};
+
+class PythonTreeGetters : public TreeGetters {
+ public:
+  Status GetRow(TensorRow *const r) override;
+  ~PythonTreeGetters() = default;
+};
+class PythonDatasetSizeGetter : public DatasetSizeGetter {
+ public:
+  Status GetRow(const std::shared_ptr<TreeAdapter> &tree_adapter, TensorRow *r) override;
+  ~PythonDatasetSizeGetter() = default;
 };
 }  // namespace mindspore::dataset
 #endif  // MINDSPORE_CCSRC_MINDDATA_DATASET_ENGINE_CONSUMERS_PYTHON_TREE_CONSUMER_H_

@@ -1,4 +1,4 @@
-# Copyright 2020 Huawei Technologies Co., Ltd
+# Copyright 2020-2021 Huawei Technologies Co., Ltd
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,12 +16,12 @@
 from copy import deepcopy
 
 from mindspore import nn
-from mindspore.ops import operations as op
 from mindspore.train._utils import check_value_type
-from ...._operators import reshape, sqrt, Tensor
-from .._attribution import Attribution
-from .backprop_utils import compute_gradients
-from ...._utils import unify_inputs, unify_targets
+from mindspore.explainer._operators import reshape, sqrt, Tensor
+from mindspore.explainer._utils import abs_max, unify_inputs, unify_targets
+
+from .. import Attribution
+from .backprop_utils import get_bp_weights, GradNet
 
 
 def _get_hook(bntype, cache):
@@ -39,16 +39,6 @@ def _get_hook(bntype, cache):
         return grad_output
 
     return reset_gradient
-
-
-def _abs_max(gradients):
-    """
-    Transform gradients to saliency through abs then take max along
-    channels.
-    """
-    gradients = op.Abs()(gradients)
-    saliency = op.ReduceMax(keep_dims=True)(gradients, axis=1)
-    return saliency
 
 
 class Gradient(Attribution):
@@ -70,12 +60,27 @@ class Gradient(Attribution):
     Args:
         network (Cell): The black-box model to be explained.
 
+    Inputs:
+        - **inputs** (Tensor) - The input data to be explained, a 4D tensor of shape :math:`(N, C, H, W)`.
+        - **targets** (Tensor, int) - The label of interest. It should be a 1D or 0D tensor, or an integer.
+          If it is a 1D tensor, its length should be the same as `inputs`.
+
+    Outputs:
+        Tensor, a 4D tensor of shape :math:`(N, 1, H, W)`.
+
     Examples:
+        >>> import numpy as np
+        >>> import mindspore as ms
         >>> from mindspore.explainer.explanation import Gradient
-        >>> net = resnet50(10)
+        >>> from mindspore.train.serialization import load_checkpoint, load_param_into_net
+        >>> # init Gradient with a trained network
+        >>> net = resnet50(10)  # please refer to model_zoo
         >>> param_dict = load_checkpoint("resnet50.ckpt")
         >>> load_param_into_net(net, param_dict)
         >>> gradient = Gradient(net)
+        >>> inputs = ms.Tensor(np.random.rand(1, 3, 224, 224), ms.float32)
+        >>> label = 5
+        >>> saliency = gradient(inputs, label)
     """
 
     def __init__(self, network):
@@ -84,33 +89,17 @@ class Gradient(Attribution):
         self._backward_model.set_train(False)
         self._backward_model.set_grad(False)
         self._hook_bn()
-        self._grad_op = compute_gradients
-        self._aggregation_fn = _abs_max
-
+        self._grad_net = GradNet(self._backward_model)
+        self._aggregation_fn = abs_max
 
     def __call__(self, inputs, targets):
-        """
-        Call function for `Gradient`.
-
-        Args:
-            inputs (Tensor): The input data to be explained, a 4D tensor of shape :math:`(N, C, H, W)`.
-            targets (Tensor, int): The label of interest. It should be a 1D or 0D tensor, or an integer.
-                If it is a 1D tensor, its length should be the same as `inputs`.
-
-        Returns:
-            Tensor, a 4D tensor of shape :math:`(N, 1, H, W)`.
-
-        Examples:
-            >>> inputs = ms.Tensor(np.random.rand([1, 3, 224, 224]), ms.float32)
-            >>> label = 5
-            >>> # gradient is a Gradient object, parse data and the target label to be explained and get the attribution
-            >>> saliency = gradient(inputs, label)
-        """
+        """Call function for `Gradient`."""
         self._verify_data(inputs, targets)
         inputs = unify_inputs(inputs)
         targets = unify_targets(targets)
 
-        gradient = self._grad_op(self._backward_model, *inputs, targets)
+        weights = get_bp_weights(self._backward_model, *inputs, targets)
+        gradient = self._grad_net(*inputs, weights)
         saliency = self._aggregation_fn(gradient)
         return saliency
 

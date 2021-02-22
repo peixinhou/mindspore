@@ -26,7 +26,7 @@
 namespace mindspore {
 namespace dataset {
 
-class AlbumNode : public DatasetNode {
+class AlbumNode : public MappableSourceNode {
  public:
   /// \brief Constructor
   AlbumNode(const std::string &dataset_dir, const std::string &data_schema,
@@ -36,9 +36,22 @@ class AlbumNode : public DatasetNode {
   /// \brief Destructor
   ~AlbumNode() = default;
 
-  /// \brief a base class override function to create a runtime dataset op object from this class
-  /// \return shared pointer to the newly created DatasetOp
-  std::vector<std::shared_ptr<DatasetOp>> Build() override;
+  /// \brief Node name getter
+  /// \return Name of the current node
+  std::string Name() const override { return kAlbumNode; }
+
+  /// \brief Print the description
+  /// \param out - The output stream to write output to
+  void Print(std::ostream &out) const override;
+
+  /// \brief Copy the node to a new object
+  /// \return A shared pointer to the new copy
+  std::shared_ptr<DatasetNode> Copy() override;
+
+  /// \brief a base class override function to create the required runtime dataset op objects for this class
+  /// \param node_ops - A vector containing shared pointer to the Dataset Ops that this object will create
+  /// \return Status Status::OK() if build successfully
+  Status Build(std::vector<std::shared_ptr<DatasetOp>> *const node_ops) override;
 
   /// \brief Parameters validation
   /// \return Status Status::OK() if all the parameters are valid
@@ -47,6 +60,18 @@ class AlbumNode : public DatasetNode {
   /// \brief Get the shard id of node
   /// \return Status Status::OK() if get shard id successfully
   Status GetShardId(int32_t *shard_id) override;
+
+  /// \brief Getter functions
+  const std::string &DatasetDir() const { return dataset_dir_; }
+  const std::string &SchemaPath() const { return schema_path_; }
+  const std::vector<std::string> &ColumnNames() const { return column_names_; }
+  bool Decode() const { return decode_; }
+  /// \brief Sampler getter
+  /// \return SamplerObj of the current node
+  std::shared_ptr<SamplerObj> Sampler() override { return sampler_; }
+
+  /// \brief Sampler setter
+  void SetSampler(std::shared_ptr<SamplerObj> sampler) override { sampler_ = sampler; }
 
  private:
   std::string dataset_dir_;

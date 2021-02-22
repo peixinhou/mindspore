@@ -125,25 +125,15 @@ void IndirectGemmFp16_16x8_c8(float16_t *output, float16_t *input, float16_t *we
 void ConvFp16(float16_t *input_data, float16_t *packed_input, float16_t *packed_weight, float16_t *bias_data,
               float16_t *col_major_input, float16_t *output_data, int task_id, ConvParameter *conv_param) {
   const int tile_n = 16;
-  int kernel_h = conv_param->kernel_h_;
-  int kernel_w = conv_param->kernel_w_;
-  int in_batch = conv_param->input_batch_;
-  int in_channel = conv_param->input_channel_;
-  int in_h = conv_param->input_h_;
-  int in_w = conv_param->input_w_;
-  int out_h = conv_param->output_h_;
-  int out_w = conv_param->output_w_;
   int out_channel = conv_param->output_channel_;
-  int thread_count = conv_param->thread_num_;
-  int output_count = out_h * out_w;
+  int output_count = conv_param->output_h_ * conv_param->output_w_;
   int output_tile_count = UP_DIV(output_count, tile_n);
-  int kernel_plane = kernel_h * kernel_w;
-  int deep = kernel_plane * in_channel;
+  int deep = conv_param->kernel_h_ * conv_param->kernel_w_ * conv_param->input_channel_;
 
-  for (int b = 0; b < in_batch; b++) {
-    int in_batch_offset = b * in_channel * in_h * in_w;
-    int out_batch_offset = b * out_channel * out_h * out_w;
-    for (int thread_id = task_id; thread_id < output_tile_count; thread_id += thread_count) {
+  for (int b = 0; b < conv_param->input_batch_; b++) {
+    int in_batch_offset = b * conv_param->input_channel_ * conv_param->input_h_ * conv_param->input_w_;
+    int out_batch_offset = b * out_channel * output_count;
+    for (int thread_id = task_id; thread_id < output_tile_count; thread_id += conv_param->thread_num_) {
       int start_index = thread_id * tile_n;
       int real_cal_num = (output_count - start_index) < tile_n ? (output_count - start_index) : tile_n;
       float16_t *gemm_input = packed_input + task_id * deep * tile_n;
@@ -166,18 +156,15 @@ void ConvWinogardFp16(float16_t *input_data, float16_t *trans_weight, const floa
                       float16_t *output_data, TmpBufferAddressFp16 *buffer_list, int task_id, ConvParameter *conv_param,
                       InputTransFp16Func in_func, OutputTransFp16Func out_func) {
   const int tile_num = 16;
-  int thread_num = conv_param->thread_num_;
-  int input_unit = conv_param->input_unit_;
-  int in_batch = conv_param->input_batch_;
   int in_channel = conv_param->input_channel_;
-  int out_unit = conv_param->output_unit_;
-  int out_w_block = UP_DIV(conv_param->output_w_, out_unit);
-  int out_h_block = UP_DIV(conv_param->output_h_, out_unit);
+  int out_w_block = UP_DIV(conv_param->output_w_, conv_param->output_unit_);
+  int out_h_block = UP_DIV(conv_param->output_h_, conv_param->output_unit_);
   int output_count = out_w_block * out_h_block;
-  int output_tile_count = UP_DIV(output_count, tile_num);
-  int out_channel = conv_param->output_channel_;
-  int oc8 = UP_DIV(out_channel, C8NUM);
-  int input_unit_square = input_unit * input_unit;
+  int per_thread_num = UP_DIV(output_count, conv_param->thread_num_);
+  int real_tile = per_thread_num < tile_num ? per_thread_num : tile_num;
+  int output_tile_count = UP_DIV(output_count, real_tile);
+  int oc8 = UP_DIV(conv_param->output_channel_, C8NUM);
+  int input_unit_square = conv_param->input_unit_ * conv_param->input_unit_;
 
   float16_t *trans_input = buffer_list[0];
   float16_t *gemm_out = buffer_list[1];
@@ -189,13 +176,16 @@ void ConvWinogardFp16(float16_t *input_data, float16_t *trans_weight, const floa
   int col_buffer_offset = tile_num * in_channel;
   // step 1 : filter transform (pre-processed offline)
   // step 2 : input transform (online)
-  for (int b = 0; b < in_batch; b++) {
+  for (int b = 0; b < conv_param->input_batch_; b++) {
     int in_batch_offset = b * in_channel * conv_param->input_h_ * conv_param->input_w_;
-    int out_batch_offset = b * out_channel * conv_param->output_h_ * conv_param->output_w_;
-    for (int thread_id = task_id; thread_id < output_tile_count; thread_id += thread_num) {
-      int out_tile_index = thread_id * tile_num;
-      int cal_num = output_count - thread_id * tile_num;
-      cal_num = cal_num > tile_num ? tile_num : cal_num;
+    int out_batch_offset = b * conv_param->output_channel_ * conv_param->output_h_ * conv_param->output_w_;
+    for (int thread_id = task_id; thread_id < output_tile_count; thread_id += conv_param->thread_num_) {
+      int out_tile_index = thread_id * real_tile;
+      int cal_num = output_count - thread_id * real_tile;
+      cal_num = cal_num > real_tile ? real_tile : cal_num;
+      if (cal_num <= 0) {
+        return;
+      }
       WinogradInputTransformFp16(input_data + in_batch_offset, trans_input + task_id * trans_input_offset,
                                  tmp_data + task_id * tmp_data_offset, cal_num, out_tile_index, out_w_block, conv_param,
                                  in_func);
@@ -204,7 +194,7 @@ void ConvWinogardFp16(float16_t *input_data, float16_t *trans_weight, const floa
       float16_t *dst_ptr = gemm_out + task_id * gemm_out_offset;
       float16_t *tmp_col_ptr = col_buffer + task_id * col_buffer_offset;
       for (int i = 0; i < input_unit_square; ++i) {
-        RowMajor2Col16MajorFp16Opt(src_ptr + i * tile_num * in_channel, tmp_col_ptr, tile_num, in_channel);
+        RowMajor2Col16MajorFp16Opt(src_ptr + i * tile_num * in_channel, tmp_col_ptr, cal_num, in_channel);
         MatMulFp16(tmp_col_ptr, trans_weight + i * in_channel * oc8 * C8NUM, dst_ptr + i * C8NUM, NULL, 0, in_channel,
                    cal_num, oc8 * C8NUM, input_unit_square, OutType_TileC8);
       }

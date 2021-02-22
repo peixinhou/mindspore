@@ -27,13 +27,14 @@ class ConvolutionFP16CPUKernel : public ConvolutionBaseFP16CPUKernel {
  public:
   ConvolutionFP16CPUKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
                            const std::vector<lite::Tensor *> &outputs, const InnerContext *ctx,
-                           const mindspore::lite::PrimitiveC *primitive)
-      : ConvolutionBaseFP16CPUKernel(parameter, inputs, outputs, ctx, primitive) {}
+                           const mindspore::lite::PrimitiveC *primitive, void *origin_weight, void *origin_bias,
+                           TypeId origin_weight_data_type, TypeId origin_bias_data_type)
+      : ConvolutionBaseFP16CPUKernel(parameter, inputs, outputs, ctx, primitive),
+        origin_weight_(origin_weight),
+        origin_bias_(origin_bias),
+        origin_weight_data_type_(origin_weight_data_type),
+        origin_bias_data_type_(origin_bias_data_type) {}
   ~ConvolutionFP16CPUKernel() override {
-    if (fp16_weight_ != nullptr) {
-      free(fp16_weight_);
-      fp16_weight_ = nullptr;
-    }
     if (packed_weight_ != nullptr) {
       free(packed_weight_);
       packed_weight_ = nullptr;
@@ -46,6 +47,7 @@ class ConvolutionFP16CPUKernel : public ConvolutionBaseFP16CPUKernel {
   int RunImpl(int task_id);
   int InitWeightBias();
   int InitTmpBuffer();
+  void AdjustNumberOfThread();
 
  private:
   void FreeTmpBuffer() {
@@ -58,9 +60,13 @@ class ConvolutionFP16CPUKernel : public ConvolutionBaseFP16CPUKernel {
       col_major_input_ = nullptr;
     }
   }
+  void *origin_weight_;  // do not free
+  void *origin_bias_;    // do not free
   float16_t *packed_input_ = nullptr;
   float16_t *packed_weight_ = nullptr;
   float16_t *col_major_input_ = nullptr;
+  TypeId origin_weight_data_type_;
+  TypeId origin_bias_data_type_;
 };
 }  // namespace mindspore::kernel
 

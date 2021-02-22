@@ -14,14 +14,15 @@
  * limitations under the License.
  */
 
+#include "src/ops/populate/strided_slice_populate.h"
+#include <limits>
 #include "src/ops/strided_slice.h"
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
-#include "nnacl/strided_slice.h"
+#include "nnacl/strided_slice_parameter.h"
 
 namespace mindspore {
 namespace lite {
-
 OpParameter *PopulateStridedSliceParameter(const mindspore::lite::PrimitiveC *primitive) {
   StridedSliceParameter *strided_slice_param =
     reinterpret_cast<StridedSliceParameter *>(malloc(sizeof(StridedSliceParameter)));
@@ -61,9 +62,11 @@ OpParameter *PopulateStridedSliceParameter(const mindspore::lite::PrimitiveC *pr
     return nullptr;
   }
   memcpy(strided_slice_param->in_shape_, (in_shape.data()), in_shape.size() * sizeof(int));
+  strided_slice_param->in_shape_length_ = static_cast<int>(in_shape.size());
   return reinterpret_cast<OpParameter *>(strided_slice_param);
 }
 
 Registry StridedSliceParameterRegistry(schema::PrimitiveType_StridedSlice, PopulateStridedSliceParameter);
+
 }  // namespace lite
 }  // namespace mindspore

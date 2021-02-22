@@ -15,6 +15,7 @@
  */
 #include "backend/kernel_compiler/cpu/mkldnn/conv2d_cpu_kernel.h"
 #include <string>
+#include <algorithm>
 #include "utils/ms_utils.h"
 #include "backend/kernel_compiler/cpu/mkldnn/mkl_kernel_engine.h"
 #include "runtime/device/cpu/cpu_device_address.h"
@@ -30,7 +31,7 @@ void Conv2dCPUKernel::InitKernel(const CNodePtr &kernel_node) {
     MS_LOG(EXCEPTION) << "conv2d only support nchw input!";
   }
   std::vector<size_t> kernel_size({weight_shape[2], weight_shape[3]});
-  size_t group = IntToSize(AnfAlgo::GetNodeAttr<int>(kernel_node, GROUP));
+  size_t group = LongToSize(AnfAlgo::GetNodeAttr<int64_t>(kernel_node, GROUP));
   if (group != 1) {
     if (src_shape[1] % group != 0) {
       MS_LOG(EXCEPTION) << "conv2d channels should be divided by group!";
@@ -41,28 +42,32 @@ void Conv2dCPUKernel::InitKernel(const CNodePtr &kernel_node) {
   dnnl::memory::desc src_desc = GetDefaultMemDesc(src_shape);
   dnnl::memory::desc weights_desc = GetDefaultMemDesc(weight_shape);
   dnnl::memory::desc dst_desc = GetDefaultMemDesc(dst_shape);
-  auto stride_ori = AnfAlgo::GetNodeAttr<std::vector<int>>(kernel_node, STRIDE);
-  auto dilation_ori = AnfAlgo::GetNodeAttr<std::vector<int>>(kernel_node, DILATION);
-  if (stride_ori.size() != 4 || stride_ori[2] != stride_ori[3]) {
-    MS_LOG(EXCEPTION) << "conv2d only support equal stride, and stride must be 4d!";
-  }
+  std::vector<int> stride_ori;
+  std::vector<int> dilation_ori;
+  auto stride_me = AnfAlgo::GetNodeAttr<std::vector<int64_t>>(kernel_node, STRIDE);
+  auto dilation_me = AnfAlgo::GetNodeAttr<std::vector<int64_t>>(kernel_node, DILATION);
+  (void)std::transform(stride_me.begin(), stride_me.end(), std::back_inserter(stride_ori),
+                       [](const int64_t &value) { return static_cast<int>(value); });
+  (void)std::transform(dilation_me.begin(), dilation_me.end(), std::back_inserter(dilation_ori),
+                       [](const int64_t &value) { return static_cast<int>(value); });
   if (stride_ori[0] != 1 || stride_ori[1] != 1) {
     MS_LOG(EXCEPTION) << "conv2d stride only support 1 in N axis and C axis!";
   }
-  if (dilation_ori.size() != 4 || dilation_ori[2] != 1 || dilation_ori[3] != 1) {
-    MS_LOG(EXCEPTION) << "conv2d dilation only support 1, and dilation must be 4d!";
+  if (dilation_ori.size() != 4) {
+    MS_LOG(EXCEPTION) << "conv2d dilation must be 4d!";
   }
   if (dilation_ori[0] != 1 || dilation_ori[1] != 1) {
     MS_LOG(EXCEPTION) << "conv2d dilation only support 1 in N axis and C axis!";
   }
-  int stride = stride_ori[2];
-  int dilation = dilation_ori[2];
-  dnnl::memory::dims strides{stride, stride};
-  dnnl::memory::dims dilates{dilation - 1, dilation - 1};
+
+  std::vector<int> stride{stride_ori[2], stride_ori[3]};
+  std::vector<int> dilation{dilation_ori[2], dilation_ori[3]};
+  dnnl::memory::dims strides{stride_ori[2], stride_ori[3]};
+  dnnl::memory::dims dilates{dilation_ori[2] - 1, dilation_ori[3] - 1};
   std::vector<int> int_padding_l;
   std::vector<int> int_padding_r;
   const std::string pad_mode = AnfAlgo::GetNodeAttr<std::string>(kernel_node, PAD_MODE);
-  GetPadding(kernel_node, pad_mode, src_shape, kernel_size, stride, &int_padding_l, &int_padding_r);
+  GetPadding(kernel_node, pad_mode, src_shape, kernel_size, stride, &int_padding_l, &int_padding_r, dilation);
   if (int_padding_l.size() != 2 || int_padding_r.size() != 2) {
     MS_LOG(EXCEPTION) << "get padding failed";
   }

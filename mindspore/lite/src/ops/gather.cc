@@ -59,7 +59,7 @@ int Gather::UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &inp
     }
     if (inputs.at(2)->isa<ValueNode>()) {
       ValueNodePtr axis_tensor = inputs.at(2)->cast<ValueNodePtr>();
-      int axis = GetValue<int>(axis_tensor->value());
+      int axis = CastToInt(axis_tensor->value()).front();
       gather_attr->axis = axis;
     } else {
       MS_LOG(ERROR) << "input axis is not value node.";
@@ -98,8 +98,8 @@ Registry GatherRegistry(schema::PrimitiveType_Gather, GatherCreator);
 
 int Gather::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> outputs_) {
   MS_ASSERT(this->primitive_ != nullptr);
-  if (inputs_.size() != kDoubleNum) {
-    MS_LOG(DEBUG) << "Gather should have two inputs";
+  if (inputs_.size() < kDoubleNum) {
+    MS_LOG(DEBUG) << "Gather should be at least two inputs";
   }
   if (outputs_.size() != kSingleNum) {
     MS_LOG(ERROR) << "Gather should have one outputs";
@@ -112,12 +112,14 @@ int Gather::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> outp
   auto output = outputs_.front();
   MS_ASSERT(input != nullptr);
   output->set_data_type(input->data_type());
+  if (this->quant_type() == schema::QuantType_WeightQuant) {
+    output->set_data_type(kNumberTypeFloat32);
+  }
   output->set_format(input->format());
   if (!infer_flag()) {
-    return RET_OK;
+    return RET_INFER_INVALID;
   }
 
-  MS_ASSERT(gather_prim != nullptr);
   int axis = GetAxis();
   int batch_dims = GetBatchDims();
   if (axis < 0) {
@@ -138,7 +140,7 @@ int Gather::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> outp
   std::vector<int> out_shape{in_shape};
   out_shape.erase(out_shape.begin() + axis);
   for (int i = indices_rank - 1; i >= 0; --i) {
-    out_shape.insert(out_shape.begin() + axis, indices_shape[i]);
+    out_shape.insert(out_shape.begin() + axis, indices_shape.at(i));
   }
   output->set_shape(out_shape);
   return RET_OK;

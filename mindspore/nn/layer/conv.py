@@ -1,4 +1,4 @@
-# Copyright 2020 Huawei Technologies Co., Ltd
+# Copyright 2020-2021 Huawei Technologies Co., Ltd
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@ from mindspore import context
 from mindspore.ops import operations as P
 from mindspore.ops.primitive import constexpr
 from mindspore.common.parameter import Parameter
-from mindspore.common.initializer import initializer, Initializer
+from mindspore.common.initializer import initializer
 from mindspore.common.tensor import Tensor
 from mindspore._checkparam import Validator, Rel, twice
 from mindspore._extends import cell_attr_register
@@ -131,9 +131,9 @@ class Conv2d(_Conv):
 
     If the 'pad_mode' is set to be "valid", the output height and width will be
     :math:`\left \lfloor{1 + \frac{H_{in} + 2 \times \text{padding} - \text{ks_h} -
-    (\text{ks_h} - 1) \times (\text{dilation} - 1) }{\text{stride}}} \right \rfloor` and
+    (\text{ks_h} - 1) \times (\text{dilation} - 1) }{\text{stride}}} \right \rfloor`    and
     :math:`\left \lfloor{1 + \frac{W_{in} + 2 \times \text{padding} - \text{ks_w} -
-    (\text{ks_w} - 1) \times (\text{dilation} - 1) }{\text{stride}}} \right \rfloor` respectively.
+    (\text{ks_w} - 1) \times (\text{dilation} - 1) }{\text{stride}}} \right \rfloor`    respectively.
 
     The first introduction can be found in paper `Gradient Based Learning Applied to Document Recognition
     <http://vision.stanford.edu/cs598_spring07/papers/Lecun98.pdf>`_.
@@ -191,15 +191,29 @@ class Conv2d(_Conv):
 
     Inputs:
         - **input** (Tensor) - Tensor of shape :math:`(N, C_{in}, H_{in}, W_{in})` \
-            or `(N, H_{in}, W_{in}, C_{in})`.
+          or :math:`(N, H_{in}, W_{in}, C_{in})`.
 
     Outputs:
-        Tensor of shape :math:`(N, C_{out}, H_{out}, W_{out})` or `(N, H_{out}, W_{out}, C_{out})`.
+        Tensor of shape :math:`(N, C_{out}, H_{out}, W_{out})` or :math:`(N, H_{out}, W_{out}, C_{out})`.
+
+    Raises:
+        TypeError: If `in_channels`, `out_channels` or `group` is not an int.
+        TypeError: If `kernel_size`, `stride`, `padding` or `dilation` is neither an int not a tuple.
+        ValueError: If `in_channels`, `out_channels`, `kernel_size`, `stride` or `dilation` is less than 1.
+        ValueError: If `padding` is less than 0.
+        ValueError: If `pad_mode` is not one of 'same', 'valid', 'pad'.
+        ValueError: If `padding` is a tuple whose length is not equal to 4.
+        ValueError: If `pad_mode` is not equal to 'pad' and `padding` is not equal to (0, 0, 0, 0).
+        ValueError: If `data_format` is neither 'NCHW' not 'NHWC'.
+
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
 
     Examples:
         >>> net = nn.Conv2d(120, 240, 4, has_bias=False, weight_init='normal')
         >>> input = Tensor(np.ones([1, 120, 1024, 640]), mindspore.float32)
-        >>> net(input).shape
+        >>> output = net(input).shape
+        >>> print(output)
         (1, 240, 1024, 640)
     """
 
@@ -243,27 +257,7 @@ class Conv2d(_Conv):
                                dilation=self.dilation,
                                group=self.group,
                                data_format=self.format)
-        self._init_depthwise_conv2d()
         self.bias_add = P.BiasAdd()
-
-    def _init_depthwise_conv2d(self):
-        """Initialize depthwise conv2d op"""
-        if context.get_context("device_target") == "Ascend" and self.group > 1:
-            self.dilation = self._dilation
-            Validator.check_equal_int(self.group, self.in_channels, 'group')
-            Validator.check_equal_int(self.group, self.out_channels, 'group')
-            self.conv2d = P.DepthwiseConv2dNative(channel_multiplier=1,
-                                                  kernel_size=self.kernel_size,
-                                                  pad_mode=self.pad_mode,
-                                                  pad=self.padding,
-                                                  stride=self.stride,
-                                                  dilation=self.dilation)
-            weight_shape = [1, self.in_channels, *self.kernel_size]
-            if isinstance(self.weight_init, Tensor):
-                self.weight_init = Tensor(self.weight_init.asnumpy().swapaxes(0, 1), self.weight_init.dtype)
-            if isinstance(self.weight_init, Initializer):
-                self.weight_init.shape = weight_shape
-            self.weight = Parameter(initializer(self.weight_init, weight_shape), name='weight')
 
     def construct(self, x):
         output = self.conv2d(x, self.weight)
@@ -318,7 +312,7 @@ class Conv1d(_Conv):
 
     If the 'pad_mode' is set to be "valid", the output width will be
     :math:`\left \lfloor{1 + \frac{W_{in} + 2 \times \text{padding} - \text{ks_w} -
-    (\text{ks_w} - 1) \times (\text{dilation} - 1) }{\text{stride}}} \right \rfloor` respectively.
+    (\text{ks_w} - 1) \times (\text{dilation} - 1) }{\text{stride}}} \right \rfloor`    respectively.
 
     The first introduction of convolution layer can be found in paper `Gradient Based Learning Applied to Document
     Recognition <http://vision.stanford.edu/cs598_spring07/papers/Lecun98.pdf>`_.
@@ -371,10 +365,20 @@ class Conv1d(_Conv):
     Outputs:
         Tensor of shape :math:`(N, C_{out}, W_{out})`.
 
+    Raises:
+        TypeError: If `in_channels`, `out_channels`, `kernel_size`, `stride`, `padding` or `dilation` is not an int.
+        ValueError: If `in_channels`, `out_channels`, `kernel_size`, `stride` or `dilation` is less than 1.
+        ValueError: If `padding` is less than 0.
+        ValueError: If `pad_mode` is not one of 'same', 'valid', 'pad'.
+
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> net = nn.Conv1d(120, 240, 4, has_bias=False, weight_init='normal')
         >>> input = Tensor(np.ones([1, 120, 640]), mindspore.float32)
-        >>> net(input).shape
+        >>> output = net(input).shape
+        >>> print(output)
         (1, 240, 640)
     """
 
@@ -541,10 +545,23 @@ class Conv2dTranspose(_Conv):
     Outputs:
         Tensor of shape :math:`(N, C_{out}, H_{out}, W_{out})`.
 
+    Raises:
+        TypeError: If `in_channels`, `out_channels` or `group` is not an int.
+        TypeError: If `kernel_size`, `stride`, `padding` or `dilation` is neither an int not a tuple.
+        ValueError: If `in_channels`, `out_channels`, `kernel_size`, `stride` or `dilation` is less than 1.
+        ValueError: If `padding` is less than 0.
+        ValueError: If `pad_mode` is not one of 'same', 'valid', 'pad'.
+        ValueError: If `padding` is a tuple whose length is not equal to 4.
+        ValueError: If `pad_mode` is not equal to 'pad' and `padding` is not equal to (0, 0, 0, 0).
+
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> net = nn.Conv2dTranspose(3, 64, 4, has_bias=False, weight_init='normal', pad_mode='pad')
         >>> input = Tensor(np.ones([1, 3, 16, 50]), mindspore.float32)
-        >>> net(input).shape
+        >>> output = net(input).shape
+        >>> print(output)
         (1, 64, 19, 53)
         """
 
@@ -716,10 +733,20 @@ class Conv1dTranspose(_Conv):
     Outputs:
         Tensor of shape :math:`(N, C_{out}, W_{out})`.
 
+    Raises:
+        TypeError: If `in_channels`, `out_channels`, `kernel_size`, `stride`, `padding` or `dilation` is not an int.
+        ValueError: If `in_channels`, `out_channels`, `kernel_size`, `stride` or `dilation` is less than 1.
+        ValueError: If `padding` is less than 0.
+        ValueError: If `pad_mode` is not one of 'same', 'valid', 'pad'.
+
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> net = nn.Conv1dTranspose(3, 64, 4, has_bias=False, weight_init='normal', pad_mode='pad')
         >>> input = Tensor(np.ones([1, 3, 50]), mindspore.float32)
-        >>> net(input).shape
+        >>> output = net(input).shape
+        >>> print(output)
         (1, 64, 53)
     """
 

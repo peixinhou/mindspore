@@ -1,5 +1,5 @@
 /**
- * Copyright 2019 Huawei Technologies Co., Ltd
+ * Copyright 2019-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,14 +15,13 @@
  */
 #include "minddata/dataset/engine/datasetops/source/image_folder_op.h"
 #include <fstream>
-#include <iomanip>
+#include <unordered_set>
 #include "utils/ms_utils.h"
 #include "minddata/dataset/core/config_manager.h"
 #include "minddata/dataset/core/tensor_shape.h"
 #include "minddata/dataset/engine/datasetops/source/sampler/sequential_sampler.h"
 #include "minddata/dataset/engine/db_connector.h"
 #include "minddata/dataset/engine/execution_tree.h"
-#include "minddata/dataset/engine/opt/pass.h"
 
 namespace mindspore {
 namespace dataset {
@@ -62,7 +61,7 @@ Status ImageFolderOp::Builder::SanityCheck() {
   err_msg += builder_num_workers_ <= 0 ? "Invalid parameter, num_parallel_workers must be greater than 0, but got " +
                                            std::to_string(builder_num_workers_) + ".\n"
                                        : "";
-  return err_msg.empty() ? Status::OK() : Status(StatusCode::kUnexpectedError, __LINE__, __FILE__, err_msg);
+  return err_msg.empty() ? Status::OK() : Status(StatusCode::kMDUnexpectedError, __LINE__, __FILE__, err_msg);
 }
 
 ImageFolderOp::ImageFolderOp(int32_t num_wkrs, int32_t rows_per_buffer, std::string file_dir, int32_t queue_size,
@@ -230,6 +229,7 @@ Status ImageFolderOp::LoadTensorRow(row_id_type row_id, ImageLabelPair pairPtr, 
     }
   }
   (*trow) = TensorRow(row_id, {std::move(image), std::move(label)});
+  trow->setPath({folder_path_ + (pairPtr->first), std::string("")});
   return Status::OK();
 }
 
@@ -255,7 +255,8 @@ void ImageFolderOp::Print(std::ostream &out, bool show_all) const {
     // Call the super class for displaying any common detailed info
     ParallelOp::Print(out, show_all);
     // Then show any custom derived-internal stuff
-    out << "\nNumber of rows:" << num_rows_ << "\nImageFolder directory: " << folder_path_ << "\n\n";
+    out << "\nNumber of rows:" << num_rows_ << "\nImageFolder directory: " << folder_path_
+        << "\nDecode: " << (decode_ ? "yes" : "no") << "\n\n";
   }
 }
 
@@ -280,7 +281,7 @@ Status ImageFolderOp::GetClassIds(std::map<int32_t, std::vector<int64_t>> *cls_i
       RETURN_STATUS_UNEXPECTED("No images found in dataset, please check if Op read images successfully or not.");
     } else {
       RETURN_STATUS_UNEXPECTED(
-        "Map for storaging image-index pair is nullptr or has been set in other place,"
+        "Map containing image-index pair is nullptr or has been set in other place,"
         "it must be empty before using GetClassIds.");
     }
   }
@@ -294,14 +295,14 @@ Status ImageFolderOp::GetClassIds(std::map<int32_t, std::vector<int64_t>> *cls_i
 }
 
 // Worker Entry for pre-scanning all the folders and do the 1st level shuffle
-// Worker pull a file name from mFoldernameQueue (which is a Queue), walks all the images under that foldername
+// Worker pull a file name from folder_name_queue_ (which is a Queue), walks all the images under that foldername
 // After walking is complete, sort all the file names (relative path to all jpeg files under the same directory )
 // (Sort is automatically conducted using a set which is implemented using a Red-Black Tree)
 // Add the sorted filenames in to a queue. The make a pair (foldername, queue<filenames>*),
 // foldername is used for 2nd level sorting.
 // FYI: 1st level sorting: sort all images under the same directory.
 // FYI: 2nd level sorting: sort all folder names
-// push this pair to mImagenameQueue (which is again a Queue)
+// push this pair to image_name_queue (which is again a Queue)
 Status ImageFolderOp::PrescanWorkerEntry(int32_t worker_id) {
   TaskManager::FindMe()->Post();
   std::string folder_name;
@@ -334,7 +335,7 @@ Status ImageFolderOp::PrescanWorkerEntry(int32_t worker_id) {
   return Status::OK();
 }
 
-// This helper function recursively walks all foldernames, and send each foldername to mFoldernameQueue
+// This helper function recursively walks all folder_paths, and send each foldername to folder_name_queue_
 // if mRecursive == false, don't go into folder of folders
 Status ImageFolderOp::RecursiveWalkFolder(Path *dir) {
   std::shared_ptr<Path::DirIterator> dir_itr = Path::DirIterator::OpenDirectory(dir);
@@ -347,7 +348,8 @@ Status ImageFolderOp::RecursiveWalkFolder(Path *dir) {
         RETURN_IF_NOT_OK(folder_name_queue_->EmplaceBack(subdir.toString().substr(dirname_offset_)));
       }
       if (recursive_ == true) {
-        RETURN_IF_NOT_OK(RecursiveWalkFolder(&subdir));
+        MS_LOG(ERROR) << "RecursiveWalkFolder(&subdir) functionality is disabled permanently. No recursive walk of "
+                      << "directory will be performed.";
       }
     }
   }
@@ -355,7 +357,7 @@ Status ImageFolderOp::RecursiveWalkFolder(Path *dir) {
 }
 
 // A thread that calls RecursiveWalkFolder
-Status ImageFolderOp::startAsyncWalk() {
+Status ImageFolderOp::StartAsyncWalk() {
   TaskManager::FindMe()->Post();
   Path dir(folder_path_);
   if (dir.Exists() == false || dir.IsDirectory() == false) {
@@ -363,8 +365,8 @@ Status ImageFolderOp::startAsyncWalk() {
   }
   dirname_offset_ = folder_path_.length();
   RETURN_IF_NOT_OK(RecursiveWalkFolder(&dir));
-  // send out num_workers_ end signal to mFoldernameQueue, 1 for each worker.
-  // Upon receiving end Signal, worker quits and set another end Signal to mImagenameQueue.
+  // send out num_workers_ end signal to folder_name_queue_, 1 for each worker.
+  // Upon receiving end Signal, worker quits and set another end Signal to image_name_queue.
   for (int32_t ind = 0; ind < num_workers_; ++ind) {
     RETURN_IF_NOT_OK(folder_name_queue_->EmplaceBack(""));  // end signal
   }
@@ -372,23 +374,23 @@ Status ImageFolderOp::startAsyncWalk() {
 }
 
 Status ImageFolderOp::LaunchThreadsAndInitOp() {
-  if (tree_ == nullptr) {
-    RETURN_STATUS_UNEXPECTED("Pipeline init failed, Execution tree not set.");
-  }
+  RETURN_UNEXPECTED_IF_NULL(tree_);
   // Registers QueueList and individual Queues for interrupt services
   RETURN_IF_NOT_OK(io_block_queues_.Register(tree_->AllTasks()));
   RETURN_IF_NOT_OK(folder_name_queue_->Register(tree_->AllTasks()));
   RETURN_IF_NOT_OK(image_name_queue_->Register(tree_->AllTasks()));
   RETURN_IF_NOT_OK(wait_for_workers_post_.Register(tree_->AllTasks()));
   // The following code launch 3 threads group
-  // 1) A thread that walks all folders and push the folder names to a util:Queue mFoldernameQueue.
-  // 2) Workers that pull foldername from mFoldernameQueue, walk it and return the sorted images to mImagenameQueue
+  // 1) A thread that walks all folders and push the folder names to a util:Queue folder_name_queue_.
+  // 2) Workers that pull foldername from folder_name_queue_, walk it and return the sorted images to image_name_queue
   // 3) Launch main workers that load DataBuffers by reading all images
-  RETURN_IF_NOT_OK(tree_->AllTasks()->CreateAsyncTask("walk dir", std::bind(&ImageFolderOp::startAsyncWalk, this)));
   RETURN_IF_NOT_OK(
-    tree_->LaunchWorkers(num_workers_, std::bind(&ImageFolderOp::PrescanWorkerEntry, this, std::placeholders::_1)));
-  RETURN_IF_NOT_OK(
-    tree_->LaunchWorkers(num_workers_, std::bind(&ImageFolderOp::WorkerEntry, this, std::placeholders::_1)));
+    tree_->AllTasks()->CreateAsyncTask("walk dir", std::bind(&ImageFolderOp::StartAsyncWalk, this), nullptr, id()));
+  RETURN_IF_NOT_OK(tree_->LaunchWorkers(num_workers_,
+                                        std::bind(&ImageFolderOp::PrescanWorkerEntry, this, std::placeholders::_1),
+                                        Name() + "::PrescanWorkerEntry", id()));
+  RETURN_IF_NOT_OK(tree_->LaunchWorkers(
+    num_workers_, std::bind(&ImageFolderOp::WorkerEntry, this, std::placeholders::_1), Name() + "::WorkerEntry", id()));
   TaskManager::FindMe()->Post();
   // The order of the following 2 functions must not be changed!
   RETURN_IF_NOT_OK(this->PrescanMasterEntry(folder_path_));  // Master thread of pre-scan workers, blocking
@@ -397,49 +399,54 @@ Status ImageFolderOp::LaunchThreadsAndInitOp() {
 }
 
 Status ImageFolderOp::CountRowsAndClasses(const std::string &path, const std::set<std::string> &exts, int64_t *num_rows,
-                                          int64_t *num_classes, int64_t dev_id, int64_t num_dev) {
+                                          int64_t *num_classes, std::map<std::string, int32_t> class_index) {
   Path dir(path);
   std::string err_msg = "";
   int64_t row_cnt = 0;
   err_msg += (dir.Exists() == false || dir.IsDirectory() == false)
-               ? "Invalid parameter, image folde path is invalid or not set, path: " + path
+               ? "Invalid parameter, image folder path is invalid or not set, path: " + path
                : "";
   err_msg +=
-    (num_classes == nullptr || num_rows == nullptr) ? "Invalid parameter, num_class or num_rows cannot be null.\n" : "";
-  err_msg += (dev_id >= num_dev || num_dev <= 0)
-               ? "Invalid parameter, num_shard must be greater than shard_id and greater than 0, got num_shard: " +
-                   std::to_string(num_dev) + ", shard_id: " + std::to_string(dev_id) + ".\n"
-               : "";
+    (num_classes == nullptr && num_rows == nullptr) ? "Invalid parameter, num_class and num_rows are null.\n" : "";
   if (err_msg.empty() == false) {
     RETURN_STATUS_UNEXPECTED(err_msg);
   }
-  std::queue<std::string> foldernames;
+  std::queue<std::string> folder_paths;
   std::shared_ptr<Path::DirIterator> dir_itr = Path::DirIterator::OpenDirectory(&dir);
+  std::unordered_set<std::string> folder_names;
   while (dir_itr->hasNext()) {
     Path subdir = dir_itr->next();
     if (subdir.IsDirectory()) {
-      foldernames.push(subdir.toString());
+      folder_paths.push(subdir.toString());
+      if (!class_index.empty()) folder_names.insert(subdir.Basename());
     }
   }
-  (*num_classes) = foldernames.size();
-  while (foldernames.empty() == false) {
-    Path subdir(foldernames.front());
+  if (num_classes != nullptr) {
+    // if class index is empty, get everything on disk
+    if (class_index.empty()) {
+      *num_classes = folder_paths.size();
+    } else {
+      for (const auto &p : class_index) {
+        CHECK_FAIL_RETURN_UNEXPECTED(folder_names.find(p.first) != folder_names.end(),
+                                     "folder: " + p.first + " doesn't exist in " + path + " .");
+      }
+      (*num_classes) = class_index.size();
+    }
+  }
+  // return here if only num_class is needed
+  RETURN_OK_IF_TRUE(num_rows == nullptr);
+  while (folder_paths.empty() == false) {
+    Path subdir(folder_paths.front());
     dir_itr = Path::DirIterator::OpenDirectory(&subdir);
     while (dir_itr->hasNext()) {
       if (exts.empty() || exts.find(subdir.Extension()) != exts.end()) {
         ++row_cnt;
       }
     }
-    foldernames.pop();
+    folder_paths.pop();
   }
-  (*num_rows) = (row_cnt / num_dev) + (row_cnt % num_dev == 0 ? 0 : 1);
+  (*num_rows) = row_cnt;
   return Status::OK();
-}
-
-// Visitor accept method for NodePass
-Status ImageFolderOp::Accept(NodePass *p, bool *modified) {
-  // Downcast shared pointer then call visitor
-  return p->RunOnNode(shared_from_base<ImageFolderOp>(), modified);
 }
 
 Status ImageFolderOp::ComputeColMap() {
@@ -454,29 +461,13 @@ Status ImageFolderOp::ComputeColMap() {
   return Status::OK();
 }
 
-// Get Dataset size
-Status ImageFolderOp::GetDatasetSize(int64_t *dataset_size) {
-  if (dataset_size_ > 0) {
-    *dataset_size = dataset_size_;
-    return Status::OK();
-  }
-  int64_t sample_size, num_rows, num_classes;
-  num_rows = num_rows_;
-  if (num_rows_ <= 0) RETURN_IF_NOT_OK(CountRowsAndClasses(folder_path_, extensions_, &num_rows, &num_classes));
-  sample_size = sampler_->GetNumSamples();
-  *dataset_size = sample_size > 0 ? std::min(num_rows, sample_size) : num_rows;
-  dataset_size_ = *dataset_size;
-  return Status::OK();
-}
-
 // Get number of classes
 Status ImageFolderOp::GetNumClasses(int64_t *num_classes) {
   if (num_classes_ > 0) {
     *num_classes = num_classes_;
     return Status::OK();
   }
-  int64_t num_rows = num_rows_;
-  RETURN_IF_NOT_OK(CountRowsAndClasses(folder_path_, extensions_, &num_rows, num_classes));
+  RETURN_IF_NOT_OK(CountRowsAndClasses(folder_path_, extensions_, nullptr, num_classes, class_index_));
   num_classes_ = *num_classes;
   return Status::OK();
 }

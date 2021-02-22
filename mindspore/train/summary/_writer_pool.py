@@ -1,4 +1,4 @@
-# Copyright 2020 Huawei Technologies Co., Ltd
+# Copyright 2020-2021 Huawei Technologies Co., Ltd
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,14 +15,16 @@
 """Write events to disk in a base directory."""
 import os
 import time
+import signal
 from collections import deque
 
 import mindspore.log as logger
+from mindspore.train.summary.enums import PluginEnum, WriterPluginEnum
 
 from ._lineage_adapter import serialize_to_lineage_event
 from ._summary_adapter import package_graph_event, package_summary_event
 from ._explain_adapter import package_explain_event
-from .writer import LineageWriter, SummaryWriter, ExplainWriter
+from .writer import LineageWriter, SummaryWriter, ExplainWriter, ExportWriter
 
 try:
     from multiprocessing import get_context
@@ -36,17 +38,24 @@ def _pack_data(datadict, wall_time):
     result, summaries, step = [], [], None
     for plugin, datalist in datadict.items():
         for data in datalist:
-            if plugin == 'graph':
+            if plugin == PluginEnum.GRAPH.value:
                 result.append([plugin, package_graph_event(data.get('value')).SerializeToString()])
-            elif plugin in ('train_lineage', 'eval_lineage', 'custom_lineage_data', 'dataset_graph'):
+            elif plugin in (PluginEnum.TRAIN_LINEAGE.value, PluginEnum.EVAL_LINEAGE.value,
+                            PluginEnum.CUSTOM_LINEAGE_DATA.value, PluginEnum.DATASET_GRAPH.value):
                 result.append([plugin, serialize_to_lineage_event(plugin, data.get('value'))])
-            elif plugin in ('scalar', 'tensor', 'histogram', 'image'):
+            elif plugin in (PluginEnum.SCALAR.value, PluginEnum.TENSOR.value, PluginEnum.HISTOGRAM.value,
+                            PluginEnum.IMAGE.value):
                 summaries.append({'_type': plugin.title(), 'name': data.get('tag'), 'data': data.get('value')})
                 step = data.get('step')
-            elif plugin == 'explainer':
+            elif plugin == PluginEnum.EXPLAINER.value:
                 result.append([plugin, package_explain_event(data.get('value'))])
+
+            if 'export_option' in data:
+                result.append([WriterPluginEnum.EXPORTER.value, data])
+
     if summaries:
-        result.append(['summary', package_summary_event(summaries, step, wall_time).SerializeToString()])
+        result.append(
+            [WriterPluginEnum.SUMMARY.value, package_summary_event(summaries, step, wall_time).SerializeToString()])
     return result
 
 
@@ -57,20 +66,42 @@ class WriterPool(ctx.Process):
     Args:
         base_dir (str): The base directory to hold all the files.
         max_file_size (Optional[int]): The maximum size of each file that can be written to disk in bytes.
+        raise_exception (bool, optional): Sets whether to throw an exception when an RuntimeError exception occurs
+            in recording data. Default: False, this means that error logs are printed and no exception is thrown.
+        export_options (Union[None, dict]): Perform custom operations on the export data. Default: None.
         filedict (dict): The mapping from plugin to filename.
     """
 
-    def __init__(self, base_dir, max_file_size, **filedict) -> None:
+    def __init__(self, base_dir, max_file_size, raise_exception=False, **filedict) -> None:
         super().__init__()
         self._base_dir, self._filedict = base_dir, filedict
         self._queue, self._writers_ = ctx.Queue(ctx.cpu_count() * 2), None
         self._max_file_size = max_file_size
+        self._raise_exception = raise_exception
         self.start()
 
     def run(self):
+        # Environment variables are used to specify a maximum number of OpenBLAS threads:
+        # In ubuntu(GPU) environment, numpy will use too many threads for computing,
+        # it may affect the start of the summary process.
+        # Notice: At present, the performance of setting the thread to 2 has been tested to be more suitable.
+        # If it is to be adjusted, it is recommended to test according to the scenario first
+        os.environ['OPENBLAS_NUM_THREADS'] = '2'
+        os.environ['GOTO_NUM_THREADS'] = '2'
+        os.environ['OMP_NUM_THREADS'] = '2'
+
+        # Prevent the multiprocess from capturing KeyboardInterrupt,
+        # which causes the main process to fail to exit.
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+
         with ctx.Pool(min(ctx.cpu_count(), 32)) as pool:
             deq = deque()
             while True:
+                if not self._writers:
+                    logger.warning("Can not find any writer to write summary data, "
+                                   "so SummaryRecord will not record data.")
+                    break
+
                 while deq and deq[0].ready():
                     for plugin, data in deq.popleft().get():
                         self._write(plugin, data)
@@ -97,12 +128,14 @@ class WriterPool(ctx.Process):
         self._writers_ = []
         for plugin, filename in self._filedict.items():
             filepath = os.path.join(self._base_dir, filename)
-            if plugin == 'summary':
+            if plugin == WriterPluginEnum.SUMMARY.value:
                 self._writers_.append(SummaryWriter(filepath, self._max_file_size))
-            elif plugin == 'lineage':
+            elif plugin == WriterPluginEnum.LINEAGE.value:
                 self._writers_.append(LineageWriter(filepath, self._max_file_size))
-            elif plugin == 'explainer':
+            elif plugin == WriterPluginEnum.EXPLAINER.value:
                 self._writers_.append(ExplainWriter(filepath, self._max_file_size))
+            elif plugin == WriterPluginEnum.EXPORTER.value:
+                self._writers_.append(ExportWriter(filepath, self._max_file_size))
         return self._writers_
 
     def _write(self, plugin, data):
@@ -110,8 +143,14 @@ class WriterPool(ctx.Process):
         for writer in self._writers[:]:
             try:
                 writer.write(plugin, data)
-            except RuntimeError as e:
-                logger.warning(e.args[0])
+            except (RuntimeError, OSError) as exc:
+                logger.error(str(exc))
+                self._writers.remove(writer)
+                writer.close()
+                if self._raise_exception:
+                    raise
+            except RuntimeWarning as exc:
+                logger.warning(str(exc))
                 self._writers.remove(writer)
                 writer.close()
 

@@ -31,6 +31,14 @@ using mindspore::kernel::KernelKey;
 namespace mindspore::lite {
 KernelRegistry *KernelRegistry::GetInstance() {
   static KernelRegistry instance;
+
+  std::unique_lock<std::mutex> malloc_creator_array(instance.lock_);
+  if (instance.creator_arrays_ == nullptr) {
+    instance.creator_arrays_ = reinterpret_cast<KernelCreator *>(malloc(array_size_ * sizeof(KernelRegistry)));
+    if (instance.creator_arrays_ == nullptr) {
+      return nullptr;
+    }
+  }
   return &instance;
 }
 
@@ -102,8 +110,13 @@ kernel::LiteKernel *KernelRegistry::GetKernel(const std::vector<Tensor *> &in_te
                                               const InnerContext *ctx, const kernel::KernelKey &key) {
   MS_ASSERT(nullptr != primitive);
   MS_ASSERT(nullptr != ctx);
-  auto parameter =
-    PopulateRegistry::GetInstance()->getParameterCreator(schema::PrimitiveType(primitive->Type()))(primitive);
+  auto func_pointer = PopulateRegistry::GetInstance()->GetParameterCreator(schema::PrimitiveType(primitive->Type()));
+  if (func_pointer == nullptr) {
+    MS_LOG(ERROR) << "ParameterCreator function pointer is nullptr, type: "
+                  << schema::EnumNamePrimitiveType((schema::PrimitiveType)primitive->Type());
+    return nullptr;
+  }
+  auto parameter = func_pointer(primitive);
   if (parameter == nullptr) {
     MS_LOG(ERROR) << "PopulateParameter return nullptr, type: "
                   << schema::EnumNamePrimitiveType((schema::PrimitiveType)primitive->Type());
@@ -122,5 +135,12 @@ kernel::LiteKernel *KernelRegistry::GetKernel(const std::vector<Tensor *> &in_te
   return nullptr;
 }
 
-KernelRegistry::~KernelRegistry() = default;
+KernelRegistry::~KernelRegistry() {
+  KernelRegistry *instance = GetInstance();
+  std::unique_lock<std::mutex> malloc_creator_array(instance->lock_);
+  if (instance->creator_arrays_ != nullptr) {
+    free(instance->creator_arrays_);
+    instance->creator_arrays_ = nullptr;
+  }
+}
 }  // namespace mindspore::lite

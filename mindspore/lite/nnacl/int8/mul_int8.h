@@ -19,11 +19,18 @@
 
 #include "nnacl/op_base.h"
 #include "nnacl/mul_parameter.h"
+#include "nnacl/int8/common_func_int8.h"
+#include "nnacl/int8/fixed_point.h"
+#ifdef ENABLE_NEON
+#include <arm_neon.h>
+#endif
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 void Mul(int8_t *input0_data, int8_t *input1_data, int8_t *output_data, int64_t real_dst_count, MulQuantArg para);
+void FastMul(int8_t *input0_data, int8_t *input1_data, int8_t *output_data, int depth, int64_t real_dst_count,
+             bool input1_broad, MulQuantArg para);
 #ifdef __cplusplus
 }
 #endif

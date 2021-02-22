@@ -111,15 +111,21 @@ int QuantDTypeCastCPUKernel::QuantDTypeCast(int task_id) {
     MS_LOG(ERROR) << "QuantDTypeCast need quantization parameters which is not found.";
     return RET_ERROR;
   }
-  auto quant_arg = out_tensors_.front()->quant_params().front().inited ? out_tensors_.front()->quant_params().front()
-                                                                       : in_tensors_.front()->quant_params().front();
+  auto quant_arg =
+    (!out_tensors_.front()->quant_params().empty() && out_tensors_.front()->quant_params().front().inited)
+      ? out_tensors_.front()->quant_params().front()
+      : in_tensors_.front()->quant_params().front();
   int ret = RET_OK;
   if (src_dtype == TypeId::kNumberTypeInt8 && dst_dtype == TypeId::kNumberTypeFloat32) {
     ret = DoDequantizeInt8ToFp32(int8_ptr_ + thread_offset, float32_ptr_ + thread_offset, quant_arg.scale,
                                  quant_arg.zeroPoint, num_unit_thread);
   } else if (src_dtype == TypeId::kNumberTypeFloat32 && dst_dtype == TypeId::kNumberTypeInt8) {
+    bool from_uint8_src = false;
+    if (quant_arg.dstDtype == TypeId::kNumberTypeUInt8) {
+      from_uint8_src = true;
+    }
     ret = DoQuantizeFp32ToInt8(float32_ptr_ + thread_offset, int8_ptr_ + thread_offset, quant_arg.scale,
-                               quant_arg.zeroPoint, num_unit_thread);
+                               quant_arg.zeroPoint, num_unit_thread, from_uint8_src);
   } else if (src_dtype == TypeId::kNumberTypeInt8 && dst_dtype == TypeId::kNumberTypeUInt8) {
     ret = Int8ToUInt8(int8_ptr_ + thread_offset, uint8_ptr_ + thread_offset, num_unit_thread);
   } else if (src_dtype == TypeId::kNumberTypeUInt8 && dst_dtype == TypeId::kNumberTypeFloat32) {
@@ -136,8 +142,12 @@ int QuantDTypeCastCPUKernel::QuantDTypeCast(int task_id) {
                                  input_quant_arg.scale, input_quant_arg.zeroPoint);
     if (ret) {
       auto output_quant_arg = out_tensors_.front()->quant_params().front();
+      bool from_uint8_src = false;
+      if (quant_arg.dstDtype == TypeId::kNumberTypeUInt8) {
+        from_uint8_src = true;
+      }
       ret = DoQuantizeFp32ToInt8(float32_ptr_ + thread_offset, int8_out_ptr_ + thread_offset, output_quant_arg.scale,
-                                 output_quant_arg.zeroPoint, num_unit_thread);
+                                 output_quant_arg.zeroPoint, num_unit_thread, from_uint8_src);
     }
   }
 
@@ -210,31 +220,7 @@ int QuantDTypeCastCPUKernel::Run() {
   return RET_OK;
 }
 
-kernel::LiteKernel *CpuQuantDTypeCastFp32KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                                       const std::vector<lite::Tensor *> &outputs,
-                                                       OpParameter *opParameter, const lite::InnerContext *ctx,
-                                                       const kernel::KernelKey &desc,
-                                                       const mindspore::lite::PrimitiveC *primitive) {
-  if (opParameter == nullptr) {
-    MS_LOG(ERROR) << "Input opParameter is nullptr!";
-    return nullptr;
-  }
-  auto *kernel = new (std::nothrow) QuantDTypeCastCPUKernel(opParameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "new QuantDTypeCastCPUKernel fail!";
-    free(opParameter);
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed! name: " << opParameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
-}
-REG_KERNEL(kCPU, kNumberTypeUInt8, PrimitiveType_QuantDTypeCast, CpuQuantDTypeCastFp32KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_QuantDTypeCast, CpuQuantDTypeCastFp32KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_QuantDTypeCast, CpuQuantDTypeCastFp32KernelCreator)
+REG_KERNEL(kCPU, kNumberTypeUInt8, PrimitiveType_QuantDTypeCast, LiteKernelCreator<QuantDTypeCastCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_QuantDTypeCast, LiteKernelCreator<QuantDTypeCastCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_QuantDTypeCast, LiteKernelCreator<QuantDTypeCastCPUKernel>)
 }  // namespace mindspore::kernel

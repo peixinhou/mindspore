@@ -18,15 +18,28 @@ and provides operations related to graph data.
 """
 import atexit
 import time
+from enum import IntEnum
 import numpy as np
 from mindspore._c_dataengine import GraphDataClient
 from mindspore._c_dataengine import GraphDataServer
 from mindspore._c_dataengine import Tensor
+from mindspore._c_dataengine import SamplingStrategy as Sampling
 
 from .validators import check_gnn_graphdata, check_gnn_get_all_nodes, check_gnn_get_all_edges, \
     check_gnn_get_nodes_from_edges, check_gnn_get_all_neighbors, check_gnn_get_sampled_neighbors, \
     check_gnn_get_neg_sampled_neighbors, check_gnn_get_node_feature, check_gnn_get_edge_feature, \
     check_gnn_random_walk
+
+
+class SamplingStrategy(IntEnum):
+    RANDOM = 0
+    EDGE_WEIGHT = 1
+
+
+DE_C_INTER_SAMPLING_STRATEGY = {
+    SamplingStrategy.RANDOM: Sampling.DE_SAMPLING_RANDOM,
+    SamplingStrategy.EDGE_WEIGHT: Sampling.DE_SAMPLING_EDGE_WEIGHT,
+}
 
 
 class GraphData:
@@ -59,11 +72,9 @@ class GraphData:
             the server automatically exits (default=True).
 
     Examples:
-        >>> import mindspore.dataset as ds
-        >>>
-        >>> data_graph = ds.GraphData('dataset_file', 2)
-        >>> nodes = data_graph.get_all_nodes(0)
-        >>> features = data_graph.get_node_feature(nodes, [1])
+        >>> graph_dataset = ds.GraphData(graph_dataset_dir, 2)
+        >>> nodes = graph_dataset.get_all_nodes(0)
+        >>> features = graph_dataset.get_node_feature(nodes, [1])
     """
 
     @check_gnn_graphdata
@@ -86,10 +97,10 @@ class GraphData:
                 dataset_file, num_parallel_workers, hostname, port, num_client, auto_shutdown)
             atexit.register(stop)
             try:
-                while self._graph_data.is_stoped() is not True:
+                while self._graph_data.is_stopped() is not True:
                     time.sleep(1)
             except KeyboardInterrupt:
-                raise Exception("Graph data server receives KeyboardInterrupt")
+                raise Exception("Graph data server receives KeyboardInterrupt.")
 
     @check_gnn_get_all_nodes
     def get_all_nodes(self, node_type):
@@ -100,19 +111,16 @@ class GraphData:
             node_type (int): Specify the type of node.
 
         Returns:
-            numpy.ndarray: Array of nodes.
+            numpy.ndarray, array of nodes.
 
         Examples:
-            >>> import mindspore.dataset as ds
-            >>>
-            >>> data_graph = ds.GraphData('dataset_file', 2)
-            >>> nodes = data_graph.get_all_nodes(0)
+            >>> nodes = graph_dataset.get_all_nodes(0)
 
         Raises:
             TypeError: If `node_type` is not integer.
         """
         if self._working_mode == 'server':
-            raise Exception("This method is not supported when working mode is server")
+            raise Exception("This method is not supported when working mode is server.")
         return self._graph_data.get_all_nodes(node_type).as_array()
 
     @check_gnn_get_all_edges
@@ -124,19 +132,16 @@ class GraphData:
             edge_type (int): Specify the type of edge.
 
         Returns:
-            numpy.ndarray: array of edges.
+            numpy.ndarray, array of edges.
 
         Examples:
-            >>> import mindspore.dataset as ds
-            >>>
-            >>> data_graph = ds.GraphData('dataset_file', 2)
-            >>> nodes = data_graph.get_all_edges(0)
+            >>> edges = graph_dataset.get_all_edges(0)
 
         Raises:
             TypeError: If `edge_type` is not integer.
         """
         if self._working_mode == 'server':
-            raise Exception("This method is not supported when working mode is server")
+            raise Exception("This method is not supported when working mode is server.")
         return self._graph_data.get_all_edges(edge_type).as_array()
 
     @check_gnn_get_nodes_from_edges
@@ -148,13 +153,13 @@ class GraphData:
             edge_list (Union[list, numpy.ndarray]): The given list of edges.
 
         Returns:
-            numpy.ndarray: Array of nodes.
+            numpy.ndarray, array of nodes.
 
         Raises:
             TypeError: If `edge_list` is not list or ndarray.
         """
         if self._working_mode == 'server':
-            raise Exception("This method is not supported when working mode is server")
+            raise Exception("This method is not supported when working mode is server.")
         return self._graph_data.get_nodes_from_edges(edge_list).as_array()
 
     @check_gnn_get_all_neighbors
@@ -167,25 +172,22 @@ class GraphData:
             neighbor_type (int): Specify the type of neighbor.
 
         Returns:
-            numpy.ndarray: Array of nodes.
+            numpy.ndarray, array of neighbors.
 
         Examples:
-            >>> import mindspore.dataset as ds
-            >>>
-            >>> data_graph = ds.GraphData('dataset_file', 2)
-            >>> nodes = data_graph.get_all_nodes(0)
-            >>> neighbors = data_graph.get_all_neighbors(nodes, 0)
+            >>> nodes = graph_dataset.get_all_nodes(0)
+            >>> neighbors = graph_dataset.get_all_neighbors(nodes, 0)
 
         Raises:
             TypeError: If `node_list` is not list or ndarray.
             TypeError: If `neighbor_type` is not integer.
         """
         if self._working_mode == 'server':
-            raise Exception("This method is not supported when working mode is server")
+            raise Exception("This method is not supported when working mode is server.")
         return self._graph_data.get_all_neighbors(node_list, neighbor_type).as_array()
 
     @check_gnn_get_sampled_neighbors
-    def get_sampled_neighbors(self, node_list, neighbor_nums, neighbor_types):
+    def get_sampled_neighbors(self, node_list, neighbor_nums, neighbor_types, strategy=SamplingStrategy.RANDOM):
         """
         Get sampled neighbor information.
 
@@ -199,26 +201,30 @@ class GraphData:
             node_list (Union[list, numpy.ndarray]): The given list of nodes.
             neighbor_nums (Union[list, numpy.ndarray]): Number of neighbors sampled per hop.
             neighbor_types (Union[list, numpy.ndarray]): Neighbor type sampled per hop.
+            strategy (SamplingStrategy, optional): Sampling strategy (default=SamplingStrategy.RANDOM).
+                It can be any of [SamplingStrategy.RANDOM, SamplingStrategy.EDGE_WEIGHT].
+
+                - SamplingStrategy.RANDOM, random sampling with replacement.
+                - SamplingStrategy.EDGE_WEIGHT, sampling with edge weight as probability.
 
         Returns:
-            numpy.ndarray: Array of nodes.
+            numpy.ndarray, array of neighbors.
 
         Examples:
-            >>> import mindspore.dataset as ds
-            >>>
-            >>> data_graph = ds.GraphData('dataset_file', 2)
-            >>> nodes = data_graph.get_all_nodes(0)
-            >>> neighbors = data_graph.get_sampled_neighbors(nodes, [2, 2], [0, 0])
+            >>> nodes = graph_dataset.get_all_nodes(0)
+            >>> neighbors = graph_dataset.get_sampled_neighbors(nodes, [2, 2], [0, 0])
 
         Raises:
             TypeError: If `node_list` is not list or ndarray.
             TypeError: If `neighbor_nums` is not list or ndarray.
             TypeError: If `neighbor_types` is not list or ndarray.
         """
+        if not isinstance(strategy, SamplingStrategy):
+            raise TypeError("Wrong input type for strategy, should be enum of 'SamplingStrategy'.")
         if self._working_mode == 'server':
-            raise Exception("This method is not supported when working mode is server")
+            raise Exception("This method is not supported when working mode is server.")
         return self._graph_data.get_sampled_neighbors(
-            node_list, neighbor_nums, neighbor_types).as_array()
+            node_list, neighbor_nums, neighbor_types, DE_C_INTER_SAMPLING_STRATEGY[strategy]).as_array()
 
     @check_gnn_get_neg_sampled_neighbors
     def get_neg_sampled_neighbors(self, node_list, neg_neighbor_num, neg_neighbor_type):
@@ -231,14 +237,11 @@ class GraphData:
             neg_neighbor_type (int): Specify the type of negative neighbor.
 
         Returns:
-            numpy.ndarray: Array of nodes.
+            numpy.ndarray, array of neighbors.
 
         Examples:
-            >>> import mindspore.dataset as ds
-            >>>
-            >>> data_graph = ds.GraphData('dataset_file', 2)
-            >>> nodes = data_graph.get_all_nodes(0)
-            >>> neg_neighbors = data_graph.get_neg_sampled_neighbors(nodes, 5, 0)
+            >>> nodes = graph_dataset.get_all_nodes(0)
+            >>> neg_neighbors = graph_dataset.get_neg_sampled_neighbors(nodes, 5, 0)
 
         Raises:
             TypeError: If `node_list` is not list or ndarray.
@@ -246,7 +249,7 @@ class GraphData:
             TypeError: If `neg_neighbor_type` is not integer.
         """
         if self._working_mode == 'server':
-            raise Exception("This method is not supported when working mode is server")
+            raise Exception("This method is not supported when working mode is server.")
         return self._graph_data.get_neg_sampled_neighbors(
             node_list, neg_neighbor_num, neg_neighbor_type).as_array()
 
@@ -260,21 +263,18 @@ class GraphData:
             feature_types (Union[list, numpy.ndarray]): The given list of feature types.
 
         Returns:
-            numpy.ndarray: array of features.
+            numpy.ndarray, array of features.
 
         Examples:
-            >>> import mindspore.dataset as ds
-            >>>
-            >>> data_graph = ds.GraphData('dataset_file', 2)
-            >>> nodes = data_graph.get_all_nodes(0)
-            >>> features = data_graph.get_node_feature(nodes, [1])
+            >>> nodes = graph_dataset.get_all_nodes(0)
+            >>> features = graph_dataset.get_node_feature(nodes, [1])
 
         Raises:
             TypeError: If `node_list` is not list or ndarray.
             TypeError: If `feature_types` is not list or ndarray.
         """
         if self._working_mode == 'server':
-            raise Exception("This method is not supported when working mode is server")
+            raise Exception("This method is not supported when working mode is server.")
         if isinstance(node_list, list):
             node_list = np.array(node_list, dtype=np.int32)
         return [
@@ -292,21 +292,18 @@ class GraphData:
             feature_types (Union[list, numpy.ndarray]): The given list of feature types.
 
         Returns:
-            numpy.ndarray: array of features.
+            numpy.ndarray, array of features.
 
         Examples:
-            >>> import mindspore.dataset as ds
-            >>>
-            >>> data_graph = ds.GraphData('dataset_file', 2)
-            >>> edges = data_graph.get_all_edges(0)
-            >>> features = data_graph.get_edge_feature(edges, [1])
+            >>> edges = graph_dataset.get_all_edges(0)
+            >>> features = graph_dataset.get_edge_feature(edges, [1])
 
         Raises:
             TypeError: If `edge_list` is not list or ndarray.
             TypeError: If `feature_types` is not list or ndarray.
         """
         if self._working_mode == 'server':
-            raise Exception("This method is not supported when working mode is server")
+            raise Exception("This method is not supported when working mode is server.")
         if isinstance(edge_list, list):
             edge_list = np.array(edge_list, dtype=np.int32)
         return [
@@ -320,11 +317,11 @@ class GraphData:
         the feature information of nodes, the number of edges, the type of edges, and the feature information of edges.
 
         Returns:
-            dict: Meta information of the graph. The key is node_type, edge_type, node_num, edge_num,
+            dict, meta information of the graph. The key is node_type, edge_type, node_num, edge_num,
             node_feature_type and edge_feature_type.
         """
         if self._working_mode == 'server':
-            raise Exception("This method is not supported when working mode is server")
+            raise Exception("This method is not supported when working mode is server.")
         return self._graph_data.graph_info()
 
     @check_gnn_random_walk
@@ -342,24 +339,21 @@ class GraphData:
             target_nodes (list[int]): Start node list in random walk
             meta_path (list[int]): node type for each walk step
             step_home_param (float, optional): return hyper parameter in node2vec algorithm (Default = 1.0).
-            step_away_param (float, optional): inout hyper parameter in node2vec algorithm (Default = 1.0).
+            step_away_param (float, optional): in out hyper parameter in node2vec algorithm (Default = 1.0).
             default_node (int, optional): default node if no more neighbors found (Default = -1).
                 A default value of -1 indicates that no node is given.
 
         Returns:
-            numpy.ndarray: Array of nodes.
+            numpy.ndarray, array of nodes.
 
         Examples:
-            >>> import mindspore.dataset as ds
-            >>>
-            >>> data_graph = ds.GraphData('dataset_file', 2)
-            >>> nodes = data_graph.random_walk([1,2], [1,2,1,2,1])
+            >>> nodes = graph_dataset.random_walk([1,2], [1,2,1,2,1])
 
         Raises:
             TypeError: If `target_nodes` is not list or ndarray.
             TypeError: If `meta_path` is not list or ndarray.
         """
         if self._working_mode == 'server':
-            raise Exception("This method is not supported when working mode is server")
+            raise Exception("This method is not supported when working mode is server.")
         return self._graph_data.random_walk(target_nodes, meta_path, step_home_param, step_away_param,
                                             default_node).as_array()

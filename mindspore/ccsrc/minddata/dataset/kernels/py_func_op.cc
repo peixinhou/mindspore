@@ -1,5 +1,5 @@
 /**
- * Copyright 2019 Huawei Technologies Co., Ltd
+ * Copyright 2019-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,12 +26,12 @@ namespace mindspore {
 namespace dataset {
 Status PyFuncOp::Compute(const TensorRow &input, TensorRow *output) {
   IO_CHECK_VECTOR(input, output);
-  Status ret = Status(StatusCode::kOK, "PyFunc Call Succeed");
+  Status ret = Status(StatusCode::kSuccess, "PyFunc Call Succeed");
   {
     // Acquire Python GIL
     py::gil_scoped_acquire gil_acquire;
     if (Py_IsInitialized() == 0) {
-      ret = Status(StatusCode::kPythonInterpreterFailure, "Python Interpreter is finalized");
+      ret = Status(StatusCode::kMDPythonInterpreterFailure, "Python Interpreter is finalized");
       goto ComputeReturn;
     }
     try {
@@ -81,7 +81,7 @@ Status PyFuncOp::Compute(const TensorRow &input, TensorRow *output) {
         }
       }
     } catch (const py::error_already_set &e) {
-      ret = Status(StatusCode::kPyFuncException, e.what());
+      ret = Status(StatusCode::kMDPyFuncException, e.what());
     }
   }
 
@@ -89,11 +89,12 @@ ComputeReturn:
   return ret;
 
 ShapeMisMatch:
-  ret = Status(StatusCode::kShapeMisMatch, "PyFunc should return a numpy array or a numpy array tuple");
+  ret = Status(StatusCode::kMDShapeMisMatch, __LINE__, __FILE__,
+               "PyFunc should return a numpy array or a numpy array tuple");
   goto ComputeReturn;
 
 TimeoutError:
-  ret = Status(StatusCode::kTimeOut, "PyFunc execute time out");
+  ret = Status(StatusCode::kMDTimeOut, __LINE__, __FILE__, "PyFunc execute time out");
   goto ComputeReturn;
 }
 
@@ -105,15 +106,35 @@ Status PyFuncOp::CastOutput(const py::object &ret_py_obj, TensorRow *output) {
         RETURN_IF_NOT_OK(Tensor::CreateEmpty(TensorShape({1}), DataType(DataType::DE_INT32), &out));
         RETURN_IF_NOT_OK(out->SetItemAt({0}, ret_py_obj.cast<int32_t>()));
         break;
+      case DataType::DE_BOOL:
+        RETURN_IF_NOT_OK(Tensor::CreateScalar(ret_py_obj.cast<bool>(), &out));
+        break;
       default:
         RETURN_STATUS_UNEXPECTED("No cast for the specified DataType was found.");
     }
     output->push_back(out);
   } catch (const std::exception &e) {
-    return Status(StatusCode::kUnexpectedError, e.what());
+    return Status(StatusCode::kMDUnexpectedError, e.what());
   }
   return Status::OK();
 }
 
+Status PyFuncOp::to_json(nlohmann::json *out_json) {
+  nlohmann::json args;
+  auto package = pybind11::module::import("pickle");
+  auto module = package.attr("dumps");
+  args["tensor_op_params"] = module(py_func_ptr_, 0).cast<std::string>();
+  args["tensor_op_name"] = py_func_ptr_.attr("__class__").attr("__name__").cast<std::string>();
+  args["is_python_front_end_op"] = true;
+  *out_json = args;
+  return Status::OK();
+}
+
+bool PyFuncOp::IsRandom() {
+  bool random = true;
+  if (py::hasattr(py_func_ptr_, "random") && py::reinterpret_borrow<py::bool_>(py_func_ptr_.attr("random")) == false)
+    random = false;
+  return random;
+}
 }  // namespace dataset
 }  // namespace mindspore

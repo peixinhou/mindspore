@@ -265,6 +265,7 @@ class AreaGraph {
   CNodePtr CreateMainCNode(const FuncGraphPtr &main_func_graph, const FuncGraphPtr &sub_func_graph,
                            const std::vector<CNodePtr> &main_cnodes,
                            const std::unordered_map<ParameterPtr, AnfNodePtr> &param_node_map) {
+    TraceGuard guard(std::make_shared<TraceOpt>(sub_func_graph->debug_info()));
     AnfNodePtrList main_cnode_inputs = {NewValueNode(sub_func_graph)};
     for (const auto &param : sub_func_graph->parameters()) {
       // assert the param exists.
@@ -272,10 +273,11 @@ class AreaGraph {
       size_t input_area = node_area_map_[input_node];
       // if the input node is in a tuple, then we need to create a GetItem fot it.
       if (node_index_in_returned_tuple_.count(input_node) != 0) {
-        int idx_val = SizeToInt(node_index_in_returned_tuple_[input_node]);
+        auto idx_val = SizeToLong(node_index_in_returned_tuple_[input_node]);
         auto idx = NewValueNode(idx_val);
         idx->set_abstract(std::make_shared<abstract::AbstractScalar>(idx_val));
         AnfNodePtrList getitem_inputs = {NewValueNode(prim::kPrimTupleGetItem), main_cnodes[input_area], idx};
+        TraceGuard g_sub(std::make_shared<TraceOpt>(main_cnodes[input_area]->debug_info()));
         auto getitem_node = main_func_graph->NewCNode(getitem_inputs);
         getitem_node->set_abstract(main_cnodes[input_area]->abstract());
         main_cnode_inputs.push_back(getitem_node);
@@ -542,7 +544,7 @@ class CostModelSplitSchemer : public Splitter::SplitSchemer {
     }
     func_graph_ = func_graph;
     this->Run();
-    return split_plan_.size() > 1;
+    return !split_plan_.empty();
   }
 
   bool NeedInline(size_t group_id) const override {
@@ -627,7 +629,12 @@ class CostModelSplitSchemer : public Splitter::SplitSchemer {
     }
     GetValidKernelNodes();
     // call CostModel to get a split plan.
-    if (!SplitByCostModel() || split_plan_.size() <= 1) {
+    if (!SplitByCostModel() || split_plan_.size() != need_inline_.size() || split_plan_.empty()) {
+      split_plan_.clear();
+      need_inline_.clear();
+      return;
+    } else if (split_plan_.size() == 1 && !NeedInline(0)) {
+      /*In this case, the CostModel decided to keep the whole graph unchanged.*/
       split_plan_.clear();
       need_inline_.clear();
       return;

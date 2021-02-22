@@ -88,7 +88,7 @@ class EvalCallBack(Callback):
     Args:
         print_per_step (int): Print loss every times. Default: 1.
     """
-    def __init__(self, model, eval_dataset, auc_metric, config, print_per_step=1, host_device_mix=False):
+    def __init__(self, model, eval_dataset, auc_metric, config, print_per_step=1):
         super(EvalCallBack, self).__init__()
         if not isinstance(print_per_step, int) or print_per_step < 0:
             raise ValueError("print_per_step must be int and >= 0.")
@@ -99,7 +99,7 @@ class EvalCallBack(Callback):
         self.aucMetric.clear()
         self.eval_file_name = config.eval_file_name
         self.eval_values = []
-        self.host_device_mix = host_device_mix
+        self.sparse = config.sparse
         self.config = config
 
     def epoch_end(self, run_context):
@@ -115,8 +115,11 @@ class EvalCallBack(Callback):
         if parallel_mode in (ParallelMode.SEMI_AUTO_PARALLEL, ParallelMode.AUTO_PARALLEL,
                              ParallelMode.DATA_PARALLEL):
             rank_id = get_rank()
+        enable_data_sink = not self.sparse
+        if bool(self.config.parameter_server):
+            enable_data_sink = True
         start_time = time.time()
-        out = self.model.eval(self.eval_dataset, dataset_sink_mode=(not self.host_device_mix))
+        out = self.model.eval(self.eval_dataset, dataset_sink_mode=enable_data_sink)
         end_time = time.time()
         eval_time = int(end_time - start_time)
 

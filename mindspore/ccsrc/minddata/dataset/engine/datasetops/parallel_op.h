@@ -1,5 +1,5 @@
 /**
- * Copyright 2019 Huawei Technologies Co., Ltd
+ * Copyright 2019-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -68,28 +68,8 @@ class ParallelOp : public DatasetOp {
     return out;
   }
 
-  // During tree prepare phase, operators may have specific pre-operations to perform depending on
-  // their role.
-  // @notes Derived versions of this function should always call it's superclass version first
-  // before providing their own implementations.
-  // @return Status - The error return code
-  Status PrepareNodePreAction() override {
-    // Run common code from super class before adding ParallelOp specific logic
-    return (DatasetOp::PrepareNodePreAction());
-  }
-
-  // During tree prepare phase, operators may have specific post-operations to perform depending on
-  // their role.
-  // @notes Derived versions of this function should always call it's superclass version first
-  // before providing their own implementations.
-  // @return Status - The error return code
-  Status PrepareNodePostAction() override {
-    // Run common code from super class before adding ParallelOp specific logic
-    return (DatasetOp::PrepareNodePostAction());
-  }
-
   // Override base class reset to provide reset actions specific to the ParallelOp class.
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status Reset() override;
 
   // Getter
@@ -115,7 +95,7 @@ class ParallelOp : public DatasetOp {
  protected:
   // Interface for derived classes to implement. All derived classes must provide the entry
   // function with the main execution loop for worker threads.
-  // @return Status - The error code return
+  // @return Status The status code returned
   virtual Status WorkerEntry(int32_t workerId) = 0;
 
   /// This function is only intended to be called by CallbackManager within the master thread of ParallelOp

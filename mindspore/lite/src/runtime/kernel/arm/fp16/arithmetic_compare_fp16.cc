@@ -39,7 +39,7 @@ ARITHMETIC_COMPARE_FUNC_INFO_FP16 arithmetic_cp_fun_table_fp16[] = {
   {PrimitiveType_NotEqual, schema::ActivationType_NO_ACTIVATION, ElementNotEqualFp16, ElementOptNotEqualFp16},
   {PrimitiveType_Equal, schema::ActivationType_NO_ACTIVATION, ElementEqualFp16, ElementOptEqualFp16},
   {PrimitiveType_Less, schema::ActivationType_NO_ACTIVATION, ElementLessFp16, ElementOptLessFp16},
-  {PrimitiveType_LessEqual, schema::ActivationType_NO_ACTIVATION, ElementLessEqual, ElementOptLessEqualFp16},
+  {PrimitiveType_LessEqual, schema::ActivationType_NO_ACTIVATION, ElementLessEqualFp16, ElementOptLessEqualFp16},
   {PrimitiveType_Greater, schema::ActivationType_NO_ACTIVATION, ElementGreaterFp16, ElementOptGreaterFp16},
   {PrimitiveType_GreaterEqual, schema::ActivationType_NO_ACTIVATION, ElementGreaterEqualFp16,
    ElementOptGreaterEqualFp16}};
@@ -126,6 +126,9 @@ int ArithmeticCompareFP16CPUKernel::DoArithmetic(int task_id) {
   int cur_offset = stride_per_thread * task_id;
   int cur_count = param_->broadcasting_ ? MSMIN(stride_per_thread, outside_ - cur_offset)
                                         : MSMIN(stride_per_thread, param_->out_elements_num_ - cur_offset);
+  if (cur_count <= 0) {
+    return RET_OK;
+  }
 
   int ret = RET_OK;
   if (param_->broadcasting_) {
@@ -184,35 +187,10 @@ void ArithmeticCompareFP16CPUKernel::FreeTmpBuffer() {
   }
 }
 
-kernel::LiteKernel *CpuArithmeticCompareFp16KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                                          const std::vector<lite::Tensor *> &outputs,
-                                                          OpParameter *parameter, const lite::InnerContext *ctx,
-                                                          const kernel::KernelKey &desc,
-                                                          const mindspore::lite::PrimitiveC *primitive) {
-  if (parameter == nullptr) {
-    MS_LOG(ERROR) << "input parameter is null!";
-    return nullptr;
-  }
-  auto kernel = new (std::nothrow) ArithmeticCompareFP16CPUKernel(parameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "Create kernel failed, name: " << parameter->name_;
-    free(parameter);
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed, name: " << parameter->name_
-                  << ", type: " << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(parameter->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
-}
-
-REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_NotEqual, CpuArithmeticCompareFp16KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_Equal, CpuArithmeticCompareFp16KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_Less, CpuArithmeticCompareFp16KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_LessEqual, CpuArithmeticCompareFp16KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_Greater, CpuArithmeticCompareFp16KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_GreaterEqual, CpuArithmeticCompareFp16KernelCreator)
+REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_NotEqual, LiteKernelCreator<ArithmeticCompareFP16CPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_Equal, LiteKernelCreator<ArithmeticCompareFP16CPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_Less, LiteKernelCreator<ArithmeticCompareFP16CPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_LessEqual, LiteKernelCreator<ArithmeticCompareFP16CPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_Greater, LiteKernelCreator<ArithmeticCompareFP16CPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_GreaterEqual, LiteKernelCreator<ArithmeticCompareFP16CPUKernel>)
 }  // namespace mindspore::kernel

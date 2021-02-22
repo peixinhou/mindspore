@@ -78,7 +78,7 @@ class ResidualBlock(nn.Cell):
         self.conv_down_sample = conv1x1(in_channels, out_channels,
                                         stride=stride, padding=0)
         self.bn_down_sample = nn.BatchNorm2d(out_channels)
-        self.add = P.TensorAdd()
+        self.add = P.Add()
 
     def construct(self, x):
         """
@@ -400,7 +400,7 @@ def test_max_pool_with_arg_max():
         def __init__(self):
             """ ComparisonNet definition """
             super(NetMaxPoolWithArgMax, self).__init__()
-            self.max_pool_with_arg_max = P.MaxPoolWithArgmax(padding="valid", ksize=2, strides=1)
+            self.max_pool_with_arg_max = P.MaxPoolWithArgmax(pad_mode="valid", kernel_size=2, strides=1)
 
         def construct(self, x):
             ret = self.max_pool_with_arg_max(x)
@@ -593,6 +593,20 @@ test_cases = [
         'block': nn.LGamma(),
         'desc_inputs': [Tensor(np.array([3, 4, 5, 6]).astype(np.float32))],
         'skip': ['backward']}),
+    ('IGamma', {
+        'block': nn.IGamma(),
+        'desc_inputs': [Tensor(np.array([3, 4, 5, 6]).astype(np.float32)),
+                        Tensor(np.array([3, 4, 5, 6]).astype(np.float32))],
+        'skip': ['backward']}),
+    ('DiGamma', {
+        'block': nn.DiGamma(),
+        'desc_inputs': [Tensor(np.array([3, 4, 5, 6]).astype(np.float32))],
+        'skip': ['backward']}),
+    ('LBeta', {
+        'block': nn.LBeta(),
+        'desc_inputs': [Tensor(np.array([3, 4, 5, 6]).astype(np.float32)),
+                        Tensor(np.array([3, 4, 5, 6]).astype(np.float32))],
+        'skip': ['backward']}),
     ('FlattenNet', {
         'block': FlattenNet(),
         'desc_inputs': [Tensor(np.ones([1, 2, 3, 4], np.float32))],
@@ -623,6 +637,16 @@ test_cases = [
                         Tensor(np.array([1, 2]).astype(np.float32))],
         'skip': ['backward']
     }),
+    ('MatInverse', {
+        'block': nn.MatInverse(),
+        'desc_inputs': [Tensor(np.array([[4, 12, -16], [12, 37, -43], [-16, -43, 98]]).astype(np.float32))],
+        'skip': ['backward']
+    }),
+    ('MatDet', {
+        'block': nn.MatDet(),
+        'desc_inputs': [Tensor(np.array([[4, 12, -16], [12, 37, -43], [-16, -43, 98]]).astype(np.float32))],
+        'skip': ['backward']
+    }),
     ('LRNNet', {
         'block': LRNNet(),
         'desc_inputs': [Tensor(np.ones([1, 5, 4, 4], np.float32))],
@@ -651,15 +675,15 @@ test_cases_for_verify_exception = [
         'desc_inputs': [0],
     }),
     ('MaxPoolWithArgmax_ValueError_1', {
-        'block': (lambda _: P.MaxPoolWithArgmax(padding='sane'), {'exception': ValueError}),
+        'block': (lambda _: P.MaxPoolWithArgmax(pad_mode='sane'), {'exception': ValueError}),
         'desc_inputs': [0],
     }),
     ('MaxPoolWithArgmax_ValueError_2', {
-        'block': (lambda _: P.MaxPoolWithArgmax(ksize='1'), {'exception': TypeError}),
+        'block': (lambda _: P.MaxPoolWithArgmax(kernel_size='1'), {'exception': TypeError}),
         'desc_inputs': [0],
     }),
     ('MaxPoolWithArgmax_ValueError_3', {
-        'block': (lambda _: P.MaxPoolWithArgmax(ksize=-2), {'exception': ValueError}),
+        'block': (lambda _: P.MaxPoolWithArgmax(kernel_size=-2), {'exception': ValueError}),
         'desc_inputs': [0],
     }),
     ('MaxPoolWithArgmax_ValueError_4', {

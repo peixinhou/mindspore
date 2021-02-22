@@ -66,22 +66,24 @@ int Where::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> outpu
   MS_ASSERT(input != nullptr);
   auto output = outputs_.front();
   MS_ASSERT(output != nullptr);
-  if (inputs_.size() != kSingleNum || outputs_.size() != kSingleNum) {
+  // Need to dynamically allocate at runtime.
+  if (inputs_.size() == kSingleNum) {
+    return RET_INFER_INVALID;
+  }
+
+  if (inputs_.size() < kTripleNum || outputs_.size() != kSingleNum) {
     MS_LOG(ERROR) << "where input or output number invalid, Input size:" << inputs_.size()
                   << ", output size: " << outputs_.size();
     return RET_INPUT_TENSOR_ERROR;
   }
-  if (inputs_.size() < 3) {
-    MS_LOG(ERROR) << "Input shape tensors should b";
-    return RET_INPUT_TENSOR_ERROR;
-  }
+
   auto input0 = inputs_.at(0);
   auto input1 = inputs_.at(1);
   auto input2 = inputs_.at(2);
   output->set_data_type(input->data_type());
   output->set_format(input->format());
   if (!infer_flag()) {
-    return RET_OK;
+    return RET_INFER_INVALID;
   }
   int num = input0->ElementsNum();
   int num1 = input1->ElementsNum();

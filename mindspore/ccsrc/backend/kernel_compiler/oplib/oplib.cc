@@ -36,6 +36,7 @@ constexpr auto kReshapeType = "reshape_type";
 constexpr auto kOpPattern = "op_pattern";
 constexpr auto kDynamicFormat = "dynamicFormat";
 constexpr auto kFormatAgnostic = "formatAgnostic";
+constexpr auto kNeedCheckSupported = "need_check_supported";
 constexpr auto kBroadcast = "broadcast";
 constexpr auto kReduce = "reduce";
 constexpr auto kDynamicShape = "dynamic_shape";
@@ -70,7 +71,7 @@ static std::string ImplTypeToStr(OpImplyType impl_type) {
     case kAICPU:
       return kAiCPU;
     default:
-      return "unknow";
+      return "unknown";
   }
 }
 bool OpLib::RegOp(const std::string &json_string, const std::string &impl_path) {
@@ -111,6 +112,7 @@ void OpLib::DecodeTBESpecificInfo(const nlohmann::json &obj, const std::shared_p
   op_info->set_compute_cost(obj.at(kComputeCost));
   op_info->set_kernel_name(obj.at(kKernelName));
   op_info->set_partial_flag(obj.at(kPartialFlag));
+  op_info->set_need_check_supported(obj.at(kNeedCheckSupported));
 
   if (obj.find(kDynamicShape) != obj.end()) {
     op_info->set_dynamic_shape(obj.at(kDynamicShape));
@@ -144,7 +146,7 @@ bool OpLib::RegOpFromLocalInfo() {
   has_load = true;
   std::string dir = common::GetEnv("MINDSPORE_OP_INFO_PATH");
   if (dir.empty()) {
-    MS_LOG(INFO) << "MindSpore op info path does not been setted. use op info from python pass.";
+    MS_LOG(INFO) << "MindSpore op info path does not been set. use op info from python pass.";
     return true;
   }
   char real_path[PATH_MAX] = {0};
@@ -218,7 +220,7 @@ bool OpLib::DecodeOpInfo(const nlohmann::json &obj, const mindspore::kernel::OpI
     }
   }
   if (CheckRepetition(op_info)) {
-    MS_LOG(WARNING) << "This op info has been already registed. op name: " << op_info->op_name()
+    MS_LOG(WARNING) << "This op info has been already registered. op name: " << op_info->op_name()
                     << ", impl type: " << ImplTypeToStr(op_info->imply_type())
                     << ", impl path: " << op_info->impl_path();
     return true;
@@ -271,7 +273,7 @@ bool OpLib::DecodeDtypeFormat(const nlohmann::json &dtype_format, const std::sha
     op_io->set_dtypes(dtype);
     op_io->set_formats(format);
   } catch (const std::exception &e) {
-    MS_LOG(ERROR) << "DecodeDtypeFormat falied" << e.what();
+    MS_LOG(ERROR) << "DecodeDtypeFormat failed" << e.what();
     ret = false;
   }
   return ret;
@@ -376,8 +378,6 @@ bool OpLib::GetRefInfo(const std::shared_ptr<OpInfo> &op_info) {
           return false;
         }
         op_info->add_ref_pair(out_index, in_index);
-        MS_LOG(INFO) << "add ref info, op name is " << op_info->op_name() << ", outindex is " << out_index
-                     << ", in_index is " << in_index;
       }
     }
   }

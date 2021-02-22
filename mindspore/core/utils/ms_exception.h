@@ -17,16 +17,29 @@
 #ifndef MINDSPORE_CORE_UTILS_MS_EXCEPTION_H_
 #define MINDSPORE_CORE_UTILS_MS_EXCEPTION_H_
 #include <exception>
+#include <set>
 #include "utils/ms_utils.h"
 namespace mindspore {
+class ExceptionListener {
+ public:
+  virtual void OnException() = 0;
+};
+
 class MsException {
  public:
-  static MsException &GetInstance() {
+  static MsException &Instance() {
     static MsException instance;
     return instance;
   }
 
-  void SetException() { exception_ptr_ = std::current_exception(); }
+  void SetException() {
+    exception_ptr_ = std::current_exception();
+    if (exception_ptr_ != nullptr && listener_ != nullptr) {
+      auto listener = listener_;
+      listener_ = nullptr;
+      listener->OnException();
+    }
+  }
 
   void CheckException() {
     if (exception_ptr_ != nullptr) {
@@ -36,11 +49,13 @@ class MsException {
     }
   }
 
+  void SetExceptionListener(ExceptionListener *listener) { listener_ = listener; }
+
  private:
   MsException() = default;
   ~MsException() = default;
   DISABLE_COPY_AND_ASSIGN(MsException)
-
+  ExceptionListener *listener_{nullptr};
   std::exception_ptr exception_ptr_{nullptr};
 };
 }  // namespace mindspore

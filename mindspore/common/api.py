@@ -16,17 +16,23 @@
 # ============================================================================
 """Providing interface methods."""
 import types
+import sys
 from collections import OrderedDict
 from functools import wraps
+
 from mindspore import context
 from mindspore import log as logger
-from .._c_expression import generate_key, Executor_, Tensor, MetaTensor, PynativeExecutor_
-from .._c_expression import verify_inputs_signature, init_exec_dataset, _set_dataset_mode_config, init_backend
 from .tensor import Tensor as MsTensor
-from ..parallel._utils import _get_device_num, _get_global_rank, _need_to_full, _check_full_batch, _to_full_tensor
+from .._c_expression import generate_key, Executor_, Tensor, MetaTensor, PynativeExecutor_
+from .._c_expression import verify_inputs_signature, init_exec_dataset, _set_dataset_mode_config, init_pipeline
 from ..parallel._ps_context import _is_role_pserver
+from ..parallel._utils import _get_device_num, _get_global_rank, _need_to_full, _check_full_batch, _to_full_tensor, \
+    _get_parameter_broadcast, _get_pipeline_stages
+
 # store ms_function class compiled pipeline cache
 ms_compile_cache = {}
+
+BROADCAST_PHASE = "_broadcast_"
 
 
 def _convert_function_arguments(fn, *args):
@@ -189,7 +195,7 @@ class _MindSporeFunction:
 
     @_wrap_func
     def __call__(self, *args):
-        init_backend()
+        init_pipeline()
         converted, arguments_dict, parse_method = _convert_function_arguments(self.fn, *args)
         if not converted:
             raise RuntimeError('Process function parameter is failure')
@@ -202,7 +208,11 @@ class _MindSporeFunction:
 
         if context.get_context("precompile_only"):
             return None
-        return self._executor(args_list, phase)
+        new_inputs = []
+        for i in args_list:
+            if isinstance(i, Tensor):
+                new_inputs.append(i)
+        return self._executor(tuple(new_inputs), phase)
 
 
 def ms_function(fn=None, obj=None, input_signature=None):
@@ -215,11 +225,10 @@ def ms_function(fn=None, obj=None, input_signature=None):
         fn (Function): The Python function that will be run as a graph. Default: None.
         obj (Object): The Python Object that provides the information for identifying the compiled function.Default:
             None.
-        input_signature (MetaTensor): The MetaTensor which describes the input arguments. The MetaTensor specifies
-            the shape and dtype of the Tensor and they will be supplied to this function. If input_signature
-            is specified, each input to `fn` must be a `Tensor`. And the input parameters of `fn` cannot accept
-            `**kwargs`. The shape and dtype of actual inputs should keep the same as input_signature. Otherwise,
-            TypeError will be raised. Default: None.
+        input_signature (Tensor): The Tensor which describes the input arguments. The shape and dtype of the Tensor
+            will be supplied to this function. If input_signature is specified, each input to `fn` must be a `Tensor`.
+            And the input parameters of `fn` cannot accept `**kwargs`. The shape and dtype of actual inputs should
+            keep the same as input_signature. Otherwise, TypeError will be raised. Default: None.
 
     Returns:
         Function, if `fn` is not None, returns a callable function that will execute the compiled function; If `fn` is
@@ -227,27 +236,34 @@ def ms_function(fn=None, obj=None, input_signature=None):
         equal to the case when `fn` is not None.
 
     Examples:
-        >>> def tensor_add(x, y):
-        >>>     z = F.tensor_add(x, y)
-        >>>     return z
-        >>>
-        >>> @ms_function
-        >>> def tensor_add_with_dec(x, y):
-        >>>     z = F.tensor_add(x, y)
-        >>>     return z
-        >>>
-        >>> @ms_function(input_signature=(MetaTensor(mindspore.float32, (1, 1, 3, 3)),
-        >>>                               MetaTensor(mindspore.float32, (1, 1, 3, 3))))
-        >>> def tensor_add_with_sig(x, y):
-        >>>     z = F.tensor_add(x, y)
-        >>>     return z
-        >>>
+        >>> from mindspore.ops import functional as F
+        ...
         >>> x = Tensor(np.ones([1, 1, 3, 3]).astype(np.float32))
         >>> y = Tensor(np.ones([1, 1, 3, 3]).astype(np.float32))
-        >>>
+        ...
+        >>> # create a callable MindSpore graph by calling ms_function
+        >>> def tensor_add(x, y):
+        ...     z = x + y
+        ...     return z
+        ...
         >>> tensor_add_graph = ms_function(fn=tensor_add)
         >>> out = tensor_add_graph(x, y)
+        ...
+        >>> # create a callable MindSpore graph through decorator @ms_function
+        >>> @ms_function
+        ... def tensor_add_with_dec(x, y):
+        ...     z = x + y
+        ...     return z
+        ...
         >>> out = tensor_add_with_dec(x, y)
+        ...
+        >>> # create a callable MindSpore graph through decorator @ms_function with input_signature parameter
+        >>> @ms_function(input_signature=(Tensor(np.ones([1, 1, 3, 3]).astype(np.float32)),
+        ...                               Tensor(np.ones([1, 1, 3, 3]).astype(np.float32))))
+        ... def tensor_add_with_sig(x, y):
+        ...     z = x + y
+        ...     return z
+        ...
         >>> out = tensor_add_with_sig(x, y)
     """
 
@@ -281,6 +297,48 @@ def _generate_pip_args(obj, *args, method="construct"):
     return args_names, args_list
 
 
+def _get_auto_split_param_names(parameter_layout_dict):
+    auto_split_param_names = []
+    for key, value in parameter_layout_dict.items():
+        for dim in value[1]:
+            if dim != -1:
+                auto_split_param_names.append(key)
+                break
+    return auto_split_param_names
+
+
+def _build_broadcast_graph(broadcast_params_dict, broadcast_phase):
+    """Build broadcast graph."""
+    from mindspore.nn.wrap.cell_wrapper import _BroadCastCell
+
+    if not broadcast_params_dict:
+        broadcast_params_dict = {}
+    broadcast_params = []
+    for param in broadcast_params_dict.values():
+        broadcast_params.append(Tensor(param.asnumpy()))
+    _broadcast_net = _BroadCastCell(broadcast_params)
+    _broadcast_net.phase = broadcast_phase
+    broadcasted_params = _broadcast_net()
+    for param_name, param in zip(broadcast_params_dict.keys(), broadcasted_params):
+        broadcast_params_dict[param_name].set_data(param)
+
+
+def _parameter_broadcast(obj, auto_parallel_mode):
+    """Parameter broadcast."""
+    auto_split_param_names = []
+    if auto_parallel_mode:
+        auto_split_param_names = _get_auto_split_param_names(obj.parameter_layout_dict)
+
+    broadcast_params_dict = obj.parameters_broadcast_dict()
+    if auto_split_param_names and broadcast_params_dict:
+        broadcast_params_dict = OrderedDict()
+        for param_name, param in obj.parameters_broadcast_dict().items():
+            if param_name not in auto_split_param_names:
+                broadcast_params_dict[param_name] = param
+    broadcast_phase = "_broadcast_subgraph"
+    _build_broadcast_graph(broadcast_params_dict, broadcast_phase)
+
+
 class _PynativeExecutor:
     """
     An pynative executor used to compile/manage/run graph.
@@ -301,18 +359,34 @@ class _PynativeExecutor:
     def check_graph(self, obj, *args, **kwargs):
         return self._executor.check_graph(obj, *args, *(kwargs.values()))
 
+    def check_run(self, obj, *args, **kwargs):
+        return self._executor.check_run(obj, *args, *(kwargs.values()))
+
     def grad(self, grad, obj, weights, *args, **kwargs):
         self._executor.grad_net(grad, obj, weights, *args, *(kwargs.values()))
 
-    def clear(self, flag=""):
-        self._executor.clear(flag)
+    def clear(self, cell_id=""):
+        self._executor.clear(cell_id)
+
+    def sync(self):
+        self._executor.sync()
 
     def set_grad_flag(self, flag):
         self._executor.set_grad_flag(flag)
 
-    def __call__(self, *args, **kwargs):
+    def enter_construct(self, cell):
+        self._executor.enter_construct(cell)
+
+    def leave_construct(self, cell):
+        self._executor.leave_construct(cell)
+
+    def parameter_broadcast(self, obj, phase, auto_parallel_mode):
+        if BROADCAST_PHASE not in phase and _get_parameter_broadcast():
+            _parameter_broadcast(obj, auto_parallel_mode)
+
+    def __call__(self, obj, *args, **kwargs):
         args = args + tuple(kwargs.values())
-        return self._executor(args, "")
+        return self._executor(obj, args, "")
 
 
 class _Executor:
@@ -330,7 +404,7 @@ class _Executor:
         self.is_init = False
         self._executor = Executor_.get_instance()
         self.compile_cache = {}
-        self.phase_prefix = ""
+        self._executor.set_py_exe_path(sys.executable)
 
     def init_dataset(self, queue_name, dataset_size, batch_size, dataset_types, dataset_shapes,
                      input_indexs, phase='dataset'):
@@ -386,14 +460,15 @@ class _Executor:
             Str, the full phase of the cell.
             Bool, if the graph has been compiled before, return False, else return True.
         """
+
         args_names, args_list = _generate_pip_args(obj, *args)
         dic = dict(zip(args_names, args_list))
         key = generate_key(phase, dic)
-        self.phase_prefix = str(key[1])
+        obj.phase_prefix = str(key[1])
         if 'export' in phase:
-            phase = phase + '.' + self.phase_prefix + '.' + str(obj.create_time)
+            phase = phase + '.' + obj.phase_prefix + '.' + str(obj.create_time)
         else:
-            phase = self.phase_prefix + phase + '.' + str(obj.create_time)
+            phase = obj.phase_prefix + phase + '.' + str(obj.create_time)
 
         if phase in self.compile_cache.keys():
             logger.debug("%r graph has existed.", phase)
@@ -422,18 +497,7 @@ class _Executor:
         if not do_convert:
             return phase, True
 
-        if auto_parallel_mode:
-            obj.parameter_layout_dict = self._executor.get_parameter_layout(phase)
-        replace = obj.init_parameters_data(auto_parallel_mode=auto_parallel_mode)
-        if not enable_debug_runtime or enable_ge:
-            if auto_parallel_mode:
-                obj.load_parameter_slice(None)
-
-        self._updata_param_node_default_input(phase, replace)
-
-        # set parallel inputs in sink mode
-        if auto_parallel_mode and is_sink_mode:
-            obj.set_parallel_input_with_inputs(*args)
+        self._auto_parallel_process(obj, phase, is_sink_mode, auto_parallel_mode, *args)
 
         # the following GE init process is not needed when use vm or ms backend
         if enable_ge:
@@ -444,19 +508,46 @@ class _Executor:
                 _exec_init_graph(obj, init_phase)
         elif not enable_ge and "export" in phase:
             self._build_data_graph(obj, phase)
+        elif BROADCAST_PHASE not in phase and _get_parameter_broadcast():
+            _parameter_broadcast(obj, auto_parallel_mode)
 
         return phase, True
+
+    def _auto_parallel_process(self, obj, phase, is_sink_mode, auto_parallel_mode, *args):
+        """compile graph in auto parallel mode."""
+        if not auto_parallel_mode:
+            replace = obj.init_parameters_data(auto_parallel_mode=auto_parallel_mode)
+            self._updata_param_node_default_input(phase, replace)
+            return
+
+        obj.parameter_layout_dict = self._executor.get_parameter_layout(phase)
+        if _get_pipeline_stages() > 1:
+            obj.parallel_parameter_name_list = self._executor.get_parallel_parameter_name_list(phase)
+            obj.remove_redundant_parameters()
+        replace = obj.init_parameters_data(auto_parallel_mode=True)
+        if not context.get_context("enable_debug_runtime") or context.get_context("enable_ge"):
+            obj.load_parameter_slice(None)
+
+        self._updata_param_node_default_input(phase, replace)
+
+        # set parallel inputs in sink mode
+        if is_sink_mode:
+            obj.set_parallel_input_with_inputs(*args)
 
     def _updata_param_node_default_input(self, phase, replace):
         new_param = {x.name: replace[x] for x in replace if id(x) != id(replace[x])}
         return self._executor.updata_param_node_default_input(phase, new_param)
 
     def _get_shard_strategy(self, obj):
-        real_phase = self.phase_prefix + obj.phase + '.' + str(obj.create_time)
+        real_phase = obj.phase_prefix + obj.phase + '.' + str(obj.create_time)
         return self._executor.get_strategy(real_phase)
 
+    def _get_num_parallel_ops(self, obj):
+        real_phase = obj.phase_prefix + obj.phase + '.' + str(obj.create_time)
+        return self._executor.get_num_parallel_ops(real_phase)
+
     def _get_allreduce_fusion(self, obj):
-        real_phase = self.phase_prefix + obj.phase + '.' + str(obj.create_time)
+        real_phase = obj.phase_prefix + obj.phase + '.' + str(obj.create_time)
         return self._executor.get_allreduce_fusion(real_phase)
 
     def has_compiled(self, phase='predict'):
@@ -500,7 +591,7 @@ class _Executor:
         if phase == 'save':
             return self._executor((), phase + '.' + str(obj.create_time))
 
-        phase_real = self.phase_prefix + phase + '.' + str(obj.create_time)
+        phase_real = obj.phase_prefix + phase + '.' + str(obj.create_time)
         if self.has_compiled(phase_real):
             return self._exec_pip(obj, *args, phase=phase_real)
         raise KeyError('{} graph is not exist.'.format(phase_real))
@@ -508,10 +599,10 @@ class _Executor:
     def del_net_res(self, net_id):
         self._executor.del_net_res(net_id)
 
-    def _get_func_graph_proto(self, exec_id, ir_type="onnx_ir", use_prefix=False):
+    def _get_func_graph_proto(self, obj, exec_id, ir_type="onnx_ir", use_prefix=False):
         """Get graph proto from pipeline."""
         if use_prefix:
-            exec_id = self.phase_prefix + exec_id
+            exec_id = obj.phase_prefix + exec_id
         if self._executor.has_compiled(exec_id) is False:
             return None
         return self._executor.get_func_graph_proto(exec_id, ir_type)

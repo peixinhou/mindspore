@@ -17,6 +17,7 @@
 #include "minddata/dataset/core/config_manager.h"
 #include "minddata/dataset/core/global_context.h"
 #include "minddata/dataset/include/config.h"
+#include "minddata/dataset/util/log_adapter.h"
 #include "minddata/dataset/util/status.h"
 
 namespace mindspore {
@@ -29,7 +30,7 @@ std::shared_ptr<ConfigManager> _config = GlobalContext::config_manager();
 
 // Function to set the seed to be used in any random generator
 bool set_seed(int32_t seed) {
-  if (seed < 0 || seed > UINT32_MAX) {
+  if (seed < 0) {
     MS_LOG(ERROR) << "Seed given is not within the required range: " << seed;
     return false;
   }
@@ -42,7 +43,7 @@ uint32_t get_seed() { return _config->seed(); }
 
 // Function to set the number of rows to be prefetched
 bool set_prefetch_size(int32_t prefetch_size) {
-  if (prefetch_size <= 0 || prefetch_size > INT32_MAX) {
+  if (prefetch_size <= 0) {
     MS_LOG(ERROR) << "Prefetch size given is not within the required range: " << prefetch_size;
     return false;
   }
@@ -55,7 +56,7 @@ int32_t get_prefetch_size() { return _config->op_connector_size(); }
 
 // Function to set the default number of parallel workers
 bool set_num_parallel_workers(int32_t num_parallel_workers) {
-  if (num_parallel_workers <= 0 || num_parallel_workers > INT32_MAX) {
+  if (num_parallel_workers <= 0) {
     MS_LOG(ERROR) << "Number of parallel workers given is not within the required range: " << num_parallel_workers;
     return false;
   }
@@ -68,7 +69,7 @@ int32_t get_num_parallel_workers() { return _config->num_parallel_workers(); }
 
 // Function to set the default interval (in milliseconds) for monitor sampling
 bool set_monitor_sampling_interval(int32_t interval) {
-  if (interval <= 0 || interval > UINT32_MAX) {
+  if (interval <= 0) {
     MS_LOG(ERROR) << "Interval given is not within the required range: " << interval;
     return false;
   }
@@ -81,7 +82,7 @@ int32_t get_monitor_sampling_interval() { return _config->monitor_sampling_inter
 
 // Function to set the default timeout (in seconds) for DSWaitedCallback
 bool set_callback_timeback(int32_t timeout) {
-  if (timeout <= 0 || timeout > UINT32_MAX) {
+  if (timeout <= 0) {
     MS_LOG(ERROR) << "Timeout given is not within the required range: " << timeout;
     return false;
   }

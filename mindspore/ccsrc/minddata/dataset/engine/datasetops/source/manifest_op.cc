@@ -1,5 +1,5 @@
 /**
- * Copyright 2019 Huawei Technologies Co., Ltd
+ * Copyright 2019-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,7 +27,6 @@
 #include "minddata/dataset/engine/datasetops/source/sampler/sequential_sampler.h"
 #include "minddata/dataset/engine/db_connector.h"
 #include "minddata/dataset/engine/execution_tree.h"
-#include "minddata/dataset/engine/opt/pass.h"
 
 namespace mindspore {
 namespace dataset {
@@ -62,7 +61,7 @@ Status ManifestOp::Builder::SanityCheck() {
   err_msg += builder_num_workers_ <= 0 ? "Invalid parameter, num_parallel_workers must be greater than 0, but got " +
                                            std::to_string(builder_num_workers_) + ".\n"
                                        : "";
-  return err_msg.empty() ? Status::OK() : Status(StatusCode::kUnexpectedError, __LINE__, __FILE__, err_msg);
+  return err_msg.empty() ? Status::OK() : Status(StatusCode::kMDUnexpectedError, __LINE__, __FILE__, err_msg);
 }
 
 ManifestOp::ManifestOp(int32_t num_works, int32_t rows_per_buffer, std::string file, int32_t queue_size, bool decode,
@@ -152,7 +151,7 @@ Status ManifestOp::LaunchThreadsAndInitOp() {
   RETURN_IF_NOT_OK(wait_for_workers_post_.Register(tree_->AllTasks()));
 
   RETURN_IF_NOT_OK(
-    tree_->LaunchWorkers(num_workers_, std::bind(&ManifestOp::WorkerEntry, this, std::placeholders::_1)));
+    tree_->LaunchWorkers(num_workers_, std::bind(&ManifestOp::WorkerEntry, this, std::placeholders::_1), "", id()));
   TaskManager::FindMe()->Post();
   RETURN_IF_NOT_OK(ParseManifestFile());
   RETURN_IF_NOT_OK(CountDatasetInfo());
@@ -219,6 +218,7 @@ Status ManifestOp::LoadTensorRow(row_id_type row_id, const std::pair<std::string
     }
   }
   (*trow) = TensorRow(row_id, {std::move(image), std::move(label)});
+  trow->setPath({data.first, file_});
   return Status::OK();
 }
 
@@ -244,7 +244,8 @@ void ManifestOp::Print(std::ostream &out, bool show_all) const {
     // Call the super class for displaying any common detailed info
     ParallelOp::Print(out, show_all);
     // Then show any custom derived-internal stuff
-    out << "\nNumber of rows:" << num_rows_ << "\nManifest file: " << file_ << "\n\n";
+    out << "\nNumber of rows:" << num_rows_ << "\nManifest file: " << file_ << "\nDecode: " << (decode_ ? "yes" : "no")
+        << "\n\n";
   }
 }
 
@@ -395,16 +396,9 @@ Status ManifestOp::CountDatasetInfo() {
   return Status::OK();
 }
 
-#ifdef ENABLE_PYTHON
-Status ManifestOp::CountTotalRows(const std::string &file, const py::dict &dict, const std::string &usage,
-                                  int64_t *count, int64_t *numClasses) {
+Status ManifestOp::CountTotalRows(const std::string &file, const std::map<std::string, int32_t> &map,
+                                  const std::string &usage, int64_t *count, int64_t *numClasses) {
   // the logic of counting the number of samples is copied from ParseManifestFile()
-  std::map<std::string, int32_t> map;
-  for (auto p : dict) {
-    (void)map.insert(std::pair<std::string, int32_t>(py::reinterpret_borrow<py::str>(p.first),
-                                                     py::reinterpret_borrow<py::int_>(p.second)));
-  }
-
   std::shared_ptr<ManifestOp> op;
   *count = 0;
   RETURN_IF_NOT_OK(Builder().SetManifestFile(file).SetClassIndex(map).SetUsage(usage).Build(&op));
@@ -414,6 +408,7 @@ Status ManifestOp::CountTotalRows(const std::string &file, const py::dict &dict,
   return Status::OK();
 }
 
+#ifdef ENABLE_PYTHON
 Status ManifestOp::GetClassIndexing(const std::string &file, const py::dict &dict, const std::string &usage,
                                     std::map<std::string, int32_t> *output_class_indexing) {
   std::map<std::string, int32_t> input_class_indexing;
@@ -440,12 +435,6 @@ Status ManifestOp::GetClassIndexing(const std::string &file, const py::dict &dic
 }
 #endif
 
-// Visitor accept method for NodePass
-Status ManifestOp::Accept(NodePass *p, bool *modified) {
-  // Downcast shared pointer then call visitor
-  return p->RunOnNode(shared_from_base<ManifestOp>(), modified);
-}
-
 Status ManifestOp::ComputeColMap() {
   // Set the column name map (base class field)
   if (column_name_id_map_.empty()) {
@@ -455,23 +444,6 @@ Status ManifestOp::ComputeColMap() {
   } else {
     MS_LOG(WARNING) << "Column name map is already set!";
   }
-  return Status::OK();
-}
-
-// Get Dataset size
-Status ManifestOp::GetDatasetSize(int64_t *dataset_size) {
-  if (dataset_size_ > 0) {
-    *dataset_size = dataset_size_;
-    return Status::OK();
-  }
-  int64_t num_rows, sample_size;
-  std::shared_ptr<ManifestOp> op;
-  RETURN_IF_NOT_OK(Builder().SetManifestFile(file_).SetClassIndex(class_index_).SetUsage(usage_).Build(&op));
-  RETURN_IF_NOT_OK(op->ParseManifestFile());
-  num_rows = static_cast<int64_t>(op->image_labelname_.size());
-  sample_size = sampler_->GetNumSamples();
-  *dataset_size = sample_size > 0 ? std::min(num_rows, sample_size) : num_rows;
-  dataset_size_ = *dataset_size;
   return Status::OK();
 }
 
@@ -488,6 +460,26 @@ Status ManifestOp::GetNumClasses(int64_t *num_classes) {
   classes_count = static_cast<int64_t>(op->label_index_.size());
   *num_classes = classes_count;
   num_classes_ = classes_count;
+  return Status::OK();
+}
+
+Status ManifestOp::GetClassIndexing(std::vector<std::pair<std::string, std::vector<int32_t>>> *output_class_indexing) {
+  if ((*output_class_indexing).empty()) {
+    std::shared_ptr<ManifestOp> op;
+    RETURN_IF_NOT_OK(Builder().SetManifestFile(file_).SetClassIndex(class_index_).SetUsage(usage_).Build(&op));
+    RETURN_IF_NOT_OK(op->ParseManifestFile());
+    RETURN_IF_NOT_OK(op->CountDatasetInfo());
+    uint32_t count = 0;
+    for (const auto label : op->label_index_) {
+      if (!class_index_.empty()) {
+        (*output_class_indexing)
+          .emplace_back(std::make_pair(label.first, std::vector<int32_t>(1, class_index_[label.first])));
+      } else {
+        (*output_class_indexing).emplace_back(std::make_pair(label.first, std::vector<int32_t>(1, count)));
+      }
+      count++;
+    }
+  }
   return Status::OK();
 }
 

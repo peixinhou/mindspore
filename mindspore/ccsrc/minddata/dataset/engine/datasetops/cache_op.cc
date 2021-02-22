@@ -1,5 +1,5 @@
 /**
- * Copyright 2020 Huawei Technologies Co., Ltd
+ * Copyright 2020-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,20 +17,14 @@
 
 #include <memory>
 #include <utility>
-#include <vector>
 #include "minddata/dataset/core/config_manager.h"
 #include "minddata/dataset/core/constants.h"
 #include "minddata/dataset/core/global_context.h"
 #include "minddata/dataset/engine/datasetops/repeat_op.h"
 #include "minddata/dataset/engine/data_buffer.h"
 #include "minddata/dataset/engine/execution_tree.h"
-#include "minddata/dataset/engine/opt/pass.h"
+#include "minddata/dataset/util/log_adapter.h"
 #include "minddata/dataset/util/task_manager.h"
-#ifndef ENABLE_ANDROID
-#include "utils/log_adapter.h"
-#else
-#include "mindspore/lite/src/common/log_adapter.h"
-#endif
 
 namespace mindspore {
 namespace dataset {
@@ -45,12 +39,12 @@ CacheOp::Builder::Builder() : build_cache_client_(nullptr), build_sampler_(nullp
 // Check if the required parameters are set by the builder.
 Status CacheOp::Builder::SanityCheck() const {
   if (build_cache_client_ == nullptr) {
-    return Status(StatusCode::kUnexpectedError, __LINE__, __FILE__,
+    return Status(StatusCode::kMDUnexpectedError, __LINE__, __FILE__,
                   "Invalid parameter, CacheOp requires a CacheClient, but got nullptr.");
   }
   // Make sure the cache client has a valid session
   if (!build_cache_client_->session_id()) {
-    return Status(StatusCode::kUnexpectedError, __LINE__, __FILE__,
+    return Status(StatusCode::kMDUnexpectedError, __LINE__, __FILE__,
                   "Invalid parameter, cache client for CacheOp requires a session id which is not equal to 0.");
   }
   return Status::OK();
@@ -82,12 +76,13 @@ Status CacheOp::InitCache() { return Status::OK(); }
 // This class functor will provide the master loop that drives the logic for performing the work
 Status CacheOp::operator()() {
   if (!sampler_) {
-    return Status(StatusCode::kUnexpectedError, __LINE__, __FILE__,
+    return Status(StatusCode::kMDUnexpectedError, __LINE__, __FILE__,
                   "Invalid parameter, CacheOp requires a sampler before it can be executed, but got nullptr.");
   }
   RETURN_IF_NOT_OK(RegisterResources());
   // Kick off the workers
-  RETURN_IF_NOT_OK(tree_->LaunchWorkers(num_workers_, std::bind(&CacheOp::WorkerEntry, this, std::placeholders::_1)));
+  RETURN_IF_NOT_OK(
+    tree_->LaunchWorkers(num_workers_, std::bind(&CacheOp::WorkerEntry, this, std::placeholders::_1), Name()));
   // required task group sync after launching workers
   TaskManager::FindMe()->Post();
   // Wait for the workers to finish caching the rows.
@@ -113,7 +108,14 @@ Status CacheOp::CacheAllRows(int32_t worker_id) {
     RETURN_IF_NOT_OK(this->GetNextInput(&db_ptr, worker_id, 0));
     while (!db_ptr->eof()) {
       if (!db_ptr->eoe()) {
-        RETURN_IF_NOT_OK(cache_client_->WriteBuffer(std::move(db_ptr)));
+        Status rc;
+        // Do the Async write if we attach to the shared memory.
+        rc = cache_client_->AsyncWriteBuffer(std::move(db_ptr));
+        if (rc.StatusCode() == StatusCode::kMDNotImplementedYet) {
+          RETURN_IF_NOT_OK(cache_client_->WriteBuffer(std::move(db_ptr)));
+        } else if (rc.IsError()) {
+          return rc;
+        }
       } else {
         // In a repeat-over-cache scenario, any of the "real" leaf operators below us have been set up
         // as non-repeating leaf ops.  As such, they only do one epoch and then quit.  Since we got the
@@ -143,21 +145,41 @@ Status CacheOp::WaitForCachingAllRows() {
   RETURN_IF_NOT_OK(rows_cache_done_.Wait());
   // Move from build phase to fetch phase if we are the one to fill the cache
   if (phase_ == Phase::kBuildPhase) {
+    RETURN_IF_NOT_OK(cache_client_->FlushAsyncWriteBuffer());  // One more flush
     RETURN_IF_NOT_OK(cache_client_->BuildPhaseDone());
     // Move to the next phase
     phase_ = Phase::kFetchPhase;
   }
+  // If we are not the one to create the cache,
+  // wait until the state changed from build phase to fetch base.
+  bool BuildPhaseDone = true;
+  do {
+    int8_t out;
+    RETURN_IF_NOT_OK(cache_client_->GetState(&out));
+    auto state = static_cast<CacheServiceState>(out);
+    switch (state) {
+      case CacheServiceState::kBuildPhase:
+        // Do nothing. Continue to wait.
+        BuildPhaseDone = false;
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        break;
+      case CacheServiceState::kFetchPhase:
+        BuildPhaseDone = true;
+        break;
+      case CacheServiceState::kOutOfMemory:
+        return Status(StatusCode::kMDOutOfMemory, "Cache server is running out of memory");
+      case CacheServiceState::kNoSpace:
+        return Status(StatusCode::kMDNoSpace, "Cache server is running of out spill storage");
+      case CacheServiceState::kNone:
+      case CacheServiceState::kError:
+      default:
+        RETURN_STATUS_UNEXPECTED("Unexpected state: " + std::to_string(out));
+    }
+  } while (!BuildPhaseDone);
   // Get statistics from the server, and if we are not the one to create the cache,
   // wait until the state changed from build phase to fetch base.
   CacheServiceStat stat{};
-  bool BuildPhaseDone = true;
-  do {
-    RETURN_IF_NOT_OK(cache_client_->GetStat(&stat));
-    BuildPhaseDone = stat.cache_service_state == static_cast<uint8_t>(CacheServiceState::kFetchPhase);
-    if (!BuildPhaseDone) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
-  } while (!BuildPhaseDone);
+  RETURN_IF_NOT_OK(cache_client_->GetStat(&stat));
   const row_id_type min_key = stat.min_row_id;
   const row_id_type max_key = stat.max_row_id;
   num_rows_ = max_key - min_key + 1;
@@ -183,9 +205,6 @@ Status CacheOp::RegisterResources() {
   return Status::OK();
 }
 
-// Base-class override for setting specific CacheOp configurations. This code will be called
-// during the execution tree prepare phase BEFORE traversing down to child operators.
-uint32_t CacheOp::PrepareFlags() const { return ExecutionTree::kDePrepCache; }
 // Base-class override for special eoe handler.
 // CacheOp must override this because it shall not perform default handling of eoe. Instead
 // the CacheOp manages actions related to the end of the epoch.
@@ -201,25 +220,16 @@ Status CacheOp::EofReceived(int32_t worker_id) {
   return Status::OK();
 }
 
-// Pre-Visitor accept method for NodePass
-Status CacheOp::PreAccept(NodePass *p, bool *modified) {
-  // Downcast shared pointer then call the pre-visitation
-  return p->PreRunOnNode(shared_from_base<CacheOp>(), modified);
-}
-
-// Visitor accept method for NodePass
-Status CacheOp::Accept(NodePass *p, bool *modified) {
-  // Downcast shared pointer then call visitor
-  return p->RunOnNode(shared_from_base<CacheOp>(), modified);
-}
-
-// A public wrapper for creating the cache through the client
-Status CacheOp::CreateCache(uint32_t cache_crc) {
+Status CacheOp::PrepareOperator() {
+  // Run any common code from super class first before adding our own
+  RETURN_IF_NOT_OK(DatasetOp::PrepareOperator());
+  // Get the computed check sum from all ops in our cache path below us and ask the cache op to create it's cache
+  uint32_t cache_crc = DatasetOp::GenerateCRC(shared_from_this());
   // This is a non-mappable cache op so the id's need to be generated.
   // Construct the cache
   const bool generate_ids = true;
   Status rc = cache_client_->CreateCache(cache_crc, generate_ids);
-  if (rc.get_code() == StatusCode::kDuplicateKey) {
+  if (rc.StatusCode() == StatusCode::kMDDuplicateKey) {
     // We are told the cache has been created already. So we skip the build phase.
     phase_ = Phase::kFetchPhase;
     rc = Status::OK();

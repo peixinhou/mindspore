@@ -19,6 +19,7 @@
 #include <memory>
 #include <map>
 #include "tools/converter/quantizer/quantize_util.h"
+#include "src/ops/assert_op.h"
 #include "src/ops/space_to_batch.h"
 #include "src/ops/space_to_batch_nd.h"
 #include "src/ops/conv2d.h"
@@ -66,7 +67,6 @@
 #include "src/ops/slice.h"
 #include "src/ops/squeeze.h"
 #include "src/ops/flatten.h"
-#include "src/ops/mean.h"
 #include "src/ops/nhwc2nchw.h"
 #include "src/ops/stack.h"
 #include "src/ops/crop.h"
@@ -101,6 +101,7 @@
 #include "src/ops/logical_not.h"
 #include "src/ops/floor_div.h"
 #include "src/ops/floor_mod.h"
+#include "src/ops/mod.h"
 #include "src/ops/equal.h"
 #include "src/ops/not_equal.h"
 #include "src/ops/less.h"
@@ -131,6 +132,7 @@
 #include "src/ops/hashtable_lookup.h"
 #include "src/ops/skip_gram.h"
 #include "src/ops/clip.h"
+#include "src/ops/adder.h"
 #include "src/ops/custom_predict.h"
 #include "src/ops/custom_normalize.h"
 #include "src/ops/custom_extract_features.h"
@@ -147,10 +149,91 @@
 #include "src/ops/while.h"
 #include "src/ops/oneslike.h"
 #include "src/ops/unsorted_segment_sum.h"
+#include "src/ops/reciprocal.h"
+#include "src/ops/constant.h"
+#include "src/ops/tensorlist_fromtensor.h"
+#include "src/ops/tensorlist_getitem.h"
+#include "src/ops/tensorlist_setitem.h"
+#include "src/ops/tensorlist_reserve.h"
+#include "src/ops/tensorlist_stack.h"
+#include "src/ops/merge.h"
+#include "src/ops/switch.h"
+#include "src/ops/partial.h"
+#include "src/ops/if.h"
+#include "src/ops/select.h"
+#include "src/ops/gelu.h"
+#include "src/ops/gru.h"
+#include "src/ops/size.h"
+#include "src/ops/random_standard_normal.h"
+#include "src/ops/invert_permutation.h"
+#include "src/ops/crop_and_resize.h"
+#include "src/ops/nonzero.h"
+#include "src/ops/erf.h"
+#include "src/ops/lin_space.h"
+#include "src/ops/uniform_real.h"
+#include "src/ops/rank.h"
+#include "src/ops/is_finite.h"
+#include "src/ops/neg_grad.h"
+#include "src/ops/activation_grad.h"
+#include "src/ops/apply_momentum.h"
+#include "src/ops/bias_grad.h"
+#include "src/ops/pooling_grad.h"
+#include "src/ops/conv2d_grad_filter.h"
+#include "src/ops/conv2d_grad_input.h"
+#include "src/ops/group_conv2d_grad_input.h"
+#include "src/ops/power_grad.h"
+#include "src/ops/softmax_cross_entropy.h"
+#include "src/ops/sparse_softmax_cross_entropy.h"
+#include "src/ops/bn_grad.h"
+#include "src/ops/arithmetic_grad.h"
+#include "src/ops/depend.h"
+#include "src/ops/flatten_grad.h"
+#include "src/ops/log_grad.h"
+#include "src/ops/abs_grad.h"
+#include "src/ops/sgd.h"
+#include "src/ops/adam.h"
+#include "src/ops/assign.h"
+#include "src/ops/dropout_grad.h"
+#include "src/ops/maximum_grad.h"
+#include "src/ops/minimum_grad.h"
+#include "src/ops/control_depend.h"
+#include "src/ops/assign_add.h"
+#include "src/ops/binary_cross_entropy.h"
+#include "src/ops/binary_cross_entropy_grad.h"
+#include "src/ops/smooth_l1_loss.h"
+#include "src/ops/smooth_l1_loss_grad.h"
+#include "src/ops/sigmoid_cross_entropy_with_logits.h"
+#include "src/ops/sigmoid_cross_entropy_with_logits_grad.h"
+#include "src/ops/strided_slice_grad.h"
 #endif
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
+std::vector<int> CastToInt(const ValuePtr &value) {
+  if (value == nullptr) {
+    MS_LOG(WARNING) << "valueptr is nullptr.";
+    return {};
+  }
+  std::vector<int> cur_value;
+  if (utils::isa<ValueSequeuePtr>(value)) {
+    if (value->cast<ValueSequeuePtr>()->value().front()->type()->number_type() == kNumberTypeInt64) {
+      auto origin_value = GetValue<std::vector<int64_t>>(value);
+      for (size_t index = 0; index < origin_value.size(); ++index) {
+        cur_value.push_back(static_cast<int>(origin_value[index]));
+      }
+    } else {
+      cur_value = GetValue<std::vector<int>>(value);
+    }
+  } else {
+    if (value->type()->number_type() == kNumberTypeInt64) {
+      cur_value.push_back(static_cast<int>(GetValue<int64_t>(value)));
+    } else {
+      cur_value.push_back(GetValue<int>(value));
+    }
+  }
+  return cur_value;
+}
+
 void PrimitiveC::CalFloatScopeByMeanAndStddev(const double &mean, const double &stdDev, float *mMin, float *mMax) {
   const float qmin = 0;
   const float qmax = 255;
@@ -161,12 +244,7 @@ void PrimitiveC::CalFloatScopeByMeanAndStddev(const double &mean, const double &
 void PrimitiveC::FillDefaultInputQuantParamIfNeed(const size_t &inputSize) {
   std::vector<schema::QuantParamT> quants;
   schema::QuantParamT quantParam;
-  // fill input_quant_param_ by not inited quant_parm
-  if (input_quant_param_.size() < inputSize) {
-    schema::QuantParamT tmpQuantParam;
-    quants.emplace_back(tmpQuantParam);
-    input_quant_param_.insert(input_quant_param_.end(), inputSize - input_quant_param_.size(), quants);
-  }
+
   if (input_quant_param_.size() == kDoubleNum) {
     quants.clear();
     quantParam.min = 0.0;
@@ -175,6 +253,12 @@ void PrimitiveC::FillDefaultInputQuantParamIfNeed(const size_t &inputSize) {
     quantParam.scale = input_quant_param_.at(0).at(0).scale * input_quant_param_.at(1).at(0).scale;
     quants.emplace_back(quantParam);
     input_quant_param_.emplace_back(quants);
+  }
+  // fill input_quant_param_ by not inited quant_parm
+  if (input_quant_param_.size() < inputSize) {
+    schema::QuantParamT tmpQuantParam;
+    quants.emplace_back(tmpQuantParam);
+    input_quant_param_.insert(input_quant_param_.end(), inputSize - input_quant_param_.size(), quants);
   }
 }
 
@@ -258,9 +342,28 @@ void PrimitiveC::PopulaterOutputQuantParam(const Primitive &prim, bool narrowRan
 
 void PrimitiveC::PopulaterQuantParam(const Primitive &prim, const std::vector<AnfNodePtr> &inputs) {
   auto narrow_range = prim.GetAttr("narrow_range");
-  bool narrowRangeQuantParam = narrow_range != nullptr && GetValue<bool>(narrow_range);
+  bool narrowRangeQuantParam = false;
+  if (narrow_range != nullptr) {
+    if (utils::isa<tensor::TensorPtr>(narrow_range)) {
+      auto narrow_range_tensor = narrow_range->cast<tensor::TensorPtr>();
+      narrowRangeQuantParam = *reinterpret_cast<bool *>(narrow_range_tensor->data_c());
+    } else if (utils::isa<ImmTraits<bool>::type>(narrow_range)) {
+      narrowRangeQuantParam = GetValue<bool>(narrow_range);
+    } else {
+      MS_LOG(ERROR) << "valueptr is invalid.";
+      return;
+    }
+  }
   auto num_bits = prim.GetAttr("num_bits");
-  int32_t numbitsRangeQuantParam = num_bits != nullptr ? GetValue<int64_t>(num_bits) : 8;
+  int32_t numbitsRangeQuantParam = 8;
+  if (num_bits != nullptr) {
+    if (utils::isa<tensor::TensorPtr>(num_bits)) {
+      auto num_bits_tensor = num_bits->cast<tensor::TensorPtr>();
+      numbitsRangeQuantParam = *reinterpret_cast<int64_t *>(num_bits_tensor->data_c());
+    } else if (utils::isa<ImmTraits<int64_t>::type>(num_bits)) {
+      numbitsRangeQuantParam = GetValue<int64_t>(num_bits);
+    }
+  }
   PopulaterInputQuantParam(prim, inputs, narrowRangeQuantParam, numbitsRangeQuantParam);
   PopulaterOutputQuantParam(prim, narrowRangeQuantParam, numbitsRangeQuantParam);
 }
@@ -275,9 +378,9 @@ void PrimitiveC::GetAttrDataFromInput(const AnfNodePtr &inputNode, std::vector<i
       auto tuple = val->cast<ValueTuplePtr>();
       MS_ASSERT(tuple != nullptr);
       for (size_t i = 0; i < tuple->size(); i++) {
-        auto elem = tuple->value().at(i)->cast<Int32ImmPtr>();
+        auto elem = tuple->value().at(i);
         MS_ASSERT(elem != nullptr);
-        data->emplace_back(static_cast<int>(elem->value()));
+        data->emplace_back(CastToInt(elem).front());
       }
     }
   }
@@ -292,7 +395,9 @@ void PrimitiveC::set_input_quant_params(const std::vector<std::vector<schema::Qu
 }
 
 void PrimitiveC::set_input_quant_param(const size_t &index, const std::vector<schema::QuantParamT> &input_quant_param) {
-  MS_ASSERT(index < this->input_quant_param_.size());
+  if (index >= this->input_quant_param_.size()) {
+    this->input_quant_param_.resize(index + 1);
+  }
   this->input_quant_param_.at(index) = input_quant_param;
 }
 
@@ -349,6 +454,10 @@ void PrimitiveC::set_quant_type(const schema::QuantType &quant_type) { this->qua
 
 schema::QuantType PrimitiveC::quant_type() const { return quant_type_; }
 
+bool PrimitiveC::enable_huffman_code() const { return enable_huffman_code_; }
+
+void PrimitiveC::set_enable_huffman_code(bool enable_huffman_code) { this->enable_huffman_code_ = enable_huffman_code; }
+
 std::shared_ptr<PrimitiveC> GetReturnPrim() {
   auto return_primitiveT = new (std::nothrow) schema::PrimitiveT;
   if (return_primitiveT == nullptr) {
@@ -398,14 +507,15 @@ std::shared_ptr<PrimitiveC> GetTupleGetItemPrim() {
 }
 
 template <typename T, typename = std::enable_if<std::is_base_of<PrimitiveC, T>::value>>
-std::shared_ptr<PrimitiveC> NewPrimitiveC(const Primitive &prim, const std::vector<AnfNodePtr> &inputs,
-                                          const schema::QuantType &quantType) {
+std::shared_ptr<PrimitiveC> NewPrimitiveC(const mindspore::Primitive &prim, const std::vector<AnfNodePtr> &inputs,
+                                          const schema::QuantType &quantType, bool train_flag = false) {
   auto primc = std::make_shared<T>();
   if (primc == nullptr) {
     MS_LOG(ERROR) << "make_shared PrimitiveC failed";
     return nullptr;
   }
   primc->set_quant_type(quantType);
+  primc->set_train_flag(train_flag);
   auto ret = primc->UnPackAttr(prim, inputs);
   if (ret != RET_OK) {
     MS_LOG(ERROR) << "UnPackAttr failed";
@@ -415,10 +525,12 @@ std::shared_ptr<PrimitiveC> NewPrimitiveC(const Primitive &prim, const std::vect
 }
 
 std::shared_ptr<PrimitiveC> PrimitiveC::Create(const Primitive &prim, const std::vector<AnfNodePtr> &inputs,
-                                               const schema::QuantType &quantType) {
+                                               const schema::QuantType &quantType, bool train_flag) {
   const auto &op_type = prim.name();
   if (op_type == "ReLU" || op_type == "ReLU6" || op_type == "Sigmoid" || op_type == "HSwish" || op_type == "HSigmoid") {
     return NewPrimitiveC<Activation>(prim, inputs, quantType);
+  } else if (op_type == "Abs") {
+    return NewPrimitiveC<Abs>(prim, inputs, quantType);
   } else if (op_type == "AddN") {
     return NewPrimitiveC<AddN>(prim, inputs, quantType);
   } else if (op_type == "BatchNorm") {
@@ -428,18 +540,22 @@ std::shared_ptr<PrimitiveC> PrimitiveC::Create(const Primitive &prim, const std:
   } else if (op_type == "Concat") {
     return NewPrimitiveC<Concat>(prim, inputs, quantType);
   } else if (op_type == "Conv2D") {
-    return NewPrimitiveC<Conv2D>(prim, inputs, quantType);
+    return NewPrimitiveC<Conv2D>(prim, inputs, quantType, train_flag);
+  } else if (op_type == "Cos") {
+    return NewPrimitiveC<Cos>(prim, inputs, quantType);
   } else if (op_type == "DepthwiseConv2dNative" || op_type == "DepthwiseConv2D") {
     return NewPrimitiveC<DepthwiseConv2D>(prim, inputs, quantType);
   } else if (op_type == "Dequant") {
     return NewPrimitiveC<Dequant>(prim, inputs, quantType);
   } else if (op_type == "Flatten") {
     return NewPrimitiveC<Flatten>(prim, inputs, quantType);
+  } else if (op_type == "FloorDiv") {
+    return NewPrimitiveC<FloorDiv>(prim, inputs, quantType);
   } else if ((op_type == "FusedBatchNorm") || (op_type == "FusedBatchNormEx")) {
     return NewPrimitiveC<FusedBatchNorm>(prim, inputs, quantType);
-  } else if (op_type == "make_tuple") {
+  } else if ((op_type == "make_tuple") || (op_type == "MakeTuple")) {
     return NewPrimitiveC<MakeTuple>(prim, inputs, quantType);
-  } else if (op_type == "MatMul") {
+  } else if (op_type == "MatMul" || op_type == "BatchMatMul") {
     return NewPrimitiveC<MatMul>(prim, inputs, quantType);
   } else if (op_type == "Mul") {
     return NewPrimitiveC<Mul>(prim, inputs, quantType);
@@ -449,6 +565,8 @@ std::shared_ptr<PrimitiveC> PrimitiveC::Create(const Primitive &prim, const std:
     return NewPrimitiveC<Quant>(prim, inputs, quantType);
   } else if (op_type == "RealDiv") {
     return NewPrimitiveC<RealDiv>(prim, inputs, quantType);
+  } else if (op_type == "Reciprocal") {
+    return NewPrimitiveC<Reciprocal>(prim, inputs, quantType);
   } else if (op_type == "ReduceMax") {
     return NewPrimitiveC<Reduce>(prim, inputs, quantType);
   } else if (op_type == "ReduceMean") {
@@ -463,6 +581,10 @@ std::shared_ptr<PrimitiveC> PrimitiveC::Create(const Primitive &prim, const std:
     return NewPrimitiveC<Reduce>(prim, inputs, quantType);
   } else if (op_type == "Reshape") {
     return NewPrimitiveC<Reshape>(prim, inputs, quantType);
+  } else if (op_type == "Rsqrt") {
+    return NewPrimitiveC<Rsqrt>(prim, inputs, quantType);
+  } else if (op_type == "Sin") {
+    return NewPrimitiveC<Sin>(prim, inputs, quantType);
   } else if (op_type == "Slice") {
     return NewPrimitiveC<Slice>(prim, inputs, quantType);
   } else if (op_type == "Squeeze") {
@@ -493,11 +615,17 @@ std::shared_ptr<PrimitiveC> PrimitiveC::Create(const Primitive &prim, const std:
     return NewPrimitiveC<Maximum>(prim, inputs, quantType);
   } else if (op_type == "Split") {
     return NewPrimitiveC<Split>(prim, inputs, quantType);
-  } else if (op_type == "While") {
-    return NewPrimitiveC<While>(prim, inputs, quantType);
   } else if (op_type == "OneHot") {
     return NewPrimitiveC<OneHot>(prim, inputs, quantType);
-  } else if (op_type == "GatherV2") {
+  } else if (op_type == "Dropout") {
+    return NewPrimitiveC<Dropout>(prim, inputs, quantType);
+  } else if (op_type == "While") {
+    return NewPrimitiveC<While>(prim, inputs, quantType);
+  } else if (op_type == "MirrorPad") {
+    return NewPrimitiveC<Pad>(prim, inputs, quantType);
+  } else if (op_type == "InstanceNorm") {
+    return NewPrimitiveC<InstanceNorm>(prim, inputs, quantType);
+  } else if (op_type == "Gather") {
     return NewPrimitiveC<Gather>(prim, inputs, quantType);
   } else if (op_type == "OnesLike") {
     return NewPrimitiveC<OnesLike>(prim, inputs, quantType);
@@ -509,10 +637,54 @@ std::shared_ptr<PrimitiveC> PrimitiveC::Create(const Primitive &prim, const std:
     return NewPrimitiveC<ExpandDims>(prim, inputs, quantType);
   } else if (op_type == "UnsortedSegmentSum") {
     return NewPrimitiveC<UnsortedSegmentSum>(prim, inputs, quantType);
-
-#ifdef SUPPORT_TRAIN
+  } else if (op_type == "ResizeNearestNeighbor") {
+    return NewPrimitiveC<Resize>(prim, inputs, quantType);
+  } else if (op_type == "ResizeBilinear") {
+    return NewPrimitiveC<Resize>(prim, inputs, quantType);
+  } else if (op_type == "Floor") {
+    return NewPrimitiveC<Floor>(prim, inputs, quantType);
+  } else if (op_type == "Minimum") {
+    return NewPrimitiveC<Minimum>(prim, inputs, quantType);
+  } else if (op_type == "Div") {
+    return NewPrimitiveC<Div>(prim, inputs, quantType);
+  } else if (op_type == "Tanh") {
+    return NewPrimitiveC<Activation>(prim, inputs, quantType);
+  } else if (op_type == "Equal") {
+    return NewPrimitiveC<Equal>(prim, inputs, quantType);
+  } else if (op_type == "TopK") {
+    return NewPrimitiveC<TopK>(prim, inputs, quantType);
+  } else if (op_type == "Mod") {
+    return NewPrimitiveC<Mod>(prim, inputs, quantType);
+  } else if (op_type == "ArgMin" || op_type == "ArgMinWithValue") {
+    return NewPrimitiveC<ArgMin>(prim, inputs, quantType);
+  } else if (op_type == "Range") {
+    return NewPrimitiveC<Range>(prim, inputs, quantType);
+  } else if (op_type == "Tile") {
+    return NewPrimitiveC<Tile>(prim, inputs, quantType, train_flag);
+  } else if (op_type == "GatherNd") {
+    return NewPrimitiveC<GatherNd>(prim, inputs, quantType);
+  } else if (op_type == "Square") {
+    return NewPrimitiveC<Square>(prim, inputs, quantType);
+  } else if (op_type == "Sqrt") {
+    return NewPrimitiveC<Sqrt>(prim, inputs, quantType);
+  } else if (op_type == "Greater") {
+    return NewPrimitiveC<Greater>(prim, inputs, quantType);
+  } else if (op_type == "Switch") {
+    return NewPrimitiveC<Switch>(prim, inputs, quantType);
+  } else if (op_type == "Partial") {
+    return NewPrimitiveC<Partial>(prim, inputs, quantType);
+  } else if (op_type == "Merge") {
+    return NewPrimitiveC<Merge>(prim, inputs, quantType);
+  } else if (op_type == "LayerNorm") {
+    return NewPrimitiveC<LayerNorm>(prim, inputs, quantType);
+  } else if (op_type == "ArgMax" || op_type == "ArgMaxWithValue") {
+    return NewPrimitiveC<ArgMax>(prim, inputs, quantType);
+  } else if (op_type == "Gelu") {
+    return NewPrimitiveC<GeLU>(prim, inputs, quantType);
   } else if (op_type == "SoftmaxCrossEntropyWithLogits") {
     return NewPrimitiveC<SoftmaxCrossEntropy>(prim, inputs, quantType);
+  } else if (op_type == "SparseSoftmaxCrossEntropyWithLogits") {
+    return NewPrimitiveC<SparseSoftmaxCrossEntropy>(prim, inputs, quantType);
   } else if (op_type == "BiasAddGrad") {
     return NewPrimitiveC<BiasGrad>(prim, inputs, quantType);
   } else if (op_type == "ApplyMomentum") {
@@ -524,20 +696,19 @@ std::shared_ptr<PrimitiveC> PrimitiveC::Create(const Primitive &prim, const std:
   } else if ((op_type == "ReluGrad" || op_type == "ReLU6Grad" || op_type == "SigmoidGrad" ||
               op_type == "HSigmoidGrad" || op_type == "HSwishGrad")) {
     return NewPrimitiveC<ActivationGrad>(prim, inputs, quantType);
-  } else if ((op_type == "MaxPoolGrad") || (op_type == "MeanPoolGrad")) {
+  } else if ((op_type == "MaxPoolGrad") || (op_type == "AvgPoolGrad") || (op_type == "AvgPoolGradGpu") ||
+             (op_type == "AvgPoolGradCpu")) {
     return NewPrimitiveC<PoolingGrad>(prim, inputs, quantType);
   } else if (op_type == "Conv2DBackpropFilter") {
     return NewPrimitiveC<Conv2DGradFilter>(prim, inputs, quantType);
-  } else if (op_type == "Conv2DBackpropInput") {
+  } else if (op_type == "Conv2DBackpropInput" && train_flag) {
     return NewPrimitiveC<Conv2DGradInput>(prim, inputs, quantType);
   } else if ((op_type == "BatchNormGrad") || (op_type == "FusedBatchNormGradEx")) {
     return NewPrimitiveC<BNGrad>(prim, inputs, quantType);
   } else if (op_type == "FlattenGrad") {
     return NewPrimitiveC<FlattenGrad>(prim, inputs, quantType);
-  } else if (op_type == "FusedBatchNormGrad") {
+  } else if ((op_type == "FusedBatchNormGrad") || (op_type == "FusedBatchNormGradCpu")) {
     return NewPrimitiveC<BNGrad>(prim, inputs, quantType);
-  } else if (op_type == "Tile") {
-    return NewPrimitiveC<Tile>(prim, inputs, quantType);
   } else if (op_type == "PowerGrad") {
     return NewPrimitiveC<PowerGrad>(prim, inputs, quantType);
   } else if (op_type == "SGD") {
@@ -546,16 +717,34 @@ std::shared_ptr<PrimitiveC> PrimitiveC::Create(const Primitive &prim, const std:
     return NewPrimitiveC<Adam>(prim, inputs, quantType);
   } else if (op_type == "Assign") {
     return NewPrimitiveC<Assign>(prim, inputs, quantType);
+  } else if (op_type == "DropoutGrad") {
+    return NewPrimitiveC<DropoutGrad>(prim, inputs, quantType);
+  } else if (op_type == "MaximumGrad") {
+    return NewPrimitiveC<MaximumGrad>(prim, inputs, quantType);
+  } else if (op_type == "MinimumGrad") {
+    return NewPrimitiveC<MinimumGrad>(prim, inputs, quantType);
   } else if (op_type == "AssignAdd") {
     return NewPrimitiveC<AssignAdd>(prim, inputs, quantType);
   } else if (op_type == "BinaryCrossEntropy") {
     return NewPrimitiveC<BinaryCrossEntropy>(prim, inputs, quantType);
   } else if (op_type == "BinaryCrossEntropyGrad") {
     return NewPrimitiveC<BinaryCrossEntropyGrad>(prim, inputs, quantType);
-#else
-  } else if (op_type == "Conv2DBackpropInput") {
+  } else if (op_type == "SmoothL1Loss") {
+    return NewPrimitiveC<SmoothL1Loss>(prim, inputs, quantType);
+  } else if (op_type == "SmoothL1LossGrad") {
+    return NewPrimitiveC<SmoothL1LossGrad>(prim, inputs, quantType);
+  } else if (op_type == "SigmoidCrossEntropyWithLogits") {
+    return NewPrimitiveC<SigmoidCrossEntropyWithLogits>(prim, inputs, quantType);
+  } else if (op_type == "SigmoidCrossEntropyWithLogitsGrad") {
+    return NewPrimitiveC<SigmoidCrossEntropyWithLogitsGrad>(prim, inputs, quantType);
+  } else if (op_type == "Pad") {
+    return NewPrimitiveC<Pad>(prim, inputs, quantType);
+  } else if (op_type == "StridedSliceGrad") {
+    return NewPrimitiveC<StridedSliceGrad>(prim, inputs, quantType);
+  } else if (op_type == "AbsGrad") {
+    return NewPrimitiveC<AbsGrad>(prim, inputs, quantType);
+  } else if (op_type == "Conv2DBackpropInput" && !train_flag) {
     return NewPrimitiveC<DeConv2D>(prim, inputs, quantType);
-#endif
   } else {
     MS_LOG(ERROR) << "Unsupported primitive type in Create : " << op_type;
     return nullptr;
@@ -636,8 +825,6 @@ PrimitiveC *PrimitiveC::Create(mindspore::schema::PrimitiveT *primitive) {
       return new (std::nothrow) Squeeze(primitive);
     case schema::PrimitiveType_Flatten:
       return new (std::nothrow) Flatten(primitive);
-    case schema::PrimitiveType_Mean:
-      return new (std::nothrow) Mean(primitive);
     case schema::PrimitiveType_Stack:
       return new (std::nothrow) Stack(primitive);
     case schema::PrimitiveType_Crop:
@@ -694,6 +881,8 @@ PrimitiveC *PrimitiveC::Create(mindspore::schema::PrimitiveT *primitive) {
       return new (std::nothrow) FloorDiv(primitive);
     case schema::PrimitiveType_FloorMod:
       return new (std::nothrow) FloorMod(primitive);
+    case schema::PrimitiveType_Mod:
+      return new (std::nothrow) Mod(primitive);
     case schema::PrimitiveType_Equal:
       return new (std::nothrow) Equal(primitive);
     case schema::PrimitiveType_NotEqual:
@@ -783,6 +972,8 @@ PrimitiveC *PrimitiveC::Create(mindspore::schema::PrimitiveT *primitive) {
       return new (std::nothrow) SkipGram(primitive);
     case schema::PrimitiveType_Clip:
       return new (std::nothrow) Clip(primitive);
+    case schema::PrimitiveType_Adder:
+      return new (std::nothrow) Adder(primitive);
     case schema::PrimitiveType_CustomPredict:
       return new (std::nothrow) CustomPredict(primitive);
     case schema::PrimitiveType_CustomNormalize:
@@ -815,8 +1006,56 @@ PrimitiveC *PrimitiveC::Create(mindspore::schema::PrimitiveT *primitive) {
       return new (std::nothrow) Quant(primitive);
     case schema::PrimitiveType_OnnxInt8Dequantize:
       return new (std::nothrow) Dequant(primitive);
-
-#ifdef SUPPORT_TRAIN
+    case schema::PrimitiveType_Reciprocal:
+      return new (std::nothrow) Reciprocal(primitive);
+    case schema::PrimitiveType_Constant:
+      return new (std::nothrow) Constant(primitive);
+    case schema::PrimitiveType_TensorListFromTensor:
+      return new (std::nothrow) TensorListFromTensor(primitive);
+    case schema::PrimitiveType_TensorListGetItem:
+      return new (std::nothrow) TensorListGetItem(primitive);
+    case schema::PrimitiveType_TensorListSetItem:
+      return new (std::nothrow) TensorListSetItem(primitive);
+    case schema::PrimitiveType_TensorListReserve:
+      return new (std::nothrow) TensorListReserve(primitive);
+    case schema::PrimitiveType_TensorListStack:
+      return new (std::nothrow) TensorListStack(primitive);
+    case schema::PrimitiveType_Switch:
+      return new (std::nothrow) Switch(primitive);
+    case schema::PrimitiveType_Merge:
+      return new (std::nothrow) Merge(primitive);
+    case schema::PrimitiveType_Partial:
+      return new (std::nothrow) Partial(primitive);
+    case schema::PrimitiveType_Assert:
+      return new (std::nothrow) AssertOP(primitive);
+    case schema::PrimitiveType_GeLU:
+      return new (std::nothrow) GeLU(primitive);
+    case schema::PrimitiveType_If:
+      return new (std::nothrow) If(primitive);
+    case schema::PrimitiveType_Select:
+      return new (std::nothrow) Select(primitive);
+    case schema::PrimitiveType_Gru:
+      return new (std::nothrow) Gru(primitive);
+    case schema::PrimitiveType_Size:
+      return new (std::nothrow) Size(primitive);
+    case schema::PrimitiveType_InvertPermutation:
+      return new (std::nothrow) InvertPermutation(primitive);
+    case schema::PrimitiveType_RandomStandardNormal:
+      return new (std::nothrow) RandomStandardNormal(primitive);
+    case schema::PrimitiveType_CropAndResize:
+      return new (std::nothrow) CropAndResize(primitive);
+    case schema::PrimitiveType_NonZero:
+      return new (std::nothrow) NonZero(primitive);
+    case schema::PrimitiveType_Erf:
+      return new (std::nothrow) Erf(primitive);
+    case schema::PrimitiveType_IsFinite:
+      return new (std::nothrow) IsFinite(primitive);
+    case schema::PrimitiveType_LinSpace:
+      return new (std::nothrow) LinSpace(primitive);
+    case schema::PrimitiveType_UniformReal:
+      return new (std::nothrow) UniformReal(primitive);
+    case schema::PrimitiveType_Rank:
+      return new (std::nothrow) Rank(primitive);
     case schema::PrimitiveType_ActivationGrad:
       return new (std::nothrow) ActivationGrad(primitive);
     case schema::PrimitiveType_PoolingGrad:
@@ -843,6 +1082,8 @@ PrimitiveC *PrimitiveC::Create(mindspore::schema::PrimitiveT *primitive) {
       return new (std::nothrow) ArithmeticGrad(primitive);
     case schema::PrimitiveType_SoftmaxCrossEntropy:
       return new (std::nothrow) SoftmaxCrossEntropy(primitive);
+    case schema::PrimitiveType_SparseSoftmaxCrossEntropy:
+      return new (std::nothrow) SparseSoftmaxCrossEntropy(primitive);
     case schema::PrimitiveType_PowerGrad:
       return new (std::nothrow) PowerGrad(primitive);
     case schema::PrimitiveType_Depend:
@@ -855,6 +1096,8 @@ PrimitiveC *PrimitiveC::Create(mindspore::schema::PrimitiveT *primitive) {
       return new (std::nothrow) NegGrad(primitive);
     case schema::PrimitiveType_LogGrad:
       return new (std::nothrow) LogGrad(primitive);
+    case schema::PrimitiveType_AbsGrad:
+      return new (std::nothrow) AbsGrad(primitive);
     case schema::PrimitiveType_Sgd:
       return new (std::nothrow) Sgd(primitive);
     case schema::PrimitiveType_Adam:
@@ -871,24 +1114,42 @@ PrimitiveC *PrimitiveC::Create(mindspore::schema::PrimitiveT *primitive) {
       return new (std::nothrow) BinaryCrossEntropyGrad(primitive);
     case schema::PrimitiveType_BinaryCrossEntropy:
       return new (std::nothrow) BinaryCrossEntropy(primitive);
-
-#endif
+    case schema::PrimitiveType_DropoutGrad:
+      return new (std::nothrow) DropoutGrad(primitive);
+    case schema::PrimitiveType_MaximumGrad:
+      return new (std::nothrow) MaximumGrad(primitive);
+    case schema::PrimitiveType_MinimumGrad:
+      return new (std::nothrow) MinimumGrad(primitive);
+    case schema::PrimitiveType_SmoothL1Loss:
+      return new (std::nothrow) SmoothL1Loss(primitive);
+    case schema::PrimitiveType_SmoothL1LossGrad:
+      return new (std::nothrow) SmoothL1LossGrad(primitive);
+    case schema::PrimitiveType_SigmoidCrossEntropyWithLogits:
+      return new (std::nothrow) SigmoidCrossEntropyWithLogits(primitive);
+    case schema::PrimitiveType_SigmoidCrossEntropyWithLogitsGrad:
+      return new (std::nothrow) SigmoidCrossEntropyWithLogitsGrad(primitive);
+    case schema::PrimitiveType_StridedSliceGrad:
+      return new (std::nothrow) StridedSliceGrad(primitive);
     default:
       MS_LOG(ERROR) << "Unsupported primitive type in Create : " << schema::EnumNamePrimitiveType(op_type);
       break;
   }
   return nullptr;
 }
+
 #else
 void PrimitiveC::set_quant_type(schema::QuantType quant_type) { this->quant_type_ = quant_type; }
 schema::QuantType PrimitiveC::quant_type() const { return quant_type_; }
 #endif
 
 int PrimitiveC::Type() const {
-  if (this->primitive_ == nullptr) {
+  if (this->primitive_ == nullptr && this->op_type_ == OP_TYPE_NOT_SET) {
     return schema::PrimitiveType_NONE;
   }
 #ifdef PRIMITIVE_WRITEABLE
+  if (op_type_ != OP_TYPE_NOT_SET) {
+    return op_type_;
+  }
   return this->primitive_->value.type;
 #else
   return this->primitive_->value_type();
@@ -897,6 +1158,10 @@ int PrimitiveC::Type() const {
 bool PrimitiveC::infer_flag() const { return this->infer_flag_; }
 
 void PrimitiveC::set_infer_flag(bool flag) { this->infer_flag_ = flag; }
+
+bool PrimitiveC::train_flag() const { return this->train_flag_; }
+
+void PrimitiveC::set_train_flag(bool flag) { this->train_flag_ = flag; }
 
 int PrimitiveC::InferShape(std::vector<lite::Tensor *> inputs, std::vector<lite::Tensor *> outputs) {
   auto input = inputs.front();

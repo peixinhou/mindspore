@@ -22,6 +22,7 @@
 #include <map>
 #include <memory>
 #include <utility>
+#include "src/ops/primitive_c.h"
 #include "src/common/log_adapter.h"
 #include "schema/inner/model_generated.h"
 #include "schema/schema_generated.h"
@@ -30,54 +31,16 @@
 #include "include/errorcode.h"
 #include "tools/converter/parser/tflite/tflite_util.h"
 
-namespace mindspore {
-namespace lite {
+namespace mindspore::lite {
 class TfliteNodeParser {
  public:
   explicit TfliteNodeParser(const std::string &node_name) : name(node_name) {}
 
   virtual ~TfliteNodeParser() = default;
 
-  virtual STATUS Parse(TfliteTensorsInfo *tensors_info, const std::unique_ptr<tflite::OperatorT> &tflite_op,
-                       const std::unique_ptr<tflite::ModelT> &tflite_model,
-                       const std::unique_ptr<tflite::SubGraphT> &tflite_subgraph, schema::CNodeT *op) = 0;
-
-  static void AddOpInput(schema::CNodeT *op, TfliteTensorsInfo *tensors_info, int idx, int total,
-                         schema::Format format) {
-    MS_ASSERT(op != nullptr);
-    MS_ASSERT(tensors_info != nullptr);
-    int new_idx = tensors_info->tensorsId.size();
-    auto iter = tensors_info->tensorsIdMap.find(idx);
-    if (iter != tensors_info->tensorsIdMap.end()) {
-      op->inputIndex.emplace_back(iter->second);
-    } else {
-      if (idx < 0) {
-        idx += total;
-      }
-      tensors_info->tensorsId.emplace_back(idx);
-      tensors_info->tensorsFormat.emplace_back(format);
-      tensors_info->tensorsIdMap.insert(std::make_pair(idx, new_idx));
-      op->inputIndex.emplace_back(new_idx);
-    }
-  }
-
-  static void AddOpOutput(schema::CNodeT *op, TfliteTensorsInfo *tensors_info, int idx, int total,
-                          schema::Format format) {
-    MS_ASSERT(op != nullptr);
-    MS_ASSERT(tensors_info != nullptr);
-    int new_idx = tensors_info->tensorsId.size();
-    auto iter = tensors_info->tensorsIdMap.find(idx);
-    if (iter != tensors_info->tensorsIdMap.end()) {
-      op->outputIndex.emplace_back(iter->second);
-    } else {
-      if (idx < 0) {
-        idx += total;
-      }
-      tensors_info->tensorsId.emplace_back(idx);
-      tensors_info->tensorsFormat.emplace_back(format);
-      tensors_info->tensorsIdMap.insert(std::make_pair(idx, new_idx));
-      op->outputIndex.emplace_back(new_idx);
-    }
+  virtual lite::PrimitiveC *ParseLitePrimitive(const std::unique_ptr<tflite::OperatorT> &tflite_op,
+                                               const std::unique_ptr<tflite::ModelT> &tflite_model) {
+    return nullptr;
   }
 
   template <typename T>
@@ -162,7 +125,6 @@ class TfliteNodeParser {
  protected:
   const std::string &name;
 };
-}  // namespace lite
-}  // namespace mindspore
+}  // namespace mindspore::lite
 
 #endif  // MINDSPORE_LITE_TOOLS_CONVERTER_PARSER_TFLITE_NODE_PARSER_H

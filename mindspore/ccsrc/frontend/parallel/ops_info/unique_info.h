@@ -32,13 +32,14 @@ class UniqueInfo : public OperatorInfo {
  public:
   UniqueInfo(const std::string &operator_name, const Shapes &inputs_shape, const Shapes &outputs_shape,
              const PrimitiveAttrs &attrs)
-      : OperatorInfo(operator_name, inputs_shape, outputs_shape, attrs, std::make_shared<GetNextCost>(false)) {}
+      : OperatorInfo(operator_name, inputs_shape, outputs_shape, attrs, std::make_shared<UniqueCost>()) {}
   ~UniqueInfo() override = default;
 
   Status Init(const StrategyPtr &strategy) override;
   Status SetCostUnderStrategy(const StrategyPtr &strategy) override;
   Status InitForCostModel(const StrategyPtr &strategy) override;
-  Status GenerateStrategies(int32_t stage_id) override;
+  Status GenerateStrategies(int64_t stage_id) override;
+  ReplaceGraphPtr replace_graph(const CNodePtr &cnode) override;
 
  protected:
   Status CheckStrategy(const StrategyPtr &strategy) override;
@@ -50,9 +51,13 @@ class UniqueInfo : public OperatorInfo {
   Status InferMirrorOps() override;
   Status InferForwardCommunication() override { return SUCCESS; }
   Status InferAsLossDivisor() override { return SUCCESS; }
+#if (ENABLE_CPU && (ENABLE_D || ENABLE_GPU))
+  Status ComputeReplaceGraph(const CNodePtr &cnode);
+#endif
 
  private:
-  int32_t dev_num_ = 1;
+  std::string replace_op_name_ = UNIQUE;
+  int64_t dev_num_ = 1;
 };
 }  // namespace parallel
 }  // namespace mindspore

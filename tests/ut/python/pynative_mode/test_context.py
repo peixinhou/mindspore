@@ -1,4 +1,4 @@
-# Copyright 2020 Huawei Technologies Co., Ltd
+# Copyright 2020-2021 Huawei Technologies Co., Ltd
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
 """ test_context """
 import os
 import shutil
+import json
 import pytest
 
 from mindspore import context
@@ -94,14 +95,18 @@ def test_profiling_options():
         context.set_context(profiling_options=True)
     with pytest.raises(TypeError):
         context.set_context(profiling_options=1)
-    with pytest.raises(ValueError):
-        context.set_context(profiling_options="training_")
-    with pytest.raises(ValueError):
-        context.set_context(profiling_options="training_trace:op_trace")
-    context.set_context(profiling_options="training_trace")
-    assert context.get_context("profiling_options") == "training_trace"
-    context.set_context(profiling_options="training_trace:task_trace")
-    assert context.get_context("profiling_options") == "training_trace:task_trace"
+    profiling_options = {
+        "output": "",
+        "fp_point": "",
+        "bp_point": "",
+        "training_trace": "on",
+        "task_trace": "on",
+        "aic_metrics": "PipeUtilization",
+        "aicpu": "on"
+    }
+    profiling_options = json.dumps(profiling_options)
+    context.set_context(profiling_options=profiling_options)
+    assert context.get_context("profiling_options") == profiling_options
 
 
 def test_variable_memory_max_size():
@@ -115,7 +120,7 @@ def test_variable_memory_max_size():
     with pytest.raises(ValueError):
         context.set_context(variable_memory_max_size="1G")
     with pytest.raises(ValueError):
-        context.set_context(variable_memory_max_size="31GB")
+        context.set_context(variable_memory_max_size="32GB")
     context.set_context(variable_memory_max_size="3GB")
 
 

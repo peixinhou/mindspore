@@ -19,8 +19,9 @@ import subprocess
 import sys
 import os
 import json
-from .common import check_kernel_info, TBEException
+from .tbe_common import check_kernel_info, TBEException
 from .helper import _op_select_format, _check_supported
+
 
 def create_tbe_parallel_process():
     """
@@ -30,6 +31,7 @@ def create_tbe_parallel_process():
         TBEParallelCompiler
     """
     return tbe_process
+
 
 def op_select_format(op_json: str):
     """
@@ -75,6 +77,7 @@ def check_supported(op_json: str):
 
     return ret
 
+
 def run_compiler(op_json):
     """
     run compiler to compile op with subprocess
@@ -89,24 +92,20 @@ def run_compiler(op_json):
         tbe_compiler = os.path.join(os.path.split(os.path.realpath(__file__))[0], "compiler.py")
         completed_object = subprocess.run([sys.executable, tbe_compiler], input=op_json, timeout=300,
                                           text=True, capture_output=True, check=True)
-        if completed_object:
-            out = completed_object.stdout
-        return "Success", out
+        return "Success", completed_object.stderr
     except subprocess.TimeoutExpired:
         tb = traceback.format_exc()
-        return "TBEException", "PreCompileTimeOut: " + tb + "\ninput_args: " + op_json
+        return "TBEException", "ERROR: " + tb + "\ninput_args: " + op_json
     except subprocess.CalledProcessError as e:
-        return "TBEException", "PreCompileProcessFailed:\n" + e.stdout + "\n" + e.stderr + "\ninput_args: " + op_json
+        return "TBEException", "ERROR:\n" + e.stdout + "\n" + e.stderr + "\ninput_args: " + op_json
+
 
 class TbeProcess:
     """tbe process"""
 
     def __init__(self):
         self.__processe_num = multiprocessing.cpu_count()
-        # max_processes_num: Set the maximum number of concurrent processes for compiler
-        max_processes_num = 24
-        if self.__processe_num > max_processes_num:
-            self.__processe_num = max_processes_num
+        self.default_num = 24
         self.__pool = None
         self.__next_task_id = 1
         self.__running_tasks = []
@@ -116,6 +115,27 @@ class TbeProcess:
             self.__pool.terminate()
             self.__pool.join()
             del self.__pool
+
+    def init_process_num(self):
+        """
+        init compile process num
+        :return: str Success or other string info
+        """
+        # max_processes_num: Set the maximum number of concurrent processes for compiler
+        process_num = os.getenv("MS_BUILD_PROCESS_NUM")
+        res = "Success"
+        if process_num is None:
+            res = "Success, using default build process num: " + str(self.default_num)
+        elif process_num.isdigit():
+            if int(process_num) in range(1, 25):
+                self.default_num = int(process_num)
+                res = "Success, using custom build process num: " + str(self.default_num)
+            else:
+                res = "TBEException",\
+                      "ERROR: [MS_BUILD_PROCESS_NUM] should be in range(1, 25), but got : " + str(process_num)
+        elif not process_num.isdigit():
+            res = "TBEException", "ERROR: [MS_BUILD_PROCESS_NUM] type should be a int num, but got :" + process_num
+        return res
 
     def exit(self):
         if self.__pool is not None:
@@ -133,6 +153,8 @@ class TbeProcess:
         Returns:
             int, task id(>0). -1 if error
         """
+        if self.__processe_num > self.default_num:
+            self.__processe_num = self.default_num
         task_id = self.__next_task_id
         self.__next_task_id = self.__next_task_id + 1
         if self.__pool is None:
@@ -167,5 +189,6 @@ class TbeProcess:
         """
         if self.__running_tasks:
             self.__running_tasks.clear()
+
 
 tbe_process = TbeProcess()

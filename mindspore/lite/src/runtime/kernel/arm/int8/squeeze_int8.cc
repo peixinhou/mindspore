@@ -14,24 +14,17 @@
  * limitations under the License.
  */
 
-#include "nnacl/int8/squeeze_int8.h"
 #include "src/runtime/kernel/arm/int8/squeeze_int8.h"
-#include "nnacl/squeeze_parameter.h"
-
 #include "schema/model_generated.h"
-#include "src/runtime/runtime_api.h"
-#include "include/errorcode.h"
 #include "src/kernel_registry.h"
 
 using mindspore::kernel::KERNEL_ARCH::kCPU;
+using mindspore::lite::KernelRegistrar;
 using mindspore::lite::RET_ERROR;
 using mindspore::lite::RET_OK;
-
-using mindspore::lite::KernelRegistrar;
 using mindspore::schema::PrimitiveType_Squeeze;
 
 namespace mindspore::kernel {
-
 SqueezeInt8CPUKernel::~SqueezeInt8CPUKernel() {
   if (quant_squeeze_param_ != nullptr) {
     if (quant_squeeze_param_->in_quant_args_ != nullptr) {
@@ -61,7 +54,7 @@ int SqueezeInt8CPUKernel::Init() {
     return RET_ERROR;
   }
   auto in_quant_args = in_tensors_.front()->quant_params();
-  MS_ASSERT(quant_args.size() > 0);
+  MS_ASSERT(in_quant_args.size() > 0);
   quant_squeeze_param_->in_quant_args_->scale_ = in_quant_args.front().scale;
   quant_squeeze_param_->in_quant_args_->zp_ = in_quant_args.front().zeroPoint;
 
@@ -95,7 +88,7 @@ int SqueezeInt8CPUKernel::Init() {
 int SqueezeInt8CPUKernel::ReSize() { return RET_OK; }
 
 int SqueezeInt8CPUKernel::Run() {
-  auto ret = ParallelLaunch(this->context_->thread_pool_, SqueezeInt8Run, this, thread_count_);
+  auto ret = ParallelLaunch(this->context_->thread_pool_, SqueezeInt8Run, this, op_parameter_->thread_num_);
   if (ret != RET_OK) {
     MS_LOG(ERROR) << "RunSqueezeParam failed. errorcode: ";
   }
@@ -113,39 +106,15 @@ int SqueezeInt8CPUKernel::DoExecute(int task_id) {
   MS_ASSERT(input_tensor);
   auto out_tensor = out_tensors_.at(kOutputIndex);
   MS_ASSERT(out_tensor);
-  int8_t *input_data = reinterpret_cast<int8_t *>(input_tensor->MutableData());
+  int8_t *input_data = reinterpret_cast<int8_t *>(input_tensor->data_c());
   MS_ASSERT(input_data);
-  int8_t *output_data = reinterpret_cast<int8_t *>(out_tensor->MutableData());
+  int8_t *output_data = reinterpret_cast<int8_t *>(out_tensor->data_c());
   MS_ASSERT(output_data);
 
   int num = input_tensor->ElementsNum();
-  SqueezeInt8(input_data, output_data, task_id, quant_squeeze_param_, para_, num);
+  SqueezeInt8(input_data, output_data, quant_squeeze_param_, num, task_id, op_parameter_->thread_num_);
   return RET_OK;
 }
-kernel::LiteKernel *CpuSqueezeInt8KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                                const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter,
-                                                const InnerContext *ctx, const kernel::KernelKey &desc,
-                                                const mindspore::lite::PrimitiveC *primitive) {
-  if (opParameter == nullptr) {
-    MS_LOG(ERROR) << "Input opParameter is nullptr!";
-    return nullptr;
-  }
-  MS_ASSERT(desc.type == schema::PrimitiveType_Squeeze);
-  auto *kernel = new (std::nothrow) SqueezeInt8CPUKernel(opParameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "new SqueezeCPUKernel fail!";
-    free(opParameter);
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
-}
-REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Squeeze, CpuSqueezeInt8KernelCreator)
 
+REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Squeeze, LiteKernelCreator<SqueezeInt8CPUKernel>)
 }  // namespace mindspore::kernel

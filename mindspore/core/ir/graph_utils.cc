@@ -23,6 +23,7 @@
 #include <utility>
 #include <stack>
 #include <vector>
+#include <tuple>
 #include <string>
 #include <fstream>
 #include <deque>
@@ -34,61 +35,68 @@
 
 namespace mindspore {
 std::vector<AnfNodePtr> TopoSort(const AnfNodePtr &root, const SuccFunc &succ, const IncludeFunc &include) {
+  std::vector<AnfNodePtr> res;
+  if (root == nullptr) {
+    return res;
+  }
   size_t seen = NewSeenGeneration();
   std::deque<AnfNodePtr> todo(1024);
-  std::unordered_map<AnfNodePtr, size_t> rank;
-  std::vector<AnfNodePtr> res;
   todo.clear();
   todo.push_back(root);
 
   while (!todo.empty()) {
     AnfNodePtr node = todo.back();
-    if (node == nullptr || node->seen_ == seen) {
+    if (node->extra_seen_ == seen) {  // We use extra_seen_ as finish flag
       todo.pop_back();
       continue;
     }
-    if (rank.find(node) != rank.end() && rank[node] != todo.size()) {
-      MS_LOG(EXCEPTION) << "Graph exists cycle, node " << node->DebugString(2);
-    }
-    rank[node] = todo.size();
-    bool cont = false;
     auto incl = include(node);
-    if (incl == FOLLOW) {
-      auto succs = succ(node);
-      for (const auto i : succs) {
-        if ((i != nullptr && i->seen_ != seen)
-            // Handle the case for 2 subgraphs calls each other.
-            // If the ValueNodeGraph's return is already in the todo list, do not follow it.
-            && !((std::find(todo.begin(), todo.end(), i) != todo.end()) && (i->func_graph() != nullptr) &&
-                 (i->func_graph()->get_return() == i))) {
-          todo.push_back(i);
-          cont = true;
-        }
-      }
-    } else if (incl == NOFOLLOW) {
-      // do nothing
-    } else if (incl == EXCLUDE) {
-      node->seen_ = seen;
+    if (node->seen_ == seen) {  // We use seen_ as checking flag
       todo.pop_back();
-      continue;
-    } else {
-      MS_LOG(EXCEPTION) << "include(node) must return one of: \"follow\", \"nofollow\", \"exclude\"";
-    }
-    if (cont) {
+      if (incl != EXCLUDE) {
+        res.push_back(node);
+      }
+      node->extra_seen_ = seen;
       continue;
     }
     node->seen_ = seen;
-    res.push_back(node);
-    todo.pop_back();
+    if (incl == FOLLOW) {
+      auto succs = succ(node);
+      (void)std::copy_if(succs.begin(), succs.end(), std::back_inserter(todo), [seen, &todo](const AnfNodePtr &next) {
+        if (next == nullptr || next->extra_seen_ == seen) {
+          return false;
+        }
+        if (next->seen_ != seen) {
+          return true;
+        }
+        if (next->func_graph()->get_return() == next) {
+          return false;
+        }
+        // To dump all nodes in a circle.
+        MS_LOG(ERROR) << "Graph cycle exists. Circle is: ";
+        size_t pos = 0;
+        auto circle_node_it = std::find(todo.begin(), todo.end(), next);
+        for (; circle_node_it != todo.end(); circle_node_it++) {
+          auto circle_node = *circle_node_it;
+          if (circle_node->seen_ == seen) {
+            MS_LOG(ERROR) << "#" << pos << ": " << circle_node->DebugString();
+            pos++;
+          }
+        }
+        MS_LOG(EXCEPTION) << "Graph cycle exists, strike node: " << next->DebugString(2);
+      });
+    } else if (incl > EXCLUDE) {  // Not NOFOLLOW or EXCLUDE
+      MS_LOG(EXCEPTION) << "The result of include(node) must be one of: \"follow\", \"nofollow\", \"exclude\"";
+    }
   }
   return res;
 }
 
 // search the cnodes inside this graph only
-std::vector<CNodePtr> BroadFirstSearchGraphCNodes(CNodePtr ret) {
+std::vector<CNodePtr> BroadFirstSearchGraphCNodes(const std::vector<CNodePtr> &starts) {
   std::deque<CNodePtr> todo(1024);
   todo.clear();
-  todo.push_back(ret);
+  todo.insert(todo.end(), starts.begin(), starts.end());
   std::vector<CNodePtr> sorted_nodes;
   auto seen = NewSeenGeneration();
   while (!todo.empty()) {
@@ -108,6 +116,33 @@ std::vector<CNodePtr> BroadFirstSearchGraphCNodes(CNodePtr ret) {
     }
   }
   return sorted_nodes;
+}
+
+// search the cnode match the predicate inside this graph only
+CNodePtr BroadFirstSearchFirstOf(const std::vector<CNodePtr> &starts, const MatchFunc &match_predicate) {
+  std::deque<CNodePtr> todo(1024);
+  todo.clear();
+  todo.insert(todo.end(), starts.begin(), starts.end());
+  auto seen = NewSeenGeneration();
+  while (!todo.empty()) {
+    CNodePtr top = todo.front();
+    todo.pop_front();
+    if (match_predicate(top)) {
+      return top;
+    }
+    auto inputs = top->inputs();
+    for (auto &item : inputs) {
+      if (item->seen_ == seen) {
+        continue;
+      }
+
+      if (item->isa<CNode>()) {
+        todo.push_back(item->cast<CNodePtr>());
+      }
+      item->seen_ = seen;
+    }
+  }
+  return nullptr;
 }
 
 std::vector<FuncGraphPtr> BroadFirstSearchGraphUsed(FuncGraphPtr root) {
@@ -131,6 +166,14 @@ std::vector<FuncGraphPtr> BroadFirstSearchGraphUsed(FuncGraphPtr root) {
   return sorted;
 }
 
+// PushSuccessors push cnode inputs to a vector as successors for topo sort.
+static void PushSuccessors(const CNodePtr &cnode, std::vector<AnfNodePtr> *vecs) {
+  auto &inputs = cnode->inputs();
+  vecs->reserve(vecs->size() + inputs.size());
+  // To keep evaluate order from left to right, we push inputs in reversed order.
+  vecs->insert(vecs->end(), inputs.rbegin(), inputs.rend());
+}
+
 std::vector<AnfNodePtr> SuccDeeper(const AnfNodePtr &node) {
   std::vector<AnfNodePtr> vecs;
   if (node == nullptr) {
@@ -146,12 +189,7 @@ std::vector<AnfNodePtr> SuccDeeper(const AnfNodePtr &node) {
     return vecs;
   } else if (node->func_graph() != nullptr) {
     if (node->isa<CNode>()) {
-      auto &inputs = node->cast<CNodePtr>()->inputs();
-      (void)vecs.insert(vecs.end(), inputs.begin(), inputs.end());
-    }
-    auto graph = node->func_graph();
-    if (graph->get_return() != nullptr) {
-      vecs.push_back(graph->get_return());
+      PushSuccessors(node->cast<CNodePtr>(), &vecs);
     }
     return vecs;
   }
@@ -174,8 +212,7 @@ std::vector<AnfNodePtr> SuccDeeperSimple(const AnfNodePtr &node) {
     return vecs;
   } else {
     if (node->isa<CNode>()) {
-      auto &inputs = node->cast<CNodePtr>()->inputs();
-      (void)vecs.insert(vecs.end(), inputs.begin(), inputs.end());
+      PushSuccessors(node->cast<CNodePtr>(), &vecs);
     }
     return vecs;
   }
@@ -183,13 +220,9 @@ std::vector<AnfNodePtr> SuccDeeperSimple(const AnfNodePtr &node) {
 
 std::vector<AnfNodePtr> SuccIncoming(const AnfNodePtr &node) {
   std::vector<AnfNodePtr> vecs;
-  if (node == nullptr) {
-    return vecs;
-  }
-
-  if (node->isa<CNode>()) {
-    auto &inputs = node->cast<CNodePtr>()->inputs();
-    (void)vecs.insert(vecs.end(), inputs.begin(), inputs.end());
+  auto cnode = dyn_cast<CNode>(node);
+  if (cnode != nullptr) {
+    PushSuccessors(cnode, &vecs);
   }
   return vecs;
 }
@@ -213,9 +246,18 @@ std::vector<AnfNodePtr> SuccIncludeFV(const FuncGraphPtr &fg, const AnfNodePtr &
         }
       }
     }
-    (void)vecs.insert(vecs.end(), inputs.begin(), inputs.end());
+    PushSuccessors(cnode, &vecs);
   }
   return vecs;
+}
+
+const std::vector<AnfNodePtr> &GetInputs(const AnfNodePtr &node) {
+  static std::vector<AnfNodePtr> empty_inputs;
+  auto cnode = dyn_cast<CNode>(node);
+  if (cnode != nullptr) {
+    return cnode->inputs();
+  }
+  return empty_inputs;
 }
 
 IncludeType AlwaysInclude(const AnfNodePtr &) { return FOLLOW; }

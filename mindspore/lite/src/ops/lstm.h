@@ -33,12 +33,14 @@ class Lstm : public PrimitiveC {
   MS_DECLARE_PARENT(Lstm, PrimitiveC);
   explicit Lstm(schema::PrimitiveT *primitive) : PrimitiveC(primitive) {}
   void SetBidirection(bool bidirection);
+  void SetSmooth(float smooth);
 
 #else
   int UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::FlatBufferBuilder *fbb) override;
 #endif
   int InferShape(std::vector<lite::Tensor *> inputs_, std::vector<lite::Tensor *> outputs_) override;
   bool GetBidirection() const;
+  float GetSmooth() const;
 };
 }  // namespace lite
 }  // namespace mindspore

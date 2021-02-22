@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 #include "transform/graph_ir/op_adapter.h"
+#include "utils/check_convert_utils.h"
 
 namespace mindspore {
 namespace transform {
@@ -139,8 +140,7 @@ Status OpAdapterImpl::SetCustomOpInput(const CusOperatorPtr &op, int index, cons
 Status OpAdapterImpl::SetNormalOpInput(const OperatorPtr &op, int index, const OperatorPtr &input) {
   MS_EXCEPTION_IF_NULL(op);
   auto it = input_map_.find(index);
-  if (it != input_map_.end()) {
-    MS_EXCEPTION_IF_NULL(input);
+  if (input != nullptr && it != input_map_.end()) {
     MS_LOG(DEBUG) << "Link op " << input->GetName() << " to " << op->GetName() << ":" << it->second.name;
     it->second.set_op(op, input);
     return SUCCESS;
@@ -392,7 +392,7 @@ std::shared_ptr<GeTensorDesc> OpAdapterImpl::CreateNodeDesc(const AnfNodePtr &no
     return nullptr;
   }
 
-  std::vector<int> shape;
+  std::vector<int64_t> shape;
   auto shape_ptr = dyn_cast<abstract::Shape>(node->Shape());
   if (nullptr != shape_ptr) {
     shape = shape_ptr->shape();
@@ -524,7 +524,7 @@ int OpAdapterImpl::SetCustomOpAttr(const CusOperatorPtr &op, const PrimitivePtr 
   ValueType value_type = SINGLE_VALUE;
   for (auto item : prim->attrs()) {
     if (item.second->isa<Int32Imm>()) {
-      (void)op->SetAttr(item.first, GetValue<int>(item.second));
+      (void)op->SetAttr(item.first, GetValue<int64_t>(item.second));
     } else if (item.second->isa<StringImm>()) {
       (void)op->SetAttr(item.first, GetValue<std::string>(item.second));
     } else if (item.second->isa<BoolImm>()) {
@@ -538,8 +538,8 @@ int OpAdapterImpl::SetCustomOpAttr(const CusOperatorPtr &op, const PrimitivePtr 
         (void)op->SetAttr(item.first, GetValue<const std::vector<std::string>>(item.second));
       } else if ((*val_seq)[0]->isa<FP32Imm>()) {
         (void)op->SetAttr(item.first, GetValue<const std::vector<float>>(item.second));
-      } else if ((*val_seq)[0]->isa<Int32Imm>()) {
-        (void)op->SetAttr(item.first, GetValue<const std::vector<int>>(item.second));
+      } else if ((*val_seq)[0]->isa<Int64Imm>()) {
+        (void)op->SetAttr(item.first, GetValue<const std::vector<int64_t>>(item.second));
       } else if ((*val_seq)[0]->isa<BoolImm>()) {
         (void)op->SetAttr(item.first, GetValue<const std::vector<bool>>(item.second));
       } else {
@@ -567,6 +567,9 @@ int OpAdapterImpl::SetNormalOpAttr(const OperatorPtr &op, const PrimitivePtr &pr
   for (auto &it : attr_map_) {
     auto value = prim->GetAttr(it.first);
     if (value != nullptr) {
+      // convert parts of attr to str eg. data_format or change ir attr to op attr eg. axis[0]
+      CheckAndConvertUtils::ConvertAttrValueToString(prim->name(), it.first, &value);
+      CheckAndConvertUtils::CheckIrAttrtoOpAttr(prim->name(), it.first, &value);
       // set attr from primitive
       int ret = setAttr(op, it.first, value);
       if (ret) {

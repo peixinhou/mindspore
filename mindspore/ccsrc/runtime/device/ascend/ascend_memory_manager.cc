@@ -18,19 +18,26 @@
 #include "runtime/device/ascend/ascend_memory_pool.h"
 #include "utils/ms_context.h"
 #include "runtime/mem.h"
+#include "runtime/device/ascend/profiling/profiling_manager.h"
+#include "profiler/device/common/memory_profiling.h"
+
+using mindspore::device::ascend::ProfilingManager;
+using mindspore::profiler::MemoryProfiling;
+
 namespace mindspore {
 namespace device {
 namespace ascend {
-constexpr uint64_t kAscendDeviceMemGB = 30;
+constexpr uint64_t kAscendInitDeviceMemGB = 30;
+constexpr uint64_t kAscendMaxDeviceMemGB = 31;
 constexpr uint64_t kMemSizeGB = 30;
-constexpr uint64_t kAscendDeviceMemSize = (kAscendDeviceMemGB << kMemSizeGB);
+constexpr uint64_t kAscendDeviceMemSize = (kAscendInitDeviceMemGB << kMemSizeGB);
 
 void AscendMemoryManager::MallocDeviceMemory() {
   auto context_mem = GetDeviceMemSizeFromContext();
   device_mem_size_ = context_mem == 0 ? kAscendDeviceMemSize : context_mem;
   auto ret = rtMalloc(reinterpret_cast<void **>(&device_mem_base_), device_mem_size_, RT_MEMORY_HBM);
-  if (ret != RT_ERROR_NONE) {
-    if (ret == RT_ERROR_DRV_ERR) {
+  if (ret != ACL_RT_SUCCESS) {
+    if (ret == ACL_ERROR_RT_MEMORY_ALLOCATION) {
       auto context_ptr = MsContext::GetInstance();
       MS_EXCEPTION_IF_NULL(context_ptr);
       unsigned int device_id = context_ptr->get_param<uint32_t>(MS_CTX_DEVICE_ID);
@@ -40,8 +47,12 @@ void AscendMemoryManager::MallocDeviceMemory() {
       MS_EXCEPTION(DeviceProcessError) << "rtMalloc mem size[" << device_mem_size_ << "] fail, ret[" << ret << "]";
     }
   }
-
   AscendMemoryPool::GetInstance().Init(device_mem_base_, device_mem_size_, dynamic_mem_offset_);
+}
+
+uint64_t AscendMemoryManager::GetDeviceMemSize() {
+  auto mem_size = GetDeviceMemSizeFromContext();
+  return mem_size == 0 ? kAscendDeviceMemSize : mem_size;
 }
 
 uint64_t AscendMemoryManager::GetDeviceMemSizeFromContext() {
@@ -59,8 +70,8 @@ uint64_t AscendMemoryManager::GetDeviceMemSizeFromContext() {
   auto gb_str = variable_memory_max_size.substr(0, pos);
   auto gb_var = std::stoull(gb_str);
   MS_LOG(INFO) << "variable_memory_max_size(GB):" << gb_var;
-  if (gb_var > kAscendDeviceMemGB || gb_var == 0) {
-    MS_LOG(EXCEPTION) << "Invalid allocate memory size:" << gb_var << " which should be in (0-30]GB";
+  if (gb_var > kAscendMaxDeviceMemGB || gb_var == 0) {
+    MS_LOG(EXCEPTION) << "Invalid allocate memory size:" << gb_var << " which should be in (0-31]GB";
   }
   return gb_var << kMemSizeGB;
 }
@@ -88,7 +99,7 @@ void *AscendMemoryManager::MallocMemFromMemPool(size_t size) {
   return AscendMemoryPool::GetInstance().AllocTensorMem(align_size);
 }
 
-uint8_t *AscendMemoryManager::MallocStaticMem(size_t size, bool communication_mem) {
+uint8_t *AscendMemoryManager::MallocStaticMem(size_t size, bool communication_mem, uint32_t graph_id) {
   size_t align_size = 0;
   if (communication_mem) {
     align_size = GetCommunicationAlignSize(size);
@@ -96,10 +107,15 @@ uint8_t *AscendMemoryManager::MallocStaticMem(size_t size, bool communication_me
     align_size = GetCommonAlignSize(size);
   }
 
-  auto device_mem_pool_offset = AscendMemoryPool::GetInstance().device_mem_pool_offset();
-  MS_LOG(INFO) << "Malloc Memory: Static, total[" << device_mem_size_ << "] (dynamic[" << total_dynamic_size_
-               << "] memory pool[" << device_mem_size_ - device_mem_pool_offset << "])"
-               << " malloc [" << align_size << "] communication_mem: " << communication_mem;
+  if (ProfilingManager::GetInstance().IsProfiling() && graph_id != kInvalidGraphId) {
+    auto node = MemoryProfiling::GetInstance().GetGraphMemoryNode(graph_id);
+    if (node == nullptr) {
+      node = MemoryProfiling::GetInstance().AddGraphMemoryNode(graph_id);
+      MS_LOG(INFO) << "Add graph memory node for static memory profiling, graph id is " << graph_id;
+    }
+
+    node->AddStaticMemorySize(align_size);
+  }
 
   if (communication_mem) {
     // create protect area [kMemAlignSize -- data -- kMemAlignSize]
@@ -137,6 +153,13 @@ uint8_t *AscendMemoryManager::MallocDynamicMem(size_t size, bool communication_m
     return device_mem_base_ + offset + kMemAlignSize;
   } else {
     return device_mem_base_ + offset;
+  }
+}
+
+void AscendMemoryManager::MallocSomasDynamicMem(const session::KernelGraph *graph) {
+  MemoryManager::MallocSomasDynamicMem(graph);
+  if (ProfilingManager::GetInstance().IsProfiling()) {
+    somas_reuse_util_ptr_->ConvertToProfilingNode(graph->graph_id());
   }
 }
 }  // namespace ascend

@@ -21,7 +21,7 @@ import mindspore.nn as nn
 from mindspore.common.tensor import Tensor
 from mindspore.common.parameter import Parameter
 import mindspore.common.dtype as mstype
-from mindspore.common.initializer import TruncatedNormal, initializer
+from mindspore.common.initializer import TruncatedNormal, initializer, Normal
 from mindspore.ops import operations as P
 from mindspore.ops import functional as F
 
@@ -41,14 +41,14 @@ class LayerNorm(nn.Cell):
     """
     def __init__(self, normalized_shape, eps=1e-5):
         super(LayerNorm, self).__init__()
-        self.gamma = Parameter(initializer('ones', normalized_shape), name="gamma")
-        self.beta = Parameter(initializer('zeros', normalized_shape), name="beta")
+        self.gamma = Parameter(initializer('ones', normalized_shape))
+        self.beta = Parameter(initializer('zeros', normalized_shape))
         self.mean = P.ReduceMean(keep_dims=True)
         self.eps = eps
 
     def construct(self, x):
         mean = self.mean(x, -1)
-        variance = self.mean(F.square(x - mean))
+        variance = self.mean(F.square(x - mean), -1)
         output = (x - mean) / F.sqrt(variance + self.eps)
         rescaled_output = output * self.gamma + self.beta
         return rescaled_output
@@ -100,10 +100,8 @@ class Mapping(nn.Cell):
         super(Mapping, self).__init__()
         self.output_size = output_size
         self.input_size = input_size
-        weight = np.random.normal(loc=0.0, scale=0.02*scale, size=(input_size, output_size))
-        bias = np.zeros(shape=(output_size,))
-        self.weight = Parameter(Tensor(weight, mstype.float32), name="mapping_weight")
-        self.bias = Parameter(Tensor(bias, mstype.float32), name="mapping_bias")
+        self.weight = Parameter(initializer(Normal(sigma=0.02*scale), [input_size, output_size]))
+        self.bias = Parameter(initializer("zeros", [output_size,]))
         self.dtype = dtype
         self.cast = P.Cast()
 
@@ -196,9 +194,8 @@ class EmbeddingLookup(nn.Cell):
         super(EmbeddingLookup, self).__init__()
         self.vocab_size = config.vocab_size
         self.embedding_size = config.embedding_size
-        self.embedding_table = Parameter(initializer(TruncatedNormal(0.02), [self.vocab_size, self.embedding_size]),
-                                         name="embedding_table")
-        self.gather = P.GatherV2()
+        self.embedding_table = Parameter(initializer(TruncatedNormal(0.02), [self.vocab_size, self.embedding_size]))
+        self.gather = P.Gather()
         self.shape = (-1, config.seq_length, config.embedding_size)
     def construct(self, input_ids):
         output = self.gather(self.embedding_table, input_ids, 0)
@@ -268,7 +265,7 @@ class Attention(nn.Cell):
             past_key = self.transpose(layer_past[0], (0, 1, 3, 2))
             key = self.concat_k((past_key, key))
             value = self.concat_v(past_value, value)
-        layer_present = P.Pack()([self.transpose(key, (0, 1, 3, 2)), value])
+        layer_present = P.Stack()([self.transpose(key, (0, 1, 3, 2)), value])
         attention = self._attn(query, key, value, attention_mask)
         attention_merge = self.merge_heads(attention)
         output = self.projection(attention_merge)
@@ -363,7 +360,7 @@ class Block(nn.Cell):
     """
     def __init__(self, config, layer_idx):
         super(Block, self).__init__()
-        scale = 1 / math.sqrt(2.0*layer_idx)
+        scale = 1.0
         self.layernorm1 = LayerNorm((config.embedding_size,)).to_float(config.compute_dtype)
         self.attention = Attention(config, scale, layer_idx)
         self.layernorm2 = LayerNorm((config.embedding_size,)).to_float(config.compute_dtype)

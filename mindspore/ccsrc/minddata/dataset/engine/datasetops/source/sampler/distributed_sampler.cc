@@ -15,6 +15,7 @@
  */
 #include "minddata/dataset/engine/datasetops/source/sampler/distributed_sampler.h"
 
+#include <algorithm>
 #include <limits>
 #include <memory>
 
@@ -33,9 +34,18 @@ DistributedSamplerRT::DistributedSamplerRT(int64_t num_samples, int64_t num_dev,
       shuffle_(shuffle),
       even_dist_(even_dist),
       offset_(offset),
-      non_empty_(true) {}
+      non_empty_(true) {
+  // Update the num_shards_ in global context. this number is only used for now by auto_num_worker_pass. User discretion
+  // is advised. Auto_num_worker_pass is currently an experimental feature which can still work if the num_shards_ isn't
+  // 100% correct. The reason behind is for now, PreBuildSampler doesn't offer a way to return num_shards. Once
+  // PreBuildSampler is phased out, this can be cleaned up.
+  GlobalContext::config_manager()->set_num_shards_for_auto_num_workers(num_devices_);
+}
 
 Status DistributedSamplerRT::InitSampler() {
+  if (is_initialized) {
+    return Status::OK();
+  }
   // Special value of 0 for num_samples means that the user wants to sample the entire set of data.
   // If the user asked to sample more rows than exists in the dataset, adjust the num_samples accordingly.
   if (num_samples_ == 0 || num_samples_ > num_rows_) {
@@ -54,7 +64,7 @@ Status DistributedSamplerRT::InitSampler() {
   if (offset_ != -1 || !even_dist_) {
     if (offset_ == -1) offset_ = 0;
     samples_per_buffer_ = (num_rows_ + offset_) / num_devices_;
-    int remainder = (num_rows_ + offset_) % num_devices_;
+    int64_t remainder = (num_rows_ + offset_) % num_devices_;
     if (device_id_ < remainder) samples_per_buffer_++;
     if (device_id_ < offset_) samples_per_buffer_--;
   } else {
@@ -62,7 +72,7 @@ Status DistributedSamplerRT::InitSampler() {
     samples_per_buffer_ = (num_rows_ + num_devices_ - 1) / num_devices_;  // equals to ceil(num_rows/num_devices)
   }
   samples_per_buffer_ = num_samples_ < samples_per_buffer_ ? num_samples_ : samples_per_buffer_;
-  if (shuffle_ == true) {
+  if (shuffle_) {
     shuffle_vec_.reserve(num_rows_);
     for (int64_t i = 0; i < num_rows_; i++) {
       shuffle_vec_.push_back(i);
@@ -71,6 +81,7 @@ Status DistributedSamplerRT::InitSampler() {
   }
   if (!samples_per_buffer_) non_empty_ = false;
 
+  is_initialized = true;
   return Status::OK();
 }
 
@@ -160,13 +171,56 @@ Status DistributedSamplerRT::ResetSampler() {
   return Status::OK();
 }
 
-void DistributedSamplerRT::Print(std::ostream &out, bool show_all) const {
+int64_t DistributedSamplerRT::CalculateNumSamples(int64_t num_rows) {
+  int64_t child_num_rows = num_rows;
+  if (!child_.empty()) {
+    child_num_rows = child_[0]->CalculateNumSamples(num_rows);
+  }
+  int64_t num_samples = (num_samples_ > 0) ? std::min(child_num_rows, num_samples_) : child_num_rows;
+  int64_t remainder = (child_num_rows + offset_) % num_devices_;
+  int64_t shard_size = (child_num_rows + offset_) / num_devices_;
+  if (offset_ != -1 || !even_dist_) {
+    if (offset_ == -1) offset_ = 0;
+    if (device_id_ < remainder) shard_size++;
+    if (device_id_ < offset_) shard_size--;
+  } else {
+    shard_size = (child_num_rows + num_devices_ - 1) / num_devices_;
+  }
+  // add 1 to an empty shard
+  // this logic is needed to follow the logic in initSampler that is written for ConcatDataset
+  if (shard_size == 0) shard_size++;
+
+  return std::min(num_samples, shard_size);
+}
+
+void DistributedSamplerRT::SamplerPrint(std::ostream &out, bool show_all) const {
   out << "\nSampler: DistributedSampler";
   if (show_all) {
-    SamplerRT::Print(out, show_all);
+    SamplerRT::SamplerPrint(out, show_all);
     out << "\nseed: " << seed_ << "\ndevice_id: " << device_id_ << "\nnum_devices: " << num_devices_
         << "\nshuffle: " << shuffle_;
   }
+}
+
+Status DistributedSamplerRT::to_json(nlohmann::json *out_json) {
+  nlohmann::json args;
+  args["sampler_name"] = "DistributedSampler";
+  args["num_shards"] = num_devices_;
+  args["shard_id"] = device_id_;
+  args["shuffle"] = shuffle_;
+  args["num_samples"] = num_samples_;
+  args["offset"] = offset_;
+  if (this->HasChildSampler()) {
+    std::vector<nlohmann::json> children_args;
+    for (auto child : child_) {
+      nlohmann::json child_arg;
+      RETURN_IF_NOT_OK(child->to_json(&child_arg));
+      children_args.push_back(child_arg);
+    }
+    args["child_sampler"] = children_args;
+  }
+  *out_json = args;
+  return Status::OK();
 }
 
 }  // namespace dataset

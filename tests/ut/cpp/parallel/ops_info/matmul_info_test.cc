@@ -390,7 +390,7 @@ TEST_F(TestMatmulInfo, GetVirtualDivOp1) {
 
   std::string arg0_name = operator_args.first.at(0).first;
   ValuePtr arg0_value = operator_args.first.at(0).second;
-  int32_t divisor = arg0_value->cast<Int32ImmPtr>()->value();
+  int64_t divisor = arg0_value->cast<Int64ImmPtr>()->value();
 
   ASSERT_EQ(virtual_div_op.at(0).first, "_VirtualDiv");
   ASSERT_EQ(virtual_div_op.size(), 1);
@@ -463,7 +463,7 @@ TEST_F(TestMatmulInfo, GetMirrorOPs4) {
   matmul1->Init(strategy);
   MirrorOps mirror_ops = matmul1->mirror_ops();
 
-  ASSERT_EQ(mirror_ops.size(), 0);  // all reduce only in -3 dim (strategy is 1);
+  ASSERT_EQ(mirror_ops.size(), 2);
 }
 
 TEST_F(TestMatmulInfo, InitTwice) {

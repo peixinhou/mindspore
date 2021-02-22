@@ -15,7 +15,8 @@
 # ============================================================================
 
 # source the globals and functions for use with cache testing
-SKIP_ADMIN_COUNTER=false
+export SKIP_ADMIN_COUNTER=false
+declare failed_tests
 . cachetest_lib.sh
 echo
 
@@ -121,7 +122,7 @@ HandleRcExit $? 0 1
 
 # find a port that is occupied using netstat
 if [ -x "$(command -v netstat)" ]; then
-  port=$(netstat -ntp | grep -v '::' | awk  '{print $4}'  | grep -E '^[[:digit:]]+' | awk -F: '{print $2}' | sort -n | tail -n 1)
+  port=$(netstat -ntp | grep -v '::' | awk '{print $4}' | grep -E '^[[:digit:]]+' | awk -F: '{print $2}' | sort -n | tail -n 1)
   if [ ${port} -gt 1025 ]; then
     # start cache server with occupied port
     cmd="${CACHE_ADMIN} --start -p ${port}"
@@ -171,7 +172,12 @@ HandleRcExit $? 0 0
 cmd="${CACHE_ADMIN} --start -w illegal"
 CacheAdminCmd "${cmd}" 1
 HandleRcExit $? 0 0
-cmd="${CACHE_ADMIN} --start -w 101"
+num_cpu=$(grep -c processor /proc/cpuinfo)
+if [ $num_cpu -lt 100 ]; then
+  cmd="${CACHE_ADMIN} --start -w 101"
+else
+  cmd="${CACHE_ADMIN} --start -w $(($num_cpu+1))"
+fi
 CacheAdminCmd "${cmd}" 1
 HandleRcExit $? 0 0
 cmd="${CACHE_ADMIN} --start -w 9999999"

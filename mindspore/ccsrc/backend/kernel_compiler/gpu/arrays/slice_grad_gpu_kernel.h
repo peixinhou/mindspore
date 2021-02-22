@@ -1,5 +1,5 @@
 /**
- * Copyright 2019 Huawei Technologies Co., Ltd
+ * Copyright 2019-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,10 +14,11 @@
  * limitations under the License.
  */
 
-#ifndef MINDSPORE_CCSRC_BACKEND_KERNEL_COMPILER_GPU_SLICE_GRAD_GPU_KERNEL_H
-#define MINDSPORE_CCSRC_BACKEND_KERNEL_COMPILER_GPU_SLICE_GRAD_GPU_KERNEL_H
+#ifndef MINDSPORE_CCSRC_BACKEND_KERNEL_COMPILER_GPU_ARRAYS_SLICE_GRAD_GPU_KERNEL_H_
+#define MINDSPORE_CCSRC_BACKEND_KERNEL_COMPILER_GPU_ARRAYS_SLICE_GRAD_GPU_KERNEL_H_
 
 #include <vector>
+#include <algorithm>
 #include "backend/kernel_compiler/gpu/gpu_kernel.h"
 #include "backend/kernel_compiler/gpu/gpu_kernel_factory.h"
 #include "backend/kernel_compiler/gpu/cuda_impl/slice_impl.cuh"
@@ -50,27 +51,27 @@ class SliceGradGpuKernel : public GpuKernel {
     auto kernel_name = AnfAlgo::GetCNodeName(kernel_node);
     if (kernel_name == "StridedSliceGrad") {
       is_strided_slice_ = true;
-      auto shapex = GetAttr<std::vector<int>>(kernel_node, "shapex");
+      std::vector<int64_t> shapex = GetAttr<std::vector<int64_t>>(kernel_node, "shapex");
       for (auto x : shapex) {
-        input_shape_.push_back(IntToSize(x));
+        input_shape_.push_back(static_cast<size_t>(x));
       }
       for (auto i = input_shape_.size(); i < 4; i++) {
         (void)input_shape_.insert(input_shape_.begin(), 1);
       }
-      strides_ = GetAttr<std::vector<int>>(kernel_node, "strides");
+      strides_ = GetAttr<std::vector<int64_t>>(kernel_node, "strides");
       for (auto i = strides_.size(); i < 4; i++) {
         (void)strides_.insert(strides_.begin(), 1);
       }
-      size_ = GetAttr<std::vector<int>>(kernel_node, "end");
+      size_ = GetAttr<std::vector<int64_t>>(kernel_node, "end");
     } else {
       auto input_shape = AnfAlgo::GetPrevNodeOutputInferShape(kernel_node, 1);
       ShapeNdTo4d(input_shape, &input_shape_);
-      size_ = GetAttr<std::vector<int>>(kernel_node, "size");
+      size_ = GetAttr<std::vector<int64_t>>(kernel_node, "size");
     }
 
     auto dy_shape = AnfAlgo::GetPrevNodeOutputInferShape(kernel_node, 0);
     ShapeNdTo4d(dy_shape, &dy_shape_);
-    begin_ = GetAttr<std::vector<int>>(kernel_node, "begin");
+    begin_ = GetAttr<std::vector<int64_t>>(kernel_node, "begin");
     DealParam();
     input_size_ = input_shape_[0] * input_shape_[1] * input_shape_[2] * input_shape_[3] * sizeof(T);
 
@@ -125,9 +126,9 @@ class SliceGradGpuKernel : public GpuKernel {
       }
     }
   }
-  std::vector<int> begin_;
-  std::vector<int> size_;
-  std::vector<int> strides_;
+  std::vector<int64_t> begin_;
+  std::vector<int64_t> size_;
+  std::vector<int64_t> strides_;
   std::vector<size_t> input_shape_;
   std::vector<size_t> dy_shape_;
   std::vector<size_t> input_size_list_;
@@ -142,4 +143,4 @@ class SliceGradGpuKernel : public GpuKernel {
 }  // namespace kernel
 }  // namespace mindspore
 
-#endif  // MINDSPORE_CCSRC_BACKEND_KERNEL_COMPILER_GPU_SLICE_GRAD_GPU_KERNEL_H
+#endif  // MINDSPORE_CCSRC_BACKEND_KERNEL_COMPILER_GPU_ARRAYS_SLICE_GRAD_GPU_KERNEL_H_

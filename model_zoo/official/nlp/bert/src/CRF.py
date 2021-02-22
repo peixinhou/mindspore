@@ -30,7 +30,7 @@ class CRF(nn.Cell):
     Args:
         tag_to_index: The dict for tag to index mapping with extra "<START>" and "<STOP>"sign.
         batch_size: Batch size, i.e., the length of the first dimension.
-        seq_length: Sequence length, i.e., the length of the second dimention.
+        seq_length: Sequence length, i.e., the length of the second dimension.
         is_training: Specifies whether to use training mode.
     Returns:
         Training mode: Tensor, total loss.
@@ -52,7 +52,7 @@ class CRF(nn.Cell):
         transitions = np.random.normal(size=(self.target_size, self.target_size)).astype(np.float32)
         transitions[tag_to_index[self.START_TAG], :] = -10000
         transitions[:, tag_to_index[self.STOP_TAG]] = -10000
-        self.transitions = Parameter(Tensor(transitions), name="transition_matrix")
+        self.transitions = Parameter(Tensor(transitions))
         self.cat = P.Concat(axis=-1)
         self.argmax = P.ArgMaxWithValue(axis=-1)
         self.log = P.Log()

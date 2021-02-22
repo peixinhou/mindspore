@@ -18,12 +18,12 @@ import stat
 import math
 from threading import Thread, Lock
 import numpy as np
-
 import mindspore.nn as nn
+import mindspore.context as context
 from mindspore import log as logger
 from mindspore.train.checkpoint_pb2 import Checkpoint
 from mindspore.train.print_pb2 import Print
-from mindspore.train.node_strategy_pb2 import ParallelStrategyMap
+from mindspore.train.node_strategy_pb2 import ParallelStrategyMap, ParallelLayouts
 from mindspore.common.tensor import Tensor
 from mindspore.common.initializer import initializer
 from mindspore.common.parameter import Parameter
@@ -31,10 +31,9 @@ from mindspore.common.api import _executor
 from mindspore.common import dtype as mstype
 from mindspore._checkparam import check_input_data, Validator
 from mindspore.compression.export import quant_export
-import mindspore.context as context
+from mindspore.parallel._tensor import _load_tensor
+from mindspore.parallel._utils import _infer_rank_list, _remove_repeated_slices
 
-__all__ = ["save_checkpoint", "load_checkpoint", "load_param_into_net", "export", "parse_print",
-           "build_searched_strategy", "merge_sliced_parameter"]
 
 tensor_to_ms_type = {"Int8": mstype.int8, "Uint8": mstype.uint8, "Int16": mstype.int16, "Uint16": mstype.uint16,
                      "Int32": mstype.int32, "Uint32": mstype.uint32, "Int64": mstype.int64, "Uint64": mstype.uint64,
@@ -94,7 +93,7 @@ def _update_param(param, new_param):
     if isinstance(param.data, Tensor) and not isinstance(new_param.data, Tensor):
         if param.data.shape != (1,) and param.data.shape != ():
             logger.error("Failed to combine the net and the parameters for param %s.", param.name)
-            msg = ("Net parameters {} shape({}) is not (1,), inconsitent with parameter_dict's(scalar)."
+            msg = ("Net parameters {} shape({}) is not (1,), inconsistent with parameter_dict's(scalar)."
                    .format(param.name, param.data.shape))
             raise RuntimeError(msg)
         param.set_data(initializer(new_param.data, param.data.shape, param.data.dtype))
@@ -110,7 +109,7 @@ def _update_param(param, new_param):
 
 
 def _exec_save(ckpt_file_name, data_list):
-    """Execute save checkpoint into file process."""
+    """Execute the process of saving checkpoint into file."""
 
     try:
         with _ckpt_mutex:
@@ -132,7 +131,7 @@ def _exec_save(ckpt_file_name, data_list):
                         param_tensor = param_value.tensor
                         param_tensor.dims.extend(value[0])
                         param_tensor.tensor_type = value[1]
-                        param_tensor.tensor_content = param_slice.tostring()
+                        param_tensor.tensor_content = param_slice.tobytes()
 
                         f.write(checkpoint_list.SerializeToString())
 
@@ -165,7 +164,7 @@ def save_checkpoint(save_obj, ckpt_file_name, integrated_save=True, async_save=F
     integrated_save = Validator.check_bool(integrated_save)
     async_save = Validator.check_bool(async_save)
 
-    logger.info("Execute save checkpoint process.")
+    logger.info("Execute the process of saving checkpoint files.")
 
     if isinstance(save_obj, nn.Cell):
         save_obj.init_parameters_data()
@@ -179,8 +178,8 @@ def save_checkpoint(save_obj, ckpt_file_name, integrated_save=True, async_save=F
 
             # in automatic model parallel scenario, some parameters were spliteds to all the devices,
             # which should be combined before saving
-            if integrated_save and key in save_obj.parameter_layout_dict:
-                param_data = _get_merged_param_data(save_obj, key, param_data)
+            if key in save_obj.parameter_layout_dict:
+                param_data = _get_merged_param_data(save_obj, key, param_data, integrated_save)
 
             each_param["data"] = param_data
             param_list.append(each_param)
@@ -211,7 +210,7 @@ def save_checkpoint(save_obj, ckpt_file_name, integrated_save=True, async_save=F
     else:
         _exec_save(ckpt_file_name, data_list)
 
-    logger.info("Save checkpoint process finish.")
+    logger.info("Saving checkpoint process is finished.")
 
 
 def _check_param_prefix(filter_prefix, param_name):
@@ -242,35 +241,11 @@ def load_checkpoint(ckpt_file_name, net=None, strict_load=False, filter_prefix=N
         ValueError: Checkpoint file is incorrect.
 
     Examples:
-        >>> ckpt_file_name = "./checkpoint/LeNet5-2_1875.ckpt"
+        >>> ckpt_file_name = "./checkpoint/LeNet5-1_32.ckpt"
         >>> param_dict = load_checkpoint(ckpt_file_name, filter_prefix="conv1")
     """
-    if not isinstance(ckpt_file_name, str):
-        raise ValueError("The ckpt_file_name must be string.")
-
-    if not os.path.exists(ckpt_file_name):
-        raise ValueError("The checkpoint file is not exist.")
-
-    if ckpt_file_name[-5:] != ".ckpt":
-        raise ValueError("Please input the correct checkpoint file name.")
-
-    if os.path.getsize(ckpt_file_name) == 0:
-        raise ValueError("The checkpoint file may be empty, please make sure enter the correct file name.")
-
-    if filter_prefix is not None:
-        if not isinstance(filter_prefix, (str, list, tuple)):
-            raise TypeError(f"The type of filter_prefix must be str, list[str] or tuple[str] "
-                            f"when filter_prefix is not None, but got {str(type(filter_prefix))}.")
-        if isinstance(filter_prefix, str):
-            filter_prefix = (filter_prefix,)
-        if not filter_prefix:
-            raise ValueError("The filter_prefix can't be empty when filter_prefix is list or tuple.")
-        for index, prefix in enumerate(filter_prefix):
-            if not isinstance(prefix, str):
-                raise TypeError(f"The type of filter_prefix must be str, list[str] or tuple[str], "
-                                f"but got {str(type(prefix))} at index {index}.")
-
-    logger.info("Execute load checkpoint process.")
+    ckpt_file_name, filter_prefix = _check_checkpoint_param(ckpt_file_name, filter_prefix)
+    logger.info("Execute the process of loading checkpoint files.")
     checkpoint_list = Checkpoint()
 
     try:
@@ -298,7 +273,6 @@ def load_checkpoint(ckpt_file_name, net=None, strict_load=False, filter_prefix=N
                 param_data = np.concatenate((param_data_list), axis=0)
                 param_data_list.clear()
                 dims = element.tensor.dims
-
                 if dims == [0]:
                     if 'Float' in data_type:
                         param_data = float(param_data[0])
@@ -314,7 +288,7 @@ def load_checkpoint(ckpt_file_name, net=None, strict_load=False, filter_prefix=N
                     param_value = param_data.reshape(param_dim)
                     parameter_dict[element.tag] = Parameter(Tensor(param_value, ms_type), name=element.tag)
 
-        logger.info("Load checkpoint process finish.")
+        logger.info("Loading checkpoint files process is finished.")
 
     except BaseException as e:
         logger.error("Failed to load the checkpoint file `%s`.", ckpt_file_name)
@@ -327,6 +301,32 @@ def load_checkpoint(ckpt_file_name, net=None, strict_load=False, filter_prefix=N
         load_param_into_net(net, parameter_dict, strict_load)
 
     return parameter_dict
+
+
+def _check_checkpoint_param(ckpt_file_name, filter_prefix=None):
+    """Check function load_checkpoint's parameter."""
+    if not isinstance(ckpt_file_name, str):
+        raise ValueError("The ckpt_file_name must be string.")
+
+    if not os.path.exists(ckpt_file_name):
+        raise ValueError("The checkpoint file is not exist.")
+
+    if ckpt_file_name[-5:] != ".ckpt":
+        raise ValueError("Please input the correct checkpoint file name.")
+
+    if filter_prefix is not None:
+        if not isinstance(filter_prefix, (str, list, tuple)):
+            raise TypeError(f"The type of filter_prefix must be str, list[str] or tuple[str] "
+                            f"when filter_prefix is not None, but got {str(type(filter_prefix))}.")
+        if isinstance(filter_prefix, str):
+            filter_prefix = (filter_prefix,)
+        if not filter_prefix:
+            raise ValueError("The filter_prefix can't be empty when filter_prefix is list or tuple.")
+        for index, prefix in enumerate(filter_prefix):
+            if not isinstance(prefix, str):
+                raise TypeError(f"The type of filter_prefix must be str, list[str] or tuple[str], "
+                                f"but got {str(type(prefix))} at index {index}.")
+    return ckpt_file_name, filter_prefix
 
 
 def load_param_into_net(net, parameter_dict, strict_load=False):
@@ -343,9 +343,12 @@ def load_param_into_net(net, parameter_dict, strict_load=False):
         TypeError: Argument is not a Cell, or parameter_dict is not a Parameter dictionary.
 
     Examples:
-        >>> net = LeNet5()
-        >>> param_dict = load_checkpoint("LeNet5-2_1875.ckpt")
-        >>> load_param_into_net(net, param_dict)
+        >>> net = Net()
+        >>> ckpt_file_name = "./checkpoint/LeNet5-1_32.ckpt"
+        >>> param_dict = load_checkpoint(ckpt_file_name, filter_prefix="conv1")
+        >>> param_not_load = load_param_into_net(net, param_dict)
+        >>> print(param_not_load)
+        ['conv1.weight']
     """
     if not isinstance(net, nn.Cell):
         logger.error("Failed to combine the net and the parameters.")
@@ -358,7 +361,7 @@ def load_param_into_net(net, parameter_dict, strict_load=False):
         raise TypeError(msg)
 
     strict_load = Validator.check_bool(strict_load)
-    logger.info("Execute load parameter into net process.")
+    logger.info("Execute the process of loading parameters into net.")
     net.init_parameters_data()
     param_not_load = []
     for _, param in net.parameters_and_names():
@@ -379,8 +382,9 @@ def load_param_into_net(net, parameter_dict, strict_load=False):
     for param_name in param_not_load:
         logger.debug("%s", param_name)
 
-    logger.info("Load parameter into net finish.")
-    logger.warning("{} parameters in the net are not loaded.".format(len(param_not_load)))
+    logger.info("Loading parameters into net is finished.")
+    if param_not_load:
+        logger.warning("{} parameters in the net are not loaded.".format(len(param_not_load)))
     return param_not_load
 
 
@@ -417,7 +421,7 @@ def _save_graph(network, file_name):
         network (Cell): Obtain a pipeline through network for saving graph.
         file_name (str): Graph file name into which the graph will be saved.
     """
-    logger.info("Execute save the graph process.")
+    logger.info("Execute the process of saving graph.")
 
     graph_proto = network.get_func_graph_proto()
     if graph_proto:
@@ -426,18 +430,20 @@ def _save_graph(network, file_name):
         os.chmod(file_name, stat.S_IRUSR)
 
 
-def _get_merged_param_data(net, param_name, param_data):
+def _get_merged_param_data(net, param_name, param_data, integrated_save):
     """
     Gets the merged data(tensor) from tensor slice, by device arrangement and tensor map.
 
     Args:
         net (Cell): MindSpore network.
-        param_name(str): The parameter name, which to be combined.
-        param_data(Tensor):The parameter data on the local device,
-                           It was a slice of the whole parameter data.
+        param_name (str): The parameter name, which to be combined.
+        param_data (Tensor): The parameter data on the local device, which was a slice of the whole parameter data.
+        integrated_save (bool): Whether to integrated save in automatic model parallel scene.
     Returns:
         Tensor, the combined tensor which with the whole data value.
     """
+    from mindspore.parallel._cell_wrapper import get_allgather_cell
+    from mindspore.parallel._tensor import _reshape_param_data, _reshape_param_data_with_weight
     layout = net.parameter_layout_dict[param_name]
     if len(layout) < 6:
         logger.info("layout dict does not contain the key %s", param_name)
@@ -448,25 +454,39 @@ def _get_merged_param_data(net, param_name, param_data):
     field_size = layout[3]
     uniform_split = layout[4]
     opt_shard_group = layout[5]
-    if uniform_split == 0:
-        raise RuntimeError("Save checkpoint only support uniform split tensor now.")
 
-    from mindspore.parallel._cell_wrapper import get_allgather_cell
-    from mindspore.parallel._tensor import _reshape_param_data, _reshape_param_data_with_weight
-    # while any dim is not equal to -1, means param is split and needs to be merged
-    # pipeline parallel need to be supported here later
-    for dim in tensor_map:
-        if dim != -1:
-            if opt_shard_group:
-                allgather_net = get_allgather_cell(opt_shard_group, True)
-            else:
+    allgather_net = None
+    if param_name in net.parallel_parameter_merge_net_dict:
+        allgather_net = net.parallel_parameter_merge_net_dict[param_name]
+    else:
+        logger.info("need to create allgather net for %s", param_name)
+
+    if integrated_save:
+        if uniform_split == 0:
+            raise RuntimeError("Integrated save checkpoint only support uniform split tensor now.")
+        # while any dim is not equal to -1, means param is split and needs to be merged
+        # pipeline parallel need to be supported here later
+        for dim in tensor_map:
+            if dim != -1:
+                if allgather_net is None:
+                    if opt_shard_group:
+                        allgather_net = get_allgather_cell(opt_shard_group, True)
+                    else:
+                        allgather_net = get_allgather_cell(opt_shard_group, False)
+                    net.parallel_parameter_merge_net_dict[param_name] = allgather_net
+                param_data = allgather_net(param_data)
+                if field_size:
+                    return _reshape_param_data_with_weight(param_data, dev_mat, field_size)
+                return _reshape_param_data(param_data, dev_mat, tensor_map)
+        if opt_shard_group:
+            if allgather_net is None:
                 allgather_net = get_allgather_cell(opt_shard_group, False)
+                net.parallel_parameter_merge_net_dict[param_name] = allgather_net
             param_data = allgather_net(param_data)
-            if field_size:
-                return _reshape_param_data_with_weight(param_data, dev_mat, field_size)
-            return _reshape_param_data(param_data, dev_mat, tensor_map)
-    if opt_shard_group:
-        allgather_net = get_allgather_cell(opt_shard_group, False)
+    elif opt_shard_group:
+        if allgather_net is None:
+            allgather_net = get_allgather_cell(opt_shard_group, False)
+            net.parallel_parameter_merge_net_dict[param_name] = allgather_net
         param_data = allgather_net(param_data)
     return param_data
 
@@ -506,11 +526,11 @@ def export(net, *inputs, file_name, file_format='AIR', **kwargs):
         file_name (str): File name of the model to be exported.
         file_format (str): MindSpore currently supports 'AIR', 'ONNX' and 'MINDIR' format for exported model.
 
-            - AIR: Ascend Intermidiate Representation. An intermidiate representation format of Ascend model.
+            - AIR: Ascend Intermediate Representation. An intermediate representation format of Ascend model.
               Recommended suffix for output file is '.air'.
             - ONNX: Open Neural Network eXchange. An open format built to represent machine learning models.
               Recommended suffix for output file is '.onnx'.
-            - MINDIR: MindSpore Native Intermidiate Representation for Anf. An intermidiate representation format
+            - MINDIR: MindSpore Native Intermediate Representation for Anf. An intermediate representation format
               for MindSpore models.
               Recommended suffix for output file is '.mindir'.
 
@@ -522,7 +542,10 @@ def export(net, *inputs, file_name, file_format='AIR', **kwargs):
     """
     logger.info("exporting model file:%s format:%s.", file_name, file_format)
     check_input_data(*inputs, data_class=Tensor)
+    if not isinstance(file_name, str):
+        raise ValueError("Args file_name {} must be string, please check it".format(file_name))
 
+    Validator.check_file_name_by_regular(file_name)
     net = _quant_export(net, *inputs, file_format=file_format, **kwargs)
     _export(net, file_name, file_format, *inputs)
 
@@ -545,27 +568,33 @@ def _export(net, file_name, file_format, *inputs):
     is_dump_onnx_in_training = net.training and file_format == 'ONNX'
     if is_dump_onnx_in_training:
         net.set_train(mode=False)
-    # export model
+
     net.init_parameters_data()
     if file_format == 'AIR':
         phase_name = 'export.air'
         graph_id, _ = _executor.compile(net, *inputs, phase=phase_name)
+        if not file_name.endswith('.air'):
+            file_name += ".air"
         _executor.export(file_name, graph_id)
-    elif file_format == 'ONNX':  # file_format is 'ONNX'
+    elif file_format == 'ONNX':
         phase_name = 'export.onnx'
         graph_id, _ = _executor.compile(net, *inputs, phase=phase_name, do_convert=False)
-        onnx_stream = _executor._get_func_graph_proto(graph_id)
+        onnx_stream = _executor._get_func_graph_proto(net, graph_id)
+        if not file_name.endswith('.onnx'):
+            file_name += ".onnx"
         with open(file_name, 'wb') as f:
             os.chmod(file_name, stat.S_IWUSR | stat.S_IRUSR)
             f.write(onnx_stream)
-    elif file_format == 'MINDIR':  # file_format is 'MINDIR'
+    elif file_format == 'MINDIR':
         phase_name = 'export.mindir'
         graph_id, _ = _executor.compile(net, *inputs, phase=phase_name, do_convert=False)
-        onnx_stream = _executor._get_func_graph_proto(graph_id, 'mind_ir')
+        onnx_stream = _executor._get_func_graph_proto(net, graph_id, 'mind_ir')
+        if not file_name.endswith('.mindir'):
+            file_name += ".mindir"
         with open(file_name, 'wb') as f:
             os.chmod(file_name, stat.S_IWUSR | stat.S_IRUSR)
             f.write(onnx_stream)
-    # restore network training mode
+
     if is_dump_onnx_in_training:
         net.set_train(mode=True)
 
@@ -702,7 +731,7 @@ def _merge_param_with_strategy(sliced_data, parameter_name, strategy, is_even):
         param_split_shape = list(layout.param_split_shape[0].dim)
         field_size = int(layout.field)
     except BaseException as e:
-        raise ValueError(f"{e.__str__()}. please make sure that strategy matches the node_strategy.proto.")
+        raise ValueError(f"{e.__str__()}. Please make sure that strategy matches the node_strategy.proto.")
 
     device_count = 1
     for dim in dev_mat:
@@ -722,7 +751,7 @@ def _merge_param_with_strategy(sliced_data, parameter_name, strategy, is_even):
 
         if field_size > 0:
             from mindspore.parallel._tensor import _reshape_param_data_with_weight
-            merged_tensor = _reshape_param_data_with_weight(all_gather_tensor, dev_mat, [field_size])
+            merged_tensor = _reshape_param_data_with_weight(all_gather_tensor, dev_mat, field_size)
 
         else:
             from mindspore.parallel._tensor import _reshape_param_data
@@ -779,9 +808,6 @@ def build_searched_strategy(strategy_filename):
         ValueError: Strategy file is incorrect.
         TypeError: Strategy_filename is not str.
 
-    Examples:
-        >>> strategy_filename = "./strategy_train.ckpt"
-        >>> strategy = build_searched_strategy(strategy_filename)
     """
     if not isinstance(strategy_filename, str):
         raise TypeError(f"The strategy_filename should be str, but got {type(strategy_filename)}.")
@@ -832,17 +858,16 @@ def merge_sliced_parameter(sliced_parameters, strategy=None):
         KeyError: The parameter name is not in keys of strategy.
 
     Examples:
-        >>> strategy = build_searched_strategy("./strategy_train.ckpt")
         >>> sliced_parameters = [
-        >>>                      Parameter(Tensor(np.array([0.00023915, 0.00013939, -0.00098059])),
-        >>>                                "network.embedding_table"),
-        >>>                      Parameter(Tensor(np.array([0.00015815, 0.00015458, -0.00012125])),
-        >>>                                "network.embedding_table"),
-        >>>                      Parameter(Tensor(np.array([0.00042165, 0.00029692, -0.00007941])),
-        >>>                                "network.embedding_table"),
-        >>>                      Parameter(Tensor(np.array([0.00084451, 0.00089960, -0.00010431])),
-        >>>                                "network.embedding_table")]
-        >>> merged_parameter = merge_sliced_parameter(sliced_parameters, strategy)
+        ...                      Parameter(Tensor(np.array([0.00023915, 0.00013939, -0.00098059])),
+        ...                                "network.embedding_table"),
+        ...                      Parameter(Tensor(np.array([0.00015815, 0.00015458, -0.00012125])),
+        ...                                "network.embedding_table"),
+        ...                      Parameter(Tensor(np.array([0.00042165, 0.00029692, -0.00007941])),
+        ...                                "network.embedding_table"),
+        ...                      Parameter(Tensor(np.array([0.00084451, 0.00089960, -0.00010431])),
+        ...                                "network.embedding_table")]
+        >>> merged_parameter = merge_sliced_parameter(sliced_parameters)
     """
     if not isinstance(sliced_parameters, list):
         raise TypeError(f"The sliced_parameters should be list, but got {type(sliced_parameters)}.")
@@ -892,3 +917,204 @@ def merge_sliced_parameter(sliced_parameters, strategy=None):
         merged_parameter = Parameter(merged_tensor, parameter_name, requires_grad, layerwise_parallel)
 
     return merged_parameter
+
+
+def load_distributed_checkpoint(network, checkpoint_filenames, predict_strategy=None):
+    """
+    Load checkpoint into net for distributed predication.
+
+    Args:
+        network (Cell): Network for distributed predication.
+        checkpoint_filenames (list[str]): The name of Checkpoint files in order of rank id.
+        predict_strategy (dict): Strategy of predication process, whose key is parameter name, and value is a list or
+            a tuple that the first four elements are [dev_matrix, tensor_map, param_split_shape, field]. If None,
+            it means that the predication process just uses single device. Default: None.
+
+    Raises:
+        TypeError: The type of inputs do not match the requirements.
+        ValueError: Failed to load checkpoint into net.
+    """
+    network = Validator.check_isinstance("network", network, nn.Cell)
+
+    for index, filename in enumerate(checkpoint_filenames):
+        if not isinstance(filename, str) or not os.path.exists(filename) \
+                or filename[-5:] != ".ckpt" or os.path.getsize(filename) == 0:
+            raise ValueError(f"Please make sure that the {filename} at index {index} is a valid checkpoint file.")
+
+    if not _check_predict_strategy(predict_strategy):
+        raise ValueError(f"Please make sure that the key of predict_strategy is str, "
+                         f"and the value is a list or a tuple that the first four elements are "
+                         f"dev_matrix (list[int]), tensor_map (list[int]), "
+                         f"param_split_shape (list[int]) and field_size (zero).")
+
+    train_strategy_filename = context.get_auto_parallel_context("strategy_ckpt_load_file")
+    _train_strategy = build_searched_strategy(train_strategy_filename)
+    train_strategy = _convert_to_list(_train_strategy)
+
+    train_dev_count = 1
+    for dim in train_strategy[list(train_strategy.keys())[0]][0]:
+        train_dev_count *= dim
+    if train_dev_count != len(checkpoint_filenames):
+        raise ValueError(
+            f"The length of checkpoint_filenames should be equal to the device count of training process. "
+            f"The length is {len(checkpoint_filenames)} but the device count is {train_dev_count}.")
+
+    rank_list = _infer_rank_list(train_strategy, predict_strategy)
+
+    param_dict = {}
+    for _, param in network.parameters_and_names():
+        sliced_params = []
+        if param.name not in rank_list.keys():
+            continue
+        param_rank = rank_list[param.name][0]
+        skip_merge_split = rank_list[param.name][1]
+        for rank in param_rank:
+            sliced_param = _load_single_param(checkpoint_filenames[rank], param.name)
+            sliced_params.append(sliced_param)
+        if skip_merge_split:
+            split_param = sliced_params[0]
+        else:
+            param_unique_strategy = _remove_repeated_slices(train_strategy[param.name])
+            _param_unique_strategy = _convert_to_layout(param.name, param_unique_strategy)
+            split_param = _merge_and_split(sliced_params, _param_unique_strategy, predict_strategy)
+        param_dict[param.name] = split_param
+
+    load_param_into_net(network, param_dict)
+
+
+def _check_predict_strategy(predict_strategy):
+    """Check predict strategy."""
+    def _check_int_list(arg):
+        if not isinstance(arg, list):
+            return False
+        for item in arg:
+            if not isinstance(item, int):
+                return False
+        return True
+
+    if predict_strategy is None:
+        return True
+
+    predict_strategy = Validator.check_isinstance("predict_strategy", predict_strategy, dict)
+    for key in predict_strategy.keys():
+        if not isinstance(key, str) or not isinstance(predict_strategy[key], (list, tuple)) \
+                or len(predict_strategy[key]) < 4:
+            return False
+        dev_matrix, tensor_map, param_split_shape, field_size = predict_strategy[key][:4]
+        if not _check_int_list(dev_matrix) or not _check_int_list(tensor_map) or \
+                not (_check_int_list(param_split_shape) or not param_split_shape) or \
+                not (isinstance(field_size, int) and field_size == 0):
+            return False
+    return True
+
+
+def _convert_to_list(strategy):
+    """Convert ParallelLayouts object to specified list."""
+    train_map = {}
+    for param_name in strategy.keys():
+        try:
+            layout = strategy.get(param_name)
+            dev_mat = list(layout.dev_matrix[0].dim)
+            tensor_map = list(layout.tensor_map[0].dim)
+            param_split_shape = list(layout.param_split_shape[0].dim)
+            field_size = int(layout.field)
+            train_map[param_name] = [dev_mat, tensor_map, param_split_shape, field_size]
+        except BaseException as e:
+            raise ValueError(f"{e.__str__()}. Please make sure that strategy matches the node_strategy.proto.")
+    return train_map
+
+
+def _convert_to_layout(param_name, tensor_layout):
+    """Convert list to ParallelLayouts object."""
+    strategy = {}
+    try:
+        layout = ParallelLayouts()
+        layout.field = tensor_layout[3]
+
+        dev_matrix = layout.dev_matrix.add()
+        for item in tensor_layout[0]:
+            dev_matrix.dim.append(item)
+
+        tensor_map = layout.tensor_map.add()
+        for item in tensor_layout[1]:
+            tensor_map.dim.append(item)
+
+        param_split_shape = layout.param_split_shape.add()
+        for item in tensor_layout[2]:
+            param_split_shape.dim.append(item)
+    except BaseException as e:
+        raise ValueError("Convert failed. " + e.__str__())
+
+    strategy[param_name] = layout
+    return strategy
+
+
+def _merge_and_split(sliced_params, train_strategy, predict_strategy):
+    """Merge sliced parameter and split it according to the predict strategy."""
+    merged_param = merge_sliced_parameter(sliced_params, train_strategy)
+    if predict_strategy is None:
+        return merged_param
+    param_name = merged_param.name
+    tensor_layout = predict_strategy[param_name]
+    split_tensor = _load_tensor(merged_param.data, tensor_layout[0], tensor_layout[1])
+    requires_grad = merged_param.requires_grad
+    layerwise_parallel = merged_param.layerwise_parallel
+    split_param = Parameter(split_tensor, param_name, requires_grad, layerwise_parallel)
+    return split_param
+
+
+def _load_single_param(ckpt_file_name, param_name):
+    """Load a parameter from checkpoint."""
+    logger.info("Execute the process of loading checkpoint files.")
+    checkpoint_list = Checkpoint()
+
+    try:
+        with open(ckpt_file_name, "rb") as f:
+            pb_content = f.read()
+        checkpoint_list.ParseFromString(pb_content)
+    except BaseException as e:
+        logger.error("Failed to read the checkpoint file `%s`, please check the correct of the file.", ckpt_file_name)
+        raise ValueError(e.__str__())
+
+    parameter = None
+    try:
+        param_data_list = []
+        for element_id, element in enumerate(checkpoint_list.value):
+            if element.tag != param_name:
+                continue
+            data = element.tensor.tensor_content
+            data_type = element.tensor.tensor_type
+            np_type = tensor_to_np_type[data_type]
+            ms_type = tensor_to_ms_type[data_type]
+            element_data = np.frombuffer(data, np_type)
+            param_data_list.append(element_data)
+            if (element_id == len(checkpoint_list.value) - 1) or \
+                    (element.tag != checkpoint_list.value[element_id + 1].tag):
+                param_data = np.concatenate((param_data_list), axis=0)
+                param_data_list.clear()
+                dims = element.tensor.dims
+                if dims == [0]:
+                    if 'Float' in data_type:
+                        param_data = float(param_data[0])
+                    elif 'Int' in data_type:
+                        param_data = int(param_data[0])
+                    parameter = Parameter(Tensor(param_data, ms_type), name=element.tag)
+                elif dims == [1]:
+                    parameter = Parameter(Tensor(param_data, ms_type), name=element.tag)
+                else:
+                    param_dim = []
+                    for dim in dims:
+                        param_dim.append(dim)
+                    param_value = param_data.reshape(param_dim)
+                    parameter = Parameter(Tensor(param_value, ms_type), name=element.tag)
+            break
+        logger.info("Loading checkpoint files process is finished.")
+
+    except BaseException as e:
+        logger.error("Failed to load the checkpoint file `%s`.", ckpt_file_name)
+        raise RuntimeError(e.__str__())
+
+    if parameter is None:
+        raise ValueError(f"There is no parameter named {param_name} in this checkpoint file {ckpt_file_name}, "
+                         f"please check parameter name or checkpoint file.")
+    return parameter

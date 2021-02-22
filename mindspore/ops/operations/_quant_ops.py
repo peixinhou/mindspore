@@ -43,7 +43,13 @@ __all__ = ["MinMaxUpdatePerLayer",
            "BatchNormFoldGradD",
            "BatchNormFold2_D",
            "BatchNormFold2GradD",
-           "BatchNormFold2GradReduce"
+           "BatchNormFold2GradReduce",
+           "IFMR",
+           "ActsULQ",
+           "ActsULQInputGrad",
+           "ActULQClampMinGrad",
+           "ActULQClampMaxGrad",
+           "WtsARQ"
            ]
 
 
@@ -186,7 +192,7 @@ class FakeQuantWithMinMaxVars(PrimitiveWithInfer):
         >>> min_tensor = Tensor(np.array([-6]), mstype.float32)
         >>> max_tensor = Tensor(np.array([6]), mstype.float32)
         >>> output_tensor = FakeQuantWithMinMaxVars(num_bits=8, narrow_range=False)(
-        >>>                 input_tensor, min_tensor, max_tensor)
+        ...                 input_tensor, min_tensor, max_tensor)
         >>> output_tensor shape: (3, 16, 5, 5)  data type: mstype.float32
     """
 
@@ -248,7 +254,7 @@ class FakeQuantWithMinMaxVarsGradient(PrimitiveWithInfer):
         >>> min_tensor = Tensor(np.array([-6]), mstype.float32)
         >>> max_tensor = Tensor(np.array([6]), mstype.float32)
         >>> x_gradient, min_gradient, max_gradient = FakeQuantWithMinMaxVarsGradient(num_bits=8,narrow_range=False)
-        >>>                                          (gradients, input_tensor, min_tensor, max_tensor)
+        ...                                          (gradients, input_tensor, min_tensor, max_tensor)
         >>> x_gradient   shape: (3, 16, 5, 5)  data type: mstype.float32
         >>> min_gradient shape: (1,)           data type: mstype.float32
         >>> max_gradient shape: (1,)           data type: mstype.float32
@@ -309,7 +315,7 @@ class FakeQuantWithMinMaxVarsPerChannel(PrimitiveWithInfer):
         >>> min_tensor = Tensor(np.array([-6, -1, -2, -3]), mstype.float32)
         >>> max_tensor = Tensor(np.array([6, 1, 2, 3]), mstype.float32)
         >>> output_tensor = FakeQuantWithMinMaxVars(num_bits=8, narrow_range=False)(
-        >>>                 input_tensor, min_tensor, max_tensor)
+        ...                 input_tensor, min_tensor, max_tensor)
         >>> output_tensor shape: (3, 16, 3, 4)  data type: mstype.float32
     """
 
@@ -364,8 +370,8 @@ class FakeQuantWithMinMaxVarsPerChannelGradient(PrimitiveWithInfer):
         >>> min_tensor = Tensor(np.array([-6, -1, -2, -3]), mstype.float32)
         >>> max_tensor = Tensor(np.array([6, 1, 2, 3]), mstype.float32)
         >>> x_gradient, min_gradient, max_gradient = FakeQuantWithMinMaxVarsPerChannelGradient(
-        >>>                                          num_bits=8, narrow_range=False)(
-        >>>                                          gradients, input_tensor, min_tensor, max_tensor)
+        ...                                          num_bits=8, narrow_range=False)(
+        ...                                          gradients, input_tensor, min_tensor, max_tensor)
         >>> x_gradient   shape: (3, 16, 3, 4)  data type: mstype.float32
         >>> min_gradient shape: (4,)           data type: mstype.float32
         >>> max_gradient shape: (4,)           data type: mstype.float32
@@ -746,7 +752,7 @@ class BatchNormFoldGrad(PrimitiveWithInfer):
     Performs grad of BatchNormFold operation.
 
     Examples:
-        >>> batch_norm_fold_grad = P.BatchNormFoldGrad()
+        >>> batch_norm_fold_grad = ops.BatchNormFoldGrad()
         >>> d_batch_mean = Tensor(np.random.randint(-2., 2., (1, 2, 2, 3)), mindspore.float32)
         >>> d_batch_std = Tensor(np.random.randn(1, 2, 2, 3), mindspore.float32)
         >>> input_x = Tensor(np.random.randint(0, 256, (4, 1, 4, 6)), mindspore.float32)
@@ -803,7 +809,7 @@ class CorrectionMul(PrimitiveWithInfer):
         - **out** (Tensor) - Tensor has the same shape as x.
 
     Examples:
-        >>> correction_mul = P.CorrectionMul()
+        >>> correction_mul = ops.CorrectionMul()
         >>> input_x = Tensor(np.random.randint(-8, 12, (3, 4)), mindspore.float32)
         >>> batch_std = Tensor(np.array([1.5, 3, 2]), mindspore.float32)
         >>> running_std = Tensor(np.array([2, 1.2, 0.5]), mindspore.float32)
@@ -836,7 +842,7 @@ class CorrectionMulGrad(PrimitiveWithInfer):
     Performs grad of CorrectionMul operation.
 
     Examples:
-        >>> correction_mul_grad = P.CorrectionMulGrad()
+        >>> correction_mul_grad = ops.CorrectionMulGrad()
         >>> dout = Tensor(np.array([1.5, -2.2, 0.7, -3, 1.6, 2.8]).reshape(2, 1, 1, 3), mindspore.float32)
         >>> input_x = Tensor(np.random.randint(0, 256, (2, 1, 1, 3)), mindspore.float32)
         >>> gamma = Tensor(np.array([0.2, -0.2, 2.5, -1.]).reshape(2, 1, 2), mindspore.float32)
@@ -876,7 +882,7 @@ class CorrectionMulGradReduce(PrimitiveWithInfer):
     Performs grad reduce of CorrectionMul operation.
 
     Examples:
-        >>> correction_mul_grad_rd = P.CorrectionMulGradReduce()
+        >>> correction_mul_grad_rd = ops.CorrectionMulGradReduce()
         >>> dout = Tensor(np.array([1.5, -2.2, 0.7, -3, 1.6, 2.8]).reshape(2, 1, 1, 3), mindspore.float32)
         >>> input_x = Tensor(np.random.randint(0, 256, (2, 1, 1, 3)), mindspore.float32)
         >>> gamma = Tensor(np.array([0.2, -0.2, 2.5, -1.]).reshape(2, 1, 2), mindspore.float32)
@@ -920,7 +926,7 @@ class BatchNormFold2(PrimitiveWithInfer):
         - **y** (Tensor) - Tensor has the same shape as x.
 
     Examples:
-        >>> batch_norm_fold2 = P.BatchNormFold2()
+        >>> batch_norm_fold2 = ops.BatchNormFold2()
         >>> input_x = Tensor(np.random.randint(-6, 6, (4, 3)), mindspore.float32)
         >>> beta = Tensor(np.array([0.2, -0.1, 0.25]), mindspore.float32)
         >>> gamma = Tensor(np.array([-0.1, -0.25, 0.1]), mindspore.float32)
@@ -968,7 +974,7 @@ class BatchNormFold2Grad(PrimitiveWithInfer):
     Performs grad of CorrectionAddGrad operation.
 
     Examples:
-        >>> bnf2_grad = P.BatchNormFold2Grad()
+        >>> bnf2_grad = ops.BatchNormFold2Grad()
         >>> input_x = Tensor(np.arange(3*3*12*12).reshape(6, 3, 6, 12), mindspore.float32)
         >>> dout = Tensor(np.random.randint(-32, 32, (6, 3, 6, 12)), mindspore.float32)
         >>> gamma = Tensor(np.random.randint(-4, 4, (3, 1, 1, 2)), mindspore.float32)
@@ -1235,9 +1241,9 @@ class ActsULQ(PrimitiveWithInfer):
     def infer_dtype(self, x_dtype, clamp_min_dtype, clamp_max_dtype):
         """infer dtype of primitive"""
         valid_types = [mstype.float32, mstype.float16]
-        validator.check_tensor_type_same({"x": x_dtype}, valid_types, self.name)
-        validator.check_tensor_type_same({"clamp_min": clamp_min_dtype}, valid_types, self.name)
-        validator.check_tensor_type_same({"clamp_max": clamp_max_dtype}, valid_types, self.name)
+        validator.check_tensor_dtype_valid("x", x_dtype, valid_types, self.name)
+        validator.check_tensor_dtype_valid("clamp_min", clamp_min_dtype, valid_types, self.name)
+        validator.check_tensor_dtype_valid("clamp_max", clamp_max_dtype, valid_types, self.name)
 
         return x_dtype, mstype.bool_, mstype.bool_, x_dtype
 
@@ -1261,7 +1267,7 @@ class ActsULQInputGrad(PrimitiveWithInfer):
 
     def infer_dtype(self, y_grad_type, clamp_min_mask_type, clamp_max_mask_type):
         valid_types = [mstype.float32, mstype.float16]
-        validator.check_tensor_type_same({"y_grad": y_grad_type}, valid_types, self.name)
+        validator.check_tensor_dtype_valid("y_grad", y_grad_type, valid_types, self.name)
         return y_grad_type
 
 
@@ -1299,7 +1305,7 @@ class ActULQClampMinGrad(PrimitiveWithInfer):
         return tuple(output_shape)
 
     def infer_dtype(self, input_x, input_y, input_z):
-        return input_x
+        return mstype.float32
 
 
 class ActULQClampMaxGrad(PrimitiveWithInfer):
@@ -1336,7 +1342,7 @@ class ActULQClampMaxGrad(PrimitiveWithInfer):
         return tuple(output_shape)
 
     def infer_dtype(self, input_x, input_y, input_z):
-        return input_x
+        return mstype.float32
 
 
 class WtsARQ(PrimitiveWithInfer):
@@ -1380,7 +1386,72 @@ class WtsARQ(PrimitiveWithInfer):
 
     def infer_dtype(self, w_dtype, w_min_dtype, w_max_dtype):
         valid_types = [mstype.float32, mstype.float16]
-        validator.check_tensor_type_same({"w": w_dtype}, valid_types, self.name)
-        validator.check_tensor_type_same({"w_min": w_min_dtype}, valid_types, self.name)
-        validator.check_tensor_type_same({"w_max": w_max_dtype}, valid_types, self.name)
+        validator.check_tensor_dtype_valid("w", w_dtype, valid_types, self.name)
+        validator.check_tensor_dtype_valid("w_min", w_min_dtype, valid_types, self.name)
+        validator.check_tensor_dtype_valid("w_max", w_max_dtype, valid_types, self.name)
         return w_dtype
+
+
+class IFMR(PrimitiveWithInfer):
+    """
+    The TFMR(Input Feature Map Reconstruction).
+
+    Args:
+        min_percentile (float): Min init percentile. Default: 0.999999.
+        max_percentile (float): Max init percentile. Default: 0.999999.
+        search_range Union[list(float), tuple(float)]: Range of searching. Default: [0.7, 1.3].
+        search_step (float): Step size of searching. Default: 0.01.
+        with_offset (bool): Whether using offset. Default: True.
+
+    Inputs:
+        - **data** (Tensor) - A Tensor of feature map. With float16 or float32 data type.
+        - **data_min** (Tensor) - A Tensor of min value of feature map, the shape is :math:`(1)`.
+          With float16 or float32 data type.
+        - **data_max** (Tensor) - A Tensor of max value of feature map, the shape is :math:`(1)`.
+          With float16 or float32 data type.
+        - **cumsum** (Tensor) - A `1-D` Tensor of cumsum bin of data. With int32 data type.
+
+    Outputs:
+        - **scale** (Tensor) - A tensor of optimal scale, the shape is :math:`(1)`. Data dtype is float32.
+        - **offset** (Tensor) - A tensor of optimal offset, the shape is :math:`(1)`. Data dtype is float32.
+
+    Examples:
+        >>> data = Tensor(np.random.rand(1, 3, 6, 4).astype(np.float32))
+        >>> data_min = Tensor([0.1], mindspore.float32)
+        >>> data_max = Tensor([0.5], mindspore.float32)
+        >>> cumsum = Tensor(np.random.rand(4).astype(np.int32))
+        >>> ifmr = Q.IFMR(min_percentile=0.2, max_percentile=0.9, search_range=(1.0, 2.0),
+        ...               search_step=1.0, with_offset=False)
+        >>> output = ifmr(data, data_min, data_max, cumsum)
+        >>> print(output)
+        (Tensor(shape=[1], dtype=Float32, value= [7.87401572e-03]),
+         Tensor(shape=[1], dtype=Float32, value= [0.00000000e+00]))
+    """
+
+    @prim_attr_register
+    def __init__(self, min_percentile=0.999999, max_percentile=0.999999, search_range=(0.7, 1.3), search_step=0.01,
+                 with_offset=True):
+        validator.check_value_type("min_percentile", min_percentile, [float], self.name)
+        validator.check_value_type("max_percentile", max_percentile, [float], self.name)
+        validator.check_value_type("search_range", search_range, [list, tuple], self.name)
+        for item in search_range:
+            validator.check_positive_float(item, "item of search_range", self.name)
+        validator.check('search_range[1]', search_range[1], 'search_range[0]', search_range[0], Rel.GE, self.name)
+        validator.check_value_type("search_step", search_step, [float], self.name)
+        validator.check_value_type("offset_flag", with_offset, [bool], self.name)
+
+    def infer_shape(self, data_shape, data_min_shape, data_max_shape, cumsum_shape):
+        validator.check_equal_int(len(data_min_shape), 1, "dims of data_min", self.name)
+        validator.check_equal_int(data_min_shape[0], 1, "data_min[0]", self.name)
+        validator.check_equal_int(len(data_max_shape), 1, "dims of data_max", self.name)
+        validator.check_equal_int(data_max_shape[0], 1, "data_max[0]", self.name)
+        validator.check_equal_int(len(cumsum_shape), 1, "dims of cumsum", self.name)
+        return (1,), (1,)
+
+    def infer_dtype(self, data_dtype, data_min_dtype, data_max_dtype, cumsum_dtype):
+        tuple(map(partial(validator.check_tensor_dtype_valid,
+                          valid_dtypes=(mstype.float16, mstype.float32), prim_name=self.name),
+                  ("input_value", "input_min", "input_max"),
+                  (data_dtype, data_min_dtype, data_max_dtype)))
+        validator.check_tensor_dtype_valid("input_bins", cumsum_dtype, [mstype.int32], self.name)
+        return mstype.tensor_type(mstype.float32), mstype.tensor_type(mstype.float32)

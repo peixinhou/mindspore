@@ -56,6 +56,9 @@ void BatchnormCPUKernel::FillParam() {
   for (size_t i = 0; i < n_dim - 1; i++) {
     param->unit_ *= input_shapes[i];
   }
+  if (default_momentum_ < 0.0f) {
+    default_momentum_ = param->momentum_;
+  }
 }
 
 int BatchnormCPUKernel::InitConstTensor() {
@@ -94,26 +97,22 @@ int BatchNormRun(void *cdata, int task_id) {
   return ret;
 }
 
-kernel::LiteKernel *CpuBatchnormKernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                              const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter,
-                                              const lite::InnerContext *ctx, const kernel::KernelKey &desc,
-                                              const mindspore::lite::PrimitiveC *primitive) {
-  MS_ASSERT(opParameter != nullptr);
-  auto *kernel = new (std::nothrow) BatchnormCPUKernel(opParameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "new BatchNormCPUKernel fail!";
-    free(opParameter);
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
+int BatchnormCPUKernel::set_momentum(float momentum) {
+  auto param = reinterpret_cast<BatchNormParameter *>(op_parameter_);
+  param->momentum_ = momentum;
+
+  return RET_OK;
 }
 
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_BatchNorm, CpuBatchnormKernelCreator)
+float BatchnormCPUKernel::get_momentum() {
+  auto param = reinterpret_cast<BatchNormParameter *>(op_parameter_);
+  return param->momentum_;
+}
+
+int BatchnormCPUKernel::RestoreDefaultMomentum() {
+  set_momentum(default_momentum_);
+  return RET_OK;
+}
+
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_BatchNorm, LiteKernelCreator<BatchnormCPUKernel>)
 }  // namespace mindspore::kernel

@@ -13,10 +13,8 @@
 # limitations under the License.
 # ============================================================================
 """GumbelCDF Bijector"""
-from mindspore.common import dtype as mstype
-from mindspore._checkparam import Validator
 from mindspore.ops import operations as P
-from ..distribution._utils.utils import check_greater_zero, set_param_type
+from ..distribution._utils.utils import check_greater_zero
 from ..distribution._utils.custom_ops import exp_generic, log_generic
 from .bijector import Bijector
 
@@ -29,54 +27,65 @@ class GumbelCDF(Bijector):
     .. math::
         Y = \exp(-\exp(\frac{-(X - loc)}{scale}))
 
-    Note:
-        For `reverse` and `reverse_log_jacobian`, input should be in range of (0, 1).
-
     Args:
-        loc (int, float, list, numpy.ndarray, Tensor): The location. Default: 0..
-        scale (int, float, list, numpy.ndarray, Tensor): The scale. Default: 1.0.
-        dtype (mindspore.dtype): Type of the distribution which the bijector operates on. Default: float32.
-        name (str): The name of the Bijector. Default: 'Gumbel_CDF'.
+        loc (float, list, numpy.ndarray, Tensor): The location. Default: 0..
+        scale (float, list, numpy.ndarray, Tensor): The scale. Default: 1.0.
+        name (str): The name of the Bijector. Default: 'GumbelCDF'.
+
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
+    Note:
+        `scale` must be greater than zero.
+        For `inverse` and `inverse_log_jacobian`, input should be in range of (0, 1).
+        The dtype of `loc` and `scale` must be float.
+        If `loc`, `scale` are passed in as numpy.ndarray or tensor, they have to have
+        the same dtype otherwise an error will be raised.
+
+    Raises:
+        TypeError: When the dtype of `loc` or `scale` is not float,
+                   and when the dtype of `loc` and `scale` is not same.
 
     Examples:
-        >>> # To initialize a GumbelCDF bijector of loc 0.0, and scale 1.0.
+        >>> import mindspore
+        >>> import mindspore.nn as nn
         >>> import mindspore.nn.probability.bijector as msb
-        >>> gum = msb.GumbelCDF(0.0, 1.0)
+        >>> from mindspore import Tensor
         >>>
-        >>> # To use GumbelCDF bijector in a network.
-        >>> class net(Cell):
-        >>>     def __init__(self):
-        >>>         super(net, self).__init__():
-        >>>         self.gum = msb.GumbelCDF(0.0, 1.0)
-        >>>
-        >>>     def construct(self, value):
-        >>>         # Similar calls can be made to other functions
-        >>>         # by replacing 'forward' by the name of the function.
-        >>>         ans1 = self.gum.forward(value)
-        >>>         ans2 = self.gum.inverse(value)
-        >>>         ans3 = self.gum.forward_log_jacobian(value)
-        >>>         ans4 = self.gum.inverse_log_jacobian(value)
+        >>> # To initialize a GumbelCDF bijector of loc 1.0, and scale 2.0.
+        >>> gumbel_cdf = msb.GumbelCDF(1.0, 2.0)
+        >>> # To use a ScalarAffine bijector in a network.
+        >>> x = Tensor([1, 2, 3], dtype=mindspore.float32)
+        >>> y = Tensor([0.1, 0.2, 0.3], dtype=mindspore.float32)
+        >>> ans1 = gumbel_cdf.forward(x)
+        >>> print(ans1.shape)
+        (3,)
+        >>> ans2 = gumbel_cdf.inverse(y)
+        >>> print(ans2.shape)
+        (3,)
+        >>> ans3 = gumbel_cdf.forward_log_jacobian(x)
+        >>> print(ans3.shape)
+        (3,)
+        >>> ans4 = gumbel_cdf.inverse_log_jacobian(y)
+        >>> print(ans4.shape)
+        (3,)
     """
 
     def __init__(self,
                  loc=0.0,
                  scale=1.0,
-                 dtype=mstype.float32,
                  name='GumbelCDF'):
         """
         Constructor of GumbelCDF Bijector.
         """
         param = dict(locals())
-        valid_dtype = mstype.float_type + mstype.int_type + mstype.uint_type
-        Validator.check_type_name("dtype", dtype, valid_dtype, type(self).__name__)
-        parameter_type = set_param_type({'loc': loc, "scale": scale}, dtype)
-        super(GumbelCDF, self).__init__(name=name, dtype=dtype, param=param)
+        param['param_dict'] = {'loc': loc, 'scale': scale}
+        super(GumbelCDF, self).__init__(name=name, param=param)
 
-        self._parameter_type = parameter_type
         self._loc = self._add_parameter(loc, 'loc')
         self._scale = self._add_parameter(scale, 'scale')
         check_greater_zero(self._scale, "scale")
-        self._event_shape = self._calc_event_shape()
+
 
         self.cast = P.Cast()
         self.exp = exp_generic
@@ -91,38 +100,34 @@ class GumbelCDF(Bijector):
     def scale(self):
         return self._scale
 
-    @property
-    def event_shape(self):
-        return self._event_shape
-
-    @property
-    def parameter_type(self):
-        return self._parameter_type
-
     def extend_repr(self):
-        return f'loc = {self.loc}, scale = {self.scale}'
-
-    def shape_mapping(self, shape):
-        return shape
+        if self.is_scalar_batch:
+            str_info = f'loc = {self.loc}, scale = {self.scale}'
+        else:
+            str_info = f'batch_shape = {self.batch_shape}'
+        return str_info
 
     def _forward(self, x):
-        x = self._check_value(x, 'value')
-        x = self.cast(x, self.parameter_type)
-        z = (x - self.loc) / self.scale
+        x = self._check_value_dtype(x)
+        loc_local = self.cast_param_by_value(x, self.loc)
+        scale_local = self.cast_param_by_value(x, self.scale)
+        z = (x - loc_local) / scale_local
         return self.exp(-self.exp(-z))
 
     def _inverse(self, y):
-        y = self._check_value(y, 'value')
-        y = self.cast(y, self.parameter_type)
-        return self.loc - self.scale * self.log(-self.log(y))
+        y = self._check_value_dtype(y)
+        loc_local = self.cast_param_by_value(y, self.loc)
+        scale_local = self.cast_param_by_value(y, self.scale)
+        return loc_local - scale_local * self.log(-self.log(y))
 
     def _forward_log_jacobian(self, x):
-        x = self._check_value(x, 'value')
-        x = self.cast(x, self.parameter_type)
-        z = (x - self.loc) / self.scale
-        return -z - self.exp(-z) - self.log(self.scale)
+        x = self._check_value_dtype(x)
+        loc_local = self.cast_param_by_value(x, self.loc)
+        scale_local = self.cast_param_by_value(x, self.scale)
+        z = (x - loc_local) / scale_local
+        return -z - self.exp(-z) - self.log(scale_local)
 
     def _inverse_log_jacobian(self, y):
-        y = self._check_value(y, 'value')
-        y = self.cast(y, self.parameter_type)
-        return self.log(self.scale / (-1. * y * self.log(y)))
+        y = self._check_value_dtype(y)
+        scale_local = self.cast_param_by_value(y, self.scale)
+        return self.log(scale_local / (-1. * y * self.log(y)))

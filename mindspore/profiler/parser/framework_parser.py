@@ -174,7 +174,6 @@ class FrameworkParser:
         device_id (str): The device ID.
         output_path (str): The directory of the parsed file. Default: `./`.
     """
-    _raw_data_dir = '/var/log/npu/profiling'
     _regex_framework = r'Framework\.(?P<data_type>.+)\.(?P<device_id>\d).+'
     _regex_framework_in_data = r'Framework\.(?P<data_type>.+)\.' \
                                r'(?P<device_id>\d)\.(?P<profiling_id>[a-zA-Z0-9]+).+'
@@ -193,6 +192,7 @@ class FrameworkParser:
     _task_id_threshold = 25000
 
     def __init__(self, profiling_id, device_id, output_path='./'):
+        self._raw_data_dir = output_path
         self._profiling_path = self._get_raw_profiling_path(profiling_id)
         self._backend_type = None
         self._framework_path = {'graph': [], 'task': [], 'point': []}
@@ -340,11 +340,11 @@ class FrameworkParser:
 
             data_type = attrs.get('data_type')
             data_type = data_type.replace("host.", "")
-            if data_type.startswith('vm.'):
+            if data_type.startswith('vm_'):
                 if self._backend_type and self._backend_type != 'vm':
                     raise ProfilerRawFileException('Backend type is inconsistent.')
                 self._backend_type = 'vm'
-                data_type = data_type.split('.')[1]
+                _, data_type = data_type.split('_', 1)
             else:
                 if self._backend_type and self._backend_type != 'ge':
                     raise ProfilerRawFileException('Backend type is inconsistent.')
@@ -398,11 +398,11 @@ class FrameworkParser:
 
             data_type = attrs.get('data_type')
             data_type = data_type.replace("host.", "")
-            if data_type.startswith('vm.'):
+            if data_type.startswith('vm_'):
                 if self._backend_type and self._backend_type != 'vm':
                     raise ProfilerRawFileException('Backend type is inconsistent.')
                 self._backend_type = 'vm'
-                data_type = data_type.split('.')[1]
+                _, data_type = data_type.split('_', 1)
             else:
                 if self._backend_type and self._backend_type != 'ge':
                     raise ProfilerRawFileException('Backend type is inconsistent.')

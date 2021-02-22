@@ -25,7 +25,6 @@ from mindspore.ops import operations as P
 from mindspore.ops import composite as C
 from mindspore.common.tensor import Tensor
 from mindspore.common.parameter import Parameter
-from .fused_layer_norm import FusedLayerNorm
 
 
 class BertConfig:
@@ -128,7 +127,7 @@ class EmbeddingLookup(nn.Cell):
                                          name='embedding_table')
         self.expand = P.ExpandDims()
         self.shape_flat = (-1,)
-        self.gather = P.GatherV2()
+        self.gather = P.Gather()
         self.one_hot = P.OneHot()
         self.on_value = Tensor(1.0, mstype.float32)
         self.off_value = Tensor(0.0, mstype.float32)
@@ -195,7 +194,7 @@ class EmbeddingPostprocessor(nn.Cell):
         self.shape = tuple(embedding_shape)
         self.layernorm = nn.LayerNorm((embedding_size,))
         self.dropout = nn.Dropout(1 - dropout_prob)
-        self.gather = P.GatherV2()
+        self.gather = P.Gather()
         self.use_relative_positions = use_relative_positions
         self.slice = P.StridedSlice()
         self.full_position_embeddings = Parameter(initializer
@@ -250,12 +249,8 @@ class BertOutput(nn.Cell):
                               weight_init=TruncatedNormal(initializer_range)).to_float(compute_type)
         self.dropout = nn.Dropout(1 - dropout_prob)
         self.dropout_prob = dropout_prob
-        self.add = P.TensorAdd()
-        if compute_type == mstype.float16:
-            self.layernorm = FusedLayerNorm((out_channels,),
-                                            use_batch_norm=enable_fused_layernorm).to_float(compute_type)
-        else:
-            self.layernorm = nn.LayerNorm((out_channels,)).to_float(compute_type)
+        self.add = P.Add()
+        self.layernorm = nn.LayerNorm((out_channels,)).to_float(compute_type)
         self.cast = P.Cast()
 
     def construct(self, hidden_status, input_tensor):
@@ -338,7 +333,7 @@ class RelaPosEmbeddingsGenerator(nn.Cell):
         self.reshape = P.Reshape()
         self.one_hot = nn.OneHot(depth=self.vocab_size)
         self.shape = P.Shape()
-        self.gather = P.GatherV2()  # index_select
+        self.gather = P.Gather()  # index_select
         self.matmul = P.BatchMatMul()
 
     def construct(self):
@@ -479,7 +474,7 @@ class BertAttention(nn.Cell):
         if self.has_attention_mask:
             self.expand_dims = P.ExpandDims()
             self.sub = P.Sub()
-            self.add = P.TensorAdd()
+            self.add = P.Add()
             self.cast = P.Cast()
             self.get_dtype = P.DType()
         if do_return_2d_tensor:
@@ -817,13 +812,13 @@ class CreateAttentionMaskFromInputMask(nn.Cell):
 
         if not self.input_mask_from_dataset:
             self.input_mask = initializer(
-                "ones", [config.batch_size, config.seq_length], mstype.int32).to_tensor()
+                "ones", [config.batch_size, config.seq_length], mstype.int32).init_data()
 
         self.cast = P.Cast()
         self.reshape = P.Reshape()
         self.shape = (config.batch_size, 1, config.seq_length)
         self.broadcast_ones = initializer(
-            "ones", [config.batch_size, config.seq_length, 1], mstype.float32).to_tensor()
+            "ones", [config.batch_size, config.seq_length, 1], mstype.float32).init_data()
         self.batch_matmul = P.BatchMatMul()
 
     def construct(self, input_mask):
@@ -869,7 +864,7 @@ class BertModel(nn.Cell):
 
         if not self.token_type_ids_from_dataset:
             self.token_type_ids = initializer(
-                "zeros", [self.batch_size, self.seq_length], mstype.int32).to_tensor()
+                "zeros", [self.batch_size, self.seq_length], mstype.int32).init_data()
 
         self.bert_embedding_lookup = EmbeddingLookup(
             vocab_size=config.vocab_size,

@@ -29,7 +29,7 @@ from mindspore.common import dtype as mstype
 
 from src.config import nasnet_a_mobile_config_gpu as cfg
 from src.dataset import create_dataset
-from src.nasnet_a_mobile import NASNetAMobileWithLoss, NASNetAMobileTrainOneStepWithClipGradient
+from src.nasnet_a_mobile import NASNetAMobileWithLoss
 from src.lr_generator import get_lr
 
 
@@ -45,16 +45,16 @@ if __name__ == '__main__':
     parser.add_argument('--platform', type=str, default='GPU', choices=('Ascend', 'GPU'), help='run platform')
     args_opt = parser.parse_args()
 
+    if args_opt.platform != "GPU":
+        raise ValueError("Only supported GPU training.")
+
     context.set_context(mode=context.GRAPH_MODE, device_target=args_opt.platform, save_graphs=False)
     if os.getenv('DEVICE_ID', "not_set").isdigit():
         context.set_context(device_id=int(os.getenv('DEVICE_ID')))
 
     # init distributed
     if args_opt.is_distributed:
-        if args_opt.platform == "Ascend":
-            init()
-        else:
-            init("nccl")
+        init("nccl")
         cfg.rank = get_rank()
         cfg.group_size = get_group_size()
         parallel_mode = ParallelMode.DATA_PARALLEL
@@ -104,9 +104,13 @@ if __name__ == '__main__':
     optimizer = RMSProp(group_params, lr, decay=cfg.rmsprop_decay, weight_decay=cfg.weight_decay,
                         momentum=cfg.momentum, epsilon=cfg.opt_eps, loss_scale=cfg.loss_scale)
 
-    net_with_grads = NASNetAMobileTrainOneStepWithClipGradient(net_with_loss, optimizer)
-    net_with_grads.set_train()
-    model = Model(net_with_grads)
+    # net_with_grads = NASNetAMobileTrainOneStepWithClipGradient(net_with_loss, optimizer)
+    # net_with_grads.set_train()
+    # model = Model(net_with_grads)
+
+    # high performance
+    net_with_loss.set_train()
+    model = Model(net_with_loss, optimizer=optimizer)
 
     print("============== Starting Training ==============")
     loss_cb = LossMonitor(per_print_times=batches_per_epoch)

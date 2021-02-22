@@ -32,13 +32,14 @@ class DeviceQueueTracing : public Tracing {
   ~DeviceQueueTracing() override = default;
 
   // Record tracing data
-  // @return Status - The error code return
-  Status Record(const int32_t type, const int32_t extra_info, const int32_t batch_num, const int32_t value);
+  // @return Status The status code returned
+  Status Record(const int32_t type, const int32_t extra_info, const int32_t batch_num, const int32_t value,
+                const uint64_t time_stamp);
 
   std::string Name() const override { return kDeviceQueueTracingName; };
 
   // Save tracing data to file
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status SaveToFile() override;
 
   Status Init(const std::string &dir_path, const std::string &device_id) override;

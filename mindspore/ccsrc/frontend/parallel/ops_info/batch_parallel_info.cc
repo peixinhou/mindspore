@@ -32,11 +32,6 @@ Status BatchParallelInfo::CheckStrategy(const StrategyPtr &strategy) {
     return FAILED;
   }
 
-  int32_t stage = strategy->GetInputStage();
-  CheckGlobalDeviceManager();
-  int32_t dev_num = SizeToInt(g_device_manager->GetDeviceListByStageId(stage).size());
-  dev_num_ = dev_num;
-
   size_t strategy_size = strategy->GetInputNumber();
   Strategys stra = strategy->GetInputDim();
   for (size_t i = 0; i < strategy_size; ++i) {
@@ -46,7 +41,7 @@ Status BatchParallelInfo::CheckStrategy(const StrategyPtr &strategy) {
     for (size_t j = 0; j < strategy_len; ++j) {
       int64_t strategy_value = sub_strategy.at(j);
       if (strategy_value > 1) {
-        if (flag || strategy_value != dev_num_) {
+        if (flag || strategy_value != stage_device_size_) {
           MS_LOG(ERROR) << name_ << " : It is not a valid data parallel strategy.";
           return FAILED;
         }
@@ -58,37 +53,21 @@ Status BatchParallelInfo::CheckStrategy(const StrategyPtr &strategy) {
 }
 
 Status BatchParallelInfo::InferDevMatrixShape() {
-  dev_matrix_shape_.push_back(dev_num_);
-  return SUCCESS;
-}
-
-Status BatchParallelInfo::InferMirrorOps() {
-  mirror_ops_.clear();
-  if (g_device_manager->DeviceNum() == 1) {
-    MS_LOG(INFO) << name_ << " : The device num is 1, no need to create mirror ops.";
-    return SUCCESS;
-  }
-
-  MS_LOG(INFO) << name_ << " : Batch parallel input number " << strategy_->GetInputNumber();
-  for (size_t i = 0; i < input_value_.size(); i++) {
-    MS_EXCEPTION_IF_NULL(g_device_manager);
-    OperatorVector op_vec = CreateMirrorOps(g_device_manager->world_group(), g_device_manager->DeviceNum());
-    mirror_ops_.push_back(op_vec);
-  }
+  dev_matrix_shape_.push_back(stage_device_size_);
   return SUCCESS;
 }
 
 Status BatchParallelInfo::InferForwardCommunication() { return SUCCESS; }
 
 Status BatchParallelInfo::InferTensorMap() {
-  if (strategy_->GetInputDim()[0][0] != dev_num_) {
+  if (strategy_->GetInputDim()[0][0] != stage_device_size_) {
     MS_LOG(ERROR) << name_ << " : It is not a valid data parallel strategy.";
     return FAILED;
   }
   for (size_t i = 0; i < inputs_shape_.size(); i++) {
     Shape tensor_map_index;
     for (size_t j = 0; j < inputs_shape_[i].size(); ++j) {
-      if (strategy_->GetInputDim()[i][j] == dev_num_ && j == 0) {
+      if (strategy_->GetInputDim()[i][j] == stage_device_size_ && j == 0) {
         tensor_map_index.push_back(0);
       } else {
         tensor_map_index.push_back(MAP_NONE);
@@ -117,7 +96,7 @@ Strategys BatchParallelInfo::GetOutputsStrategy() {
     Dimensions strategy;
     for (size_t j = 0; j < outputs_shape_[i].size(); ++j) {
       if (i == 0 && j == 0) {
-        strategy.push_back(dev_num_);
+        strategy.push_back(stage_device_size_);
       } else {
         strategy.push_back(1);
       }
@@ -175,15 +154,13 @@ Status BatchParallelInfo::SetCostUnderStrategy(const StrategyPtr &strategy) {
   return SetCostUnderStrategyBase(strategy);
 }
 
-Status BatchParallelInfo::GenerateStrategies(int32_t stage_id) {
-  CheckGlobalDeviceManager();
-  size_t total_dev_num = g_device_manager->GetDeviceListByStageId(stage_id).size();
+Status BatchParallelInfo::GenerateStrategies(int64_t stage_id) {
   StrategyPtr sp;
   Strategys strategy;
   for (size_t i = 0; i < inputs_shape_.size(); i++) {
     Shape temp(inputs_shape_[i].size(), 1);
     if (split_flag_list_[i]) {
-      temp[0] = SizeToInt(total_dev_num);
+      temp[0] = stage_device_size_;
     }
     strategy.push_back(temp);
   }

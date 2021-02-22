@@ -15,7 +15,7 @@
  */
 
 #include "nnacl/int8/common_func_int8.h"
-#include "nnacl/quantization/fixed_point.h"
+#include "nnacl/int8/fixed_point.h"
 
 void PostConvFuncCommInt8(const int32_t *in, int8_t *out, const int32_t *bias, size_t oc, size_t plane,
                           size_t out_oc_stride, size_t in_plane_stride, int32_t multiplier, int32_t mini, int32_t maxi,
@@ -56,3 +56,19 @@ void PostFuncInt8C4(const int32_t *in, const int32_t *bias, int8_t *out, size_t 
 #endif
   return;
 }
+
+#ifdef ENABLE_ARM
+int16x8_t LoadAndAddOffset(int8_t *data, int index, int offset) {
+  int8x8_t input_s8 = vld1_s8(data + index);
+  int16x8_t input_s16 = vmovl_s8(input_s8);
+  return vaddq_s16(input_s16, vdupq_n_s16(offset));
+}
+
+int32x4_t ClacScaledInput(int32x4_t input, int32x4_t left_shift_result_vec, int32x4_t input_multiplier_vec,
+                          int32x4_t right_shift_vec) {
+  int32x4_t shifted_input = vmulq_s32(input, left_shift_result_vec);
+  shifted_input = vqrdmulhq_s32(shifted_input, input_multiplier_vec);
+  const int32x4_t fixup = vshrq_n_s32(vandq_s32(shifted_input, right_shift_vec), 31);
+  return vrshlq_s32(vqaddq_s32(shifted_input, fixup), right_shift_vec);
+}
+#endif

@@ -1,5 +1,5 @@
 /**
- * Copyright 2020 Huawei Technologies Co., Ltd
+ * Copyright 2020-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@
 
 #include "minddata/dataset/engine/execution_tree.h"
 #include "minddata/dataset/engine/ir/datasetops/dataset_node.h"
+#include "minddata/dataset/engine/perf/dataset_iterator_tracing.h"
 
 namespace mindspore {
 namespace dataset {
@@ -32,40 +33,80 @@ class DatasetNode;
 
 class TreeAdapter {
  public:
-  TreeAdapter() = default;
+  // this flag is used to indicate the purpose of the creation of this tree adapter (type of the tree_consumer).
+  // Currently there are 3 types of consumer, Iterator, Getter and TDT/Vocab/Save ...
+  // To avoid premature optimization, the last type (TDT/Vocab/Save) is regarded as Iterator for now.
+  enum UsageFlag { kDeIterator = 0, kDeGetter = 1 };
+
+  explicit TreeAdapter(UsageFlag flag = kDeIterator);
 
   ~TreeAdapter() = default;
 
-  // This will construct an ExeTree from a Dataset root and Prepare() the ExeTree
-  // This function is only meant to be called once and needs to be called before GetNext
-  // ExeTree will be launched when the first GetNext is called
-  Status BuildAndPrepare(std::shared_ptr<DatasetNode> root, int32_t num_epoch = -1);
+  // This function performs syntax checking, semantics checking, optimizes, and then builds
+  // the Execution tree.
+  Status Compile(std::shared_ptr<DatasetNode> root_ir, int32_t num_epochs = -1);
+
+  // Return the root node of the IR after cloned from the parsed IR tree
+  std::shared_ptr<DatasetNode> RootIRNode() const { return root_ir_; }
 
   // This is the main method TreeConsumer uses to interact with TreeAdapter
   // 1. GetNext will Launch() the ExeTree on its first call by iterator (tree is already prepared)
   // 2. GetNext will return empty row when eoe/eof is obtained
   Status GetNext(TensorRow *);
 
-  // This function will return the root of the execution tree.
-  std::weak_ptr<DatasetOp> GetRoot() { return tree_ != nullptr ? tree_->root() : nullptr; }
+  // unique_ptr overloads operator bool(), will return false if it doesn't manage an object
+  std::weak_ptr<DatasetOp> GetRoot() { return tree_ ? tree_->root() : nullptr; }
 
   // This function will return the column_name_map once BuildAndPrepare() is called
   std::unordered_map<std::string, int32_t> GetColumnNameMap() const { return column_name_map_; }
 
   // This function returns the TaskGroup associated with ExeTree. This is needed by DeviceQueueConsumer
   // to be able to launch a thread. BuildAndPrepare needs to be called before this function
-  TaskGroup *AllTasks() const { return tree_ != nullptr ? tree_->AllTasks() : nullptr; }
+  TaskGroup *const AllTasks() const { return tree_ ? tree_->AllTasks() : nullptr; }
 
   Status Launch() const;
 
+  // Set optional optimization pass
+  void SetOptimize(bool value) { optimize_ = value; }
+
+  // Optional optimizations status
+  bool OptimizationEnabled() const { return optimize_; }
+
  private:
-  // This RECURSIVE function converts IR nodes into DatasetOp in ExecutionTree. IR could build a vector of ops. In
-  // such case, the first node is returned. Op is added as child when the current function returns.
-  Status DFSBuildTree(std::shared_ptr<DatasetNode> ir, std::shared_ptr<DatasetOp> *op);
+  // Run the mandatory pass checking the syntax and semantics of the IR tree
+  Status PrePass(std::shared_ptr<DatasetNode> ir);
+
+  // Run the optional optimization pass on the IR tree
+  Status Optimize(std::shared_ptr<DatasetNode> ir);
+
+  // Run the mandatory pass augmenting the IR tree
+  Status PostPass(std::shared_ptr<DatasetNode> ir);
+
+  // Build an Execution tree
+  Status Build(std::shared_ptr<DatasetNode> root_ir);
+
+  // This RECURSIVE function walks the (optimized) IR tree in DFS to build its corresponding Execution tree.
+  Status BuildExecutionTreeRecur(std::shared_ptr<DatasetNode> ir, std::shared_ptr<DatasetOp> *op);
 
   std::unique_ptr<DataBuffer> cur_db_;
   std::unordered_map<std::string, int32_t> column_name_map_;
-  std::unique_ptr<ExecutionTree> tree_;
+  std::shared_ptr<DatasetNode> root_ir_;
+  std::unique_ptr<ExecutionTree> tree_;              // current connector capacity of root op, used for profiling
+  bool optimize_;                                    // Flag to enable optional optimization pass
+  std::shared_ptr<DatasetIteratorTracing> tracing_;  // trace profiling data
+  int32_t cur_batch_num_;                            // current batch number, used for profiling
+  int32_t cur_connector_size_;                       // current connector size of root op, used for profiling
+  int32_t cur_connector_capacity_;                   // current connector capacity of root op, used for profiling
+  UsageFlag usage_;                                  // usage of this tree adapter (type of consumer)
+  // State flags for the lifecycle of the tree
+  enum CompileState {
+    kCompileStateInit = 0,      // The freshly initialized state
+    kCompileStateIRGraphBuilt,  // User code has been parsed and its IR graph built
+    kCompileStateIRTreeCloned,  // IR tree has been cloned from the IR graph
+    kCompileStateOptimized,     // IR tree has been optimized
+    kCompileStateReady          // Execution tree is generated from the optimized IR
+  };
+  CompileState tree_state_;
 };
 }  // namespace dataset
 }  // namespace mindspore

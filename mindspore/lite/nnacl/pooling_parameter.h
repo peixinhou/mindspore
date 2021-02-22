@@ -17,7 +17,6 @@
 #define MINDSPORE_LITE_NNACL_POOLING_PARAMETER_H_
 
 #include "nnacl/op_base.h"
-#include "nnacl/quantization/quantize.h"
 
 typedef enum PoolMode { PoolMode_No, PoolMode_MaxPool, PoolMode_AvgPool } PoolMode;
 
@@ -28,6 +27,7 @@ typedef struct PoolingParameter {
   OpParameter op_parameter_;
   PoolMode pool_mode_;
   RoundMode round_mode_;
+  PadMode pad_mode_;
   ActType act_type_;
   int avg_mode_;
   bool global_;

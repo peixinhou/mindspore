@@ -25,12 +25,68 @@
 #include "backend/session/anf_runtime_algorithm.h"
 #include "runtime/device/kernel_adjust.h"
 #include "backend/optimizer/common/helper.h"
+#include "backend/kernel_compiler/oplib/oplib.h"
 #include "utils/utils.h"
 
 namespace mindspore {
 namespace device {
 namespace ascend {
-const uint32_t kHcomMaxTask = 5;
+namespace {
+CNodePtr GetHcomAndOverflowMarker(const NotNull<KernelGraphPtr> &graph_ptr, vector<CNodePtr> *hcom_nodes) {
+  auto cnode_ptr_list = graph_ptr->execution_order();
+  CNodePtr overflow_marker = nullptr;
+  std::string kNPUGetFloatStatusOpName = "NPUGetFloatStatus";
+  for (size_t i = 0; i < cnode_ptr_list.size(); ++i) {
+    auto cur_cnode_ptr = cnode_ptr_list[i];
+    MS_EXCEPTION_IF_NULL(cur_cnode_ptr);
+    if (AnfAlgo::GetCNodeName(cur_cnode_ptr) == kNPUGetFloatStatusOpName) {
+      overflow_marker = cur_cnode_ptr;
+    } else if (AnfAlgo::GetKernelType(cur_cnode_ptr) == HCCL_KERNEL) {
+      hcom_nodes->emplace_back(cur_cnode_ptr);
+    } else if (i > 0 && AnfAlgo::GetCNodeName(cnode_ptr_list[i - 1]) == kAtomicAddrCleanOpName) {
+      auto graph_id = AnfAlgo::GetGraphId(cur_cnode_ptr.get());
+      AnfAlgo::SetGraphId(graph_id, cnode_ptr_list[i - 1].get());
+    }
+  }
+  return overflow_marker;
+}
+
+bool HasRefNodes(const vector<CNodePtr> &moved_backward_cnodes) {
+  for (auto &cnode : moved_backward_cnodes) {
+    std::string op_name = AnfAlgo::GetCNodeName(cnode);
+    auto op_info = mindspore::kernel::OpLib::FindOp(op_name, kernel::kTBE);
+    if (op_info != nullptr && op_info->is_ref()) {
+      MS_LOG(INFO) << "Find RefNode: " << op_name << ", full name: " << cnode->fullname_with_scope();
+      return true;
+    }
+  }
+  return false;
+}
+
+StreamActiveKind GetStreamKind(uint32_t cur_stream_id, uint32_t pre_stream_id, uint32_t next_stream_id) {
+  // pre_stream_id equal to UINT32_MAX means no node active current StreamActive
+  // next_stream_id equal to UINT32_MAX means current StreamActive active no node
+  if (pre_stream_id == UINT32_MAX || next_stream_id == UINT32_MAX) {
+    return kInvalid;
+  }
+
+  if (cur_stream_id == pre_stream_id && cur_stream_id == next_stream_id) {
+    return kMiddle;
+  }
+
+  if (cur_stream_id == pre_stream_id) {
+    return kTail;
+  }
+
+  if (cur_stream_id == next_stream_id) {
+    return kHead;
+  }
+
+  return kInvalid;
+}
+}  // namespace
+
+const uint32_t kHcomMaxTask = 4;
 const uint32_t kCommonMaxTask = 350;
 
 void AscendStreamAssign::AssignStream(const NotNull<KernelGraphPtr> &graph_ptr) {
@@ -38,6 +94,7 @@ void AscendStreamAssign::AssignStream(const NotNull<KernelGraphPtr> &graph_ptr) 
     Reset();
     SetLoopSink();
     ReorderIndependentOrders(graph_ptr);
+    TrailingTimeOptimizationByReorder(graph_ptr);
 
     AssignAllNodesStream(graph_ptr);
     UpdateAtomicAddrCleanStreamId(graph_ptr);
@@ -104,7 +161,7 @@ void AscendStreamAssign::ReorderIndependentOrders(const NotNull<KernelGraphPtr> 
         continue;
       }
 
-      auto res = FindTargetOp(begin, end, cur_independent);
+      auto res = FindTargetOp(begin, end, cur_independent, false);
       if (res != end) {
         flag = true;
         exe_orders.emplace_back(cur_independent);
@@ -126,6 +183,263 @@ void AscendStreamAssign::ReorderIndependentOrders(const NotNull<KernelGraphPtr> 
   }
 
   graph_ptr->set_execution_order(exe_orders);
+}
+
+void AscendStreamAssign::CheckScenario(const NotNull<KernelGraphPtr> &graph_ptr,
+                                       vector<CNodePtr> *last_grad_and_status) {
+  auto cnode_ptr_list = graph_ptr->execution_order();
+  vector<CNodePtr> hcom_nodes;
+  auto overflow_marker = GetHcomAndOverflowMarker(graph_ptr, &hcom_nodes);
+  if (hcom_nodes.size() < 2 || overflow_marker == nullptr) {
+    MS_LOG(INFO) << "Current model isn't in distribute or mix-precision mode, no optimization needed";
+    last_grad_and_status->clear();
+    return;
+  }
+
+  auto overflow_marker_pos = find(cnode_ptr_list.begin(), cnode_ptr_list.end(), overflow_marker);
+  auto last_hcom_ptr = hcom_nodes[hcom_nodes.size() - 1];
+  auto last_hcom_pos = find(cnode_ptr_list.begin(), cnode_ptr_list.end(), last_hcom_ptr);
+  auto last_grad_hcom_ptr = hcom_nodes[hcom_nodes.size() - 2];
+  auto last_grad_hcom_pos = find(cnode_ptr_list.begin(), cnode_ptr_list.end(), last_grad_hcom_ptr);
+  if (last_grad_hcom_pos > overflow_marker_pos || last_hcom_pos < overflow_marker_pos) {
+    MS_LOG(INFO) << "Grads average done after overflow judgement or status aren't allgathered, no optimization needed";
+    last_grad_and_status->clear();
+    return;
+  }
+
+  auto last_inputs = GetLastInputCnode(graph_ptr, last_grad_hcom_ptr);
+  if (last_inputs.empty() || last_inputs.size() > 1 || IsHcom(last_inputs[0])) {
+    MS_LOG(INFO) << "Inputs of last gradients allreduce is empty or include other allreduce, no optimization needed";
+    last_grad_and_status->clear();
+    return;
+  }
+  auto last_grad_ptr = last_inputs[0];
+  MS_LOG(DEBUG) << "Last Hcom: " << last_grad_hcom_ptr->fullname_with_scope()
+                << "; last input: " << last_grad_ptr->fullname_with_scope();
+  auto last_grad_hcom_graph_id = AnfAlgo::GetGraphId(last_grad_hcom_ptr.get());
+  auto last_grad_graph_id = AnfAlgo::GetGraphId(last_grad_ptr.get());
+  auto overflow_marker_graph_id = AnfAlgo::GetGraphId(overflow_marker.get());
+  if (last_grad_graph_id != last_grad_hcom_graph_id || last_grad_graph_id != overflow_marker_graph_id) {
+    MS_LOG(INFO) << "The grads and grad_hcom or overflow marker were not on the same subgraph, no optimization needed";
+    last_grad_and_status->clear();
+    return;
+  }
+
+  auto label_switch_pos = find_if(last_grad_hcom_pos, cnode_ptr_list.end(),
+                                  [](CNodePtr &node) -> bool { return AnfAlgo::GetCNodeName(node) == "LabelSwitch"; });
+  if (label_switch_pos == cnode_ptr_list.end()) {
+    MS_LOG(INFO) << "No branches after getting overflow status, no optimization needed";
+    last_grad_and_status->clear();
+    return;
+  }
+  last_grad_and_status->emplace_back(last_grad_ptr);
+  last_grad_and_status->emplace_back(overflow_marker);
+  return;
+}
+
+CNodePtr AscendStreamAssign::GetCNodesNeededMoved(vector<CNodePtr> *moved_backward_cnodes,
+                                                  vector<CNodePtr> *moved_forward_cnodes,
+                                                  const vector<CNodePtr> &last_grad_and_status,
+                                                  const NotNull<KernelGraphPtr> &graph_ptr) {
+  auto cnode_ptr_list = graph_ptr->execution_order();
+  if (last_grad_and_status.size() != 2) {
+    return nullptr;
+  }
+  auto last_grad_ptr = last_grad_and_status[0];
+  auto float_status_ptr = last_grad_and_status[1];
+  auto last_grad_pos = find(cnode_ptr_list.begin(), cnode_ptr_list.end(), last_grad_ptr);
+  auto float_status_pos = find(cnode_ptr_list.begin(), cnode_ptr_list.end(), float_status_ptr);
+  if (last_grad_pos == cnode_ptr_list.end() || float_status_pos == cnode_ptr_list.end()) {
+    return nullptr;
+  }
+  auto graph_id = AnfAlgo::GetGraphId(last_grad_ptr.get());
+  moved_backward_cnodes->insert(moved_backward_cnodes->end(), last_grad_pos + 1, float_status_pos);
+
+  auto it = float_status_pos;
+  while (AnfAlgo::GetGraphId((*it).get()) == graph_id && it < cnode_ptr_list.end()) {
+    if (AnfAlgo::GetCNodeName(*it) == kAtomicAddrCleanOpName) {
+      it++;
+      continue;
+    }
+    auto inputs = GetInputKernels(*it);
+    bool is_independent = true;
+    for (auto &input : inputs) {
+      if (find(moved_backward_cnodes->begin(), moved_backward_cnodes->end(), input) != moved_backward_cnodes->end()) {
+        is_independent = false;
+        break;
+      }
+    }
+    if (is_independent) {
+      if (AnfAlgo::GetCNodeName(*(it - 1)) == kAtomicAddrCleanOpName) {
+        moved_forward_cnodes->emplace_back(*(it - 1));
+      }
+      moved_forward_cnodes->emplace_back(*it);
+    } else {
+      if (AnfAlgo::GetCNodeName(*(it - 1)) == kAtomicAddrCleanOpName) {
+        moved_backward_cnodes->emplace_back(*(it - 1));
+      }
+      moved_backward_cnodes->emplace_back(*it);
+    }
+    it++;
+  }
+
+  size_t total_moved_size = it - last_grad_pos - 1;
+  if (HasRefNodes(*moved_backward_cnodes) ||
+      moved_backward_cnodes->size() + moved_forward_cnodes->size() != total_moved_size) {
+    MS_LOG(INFO) << "Ref node was found or invalid number of moved nodes, give up optimization";
+    return nullptr;
+  }
+  return GetTargetOutputNode(*moved_backward_cnodes, *it, graph_ptr);
+}
+
+CNodePtr AscendStreamAssign::GetTargetOutputNode(const vector<CNodePtr> &moved_backward_cnodes,
+                                                 const CNodePtr first_node, const NotNull<KernelGraphPtr> &graph_ptr) {
+  auto cnode_ptr_list = graph_ptr->execution_order();
+  if (moved_backward_cnodes.empty() || !first_node) {
+    return nullptr;
+  }
+  uint32_t subgraph_id = 0;
+  bool get_subgraph_id = false;
+  auto it = find(cnode_ptr_list.begin(), cnode_ptr_list.end(), first_node);
+  CNodePtr first_output_node_ptr = nullptr;
+  while (!get_subgraph_id && it < cnode_ptr_list.end()) {
+    auto inputs = GetInputKernels(*it);
+    for (auto &input : inputs) {
+      if (find(moved_backward_cnodes.begin(), moved_backward_cnodes.end(), input) != moved_backward_cnodes.end()) {
+        get_subgraph_id = true;
+        subgraph_id = AnfAlgo::GetGraphId((*it).get());
+        first_output_node_ptr = *it;
+        break;
+      }
+    }
+    it++;
+  }
+  if (subgraph_id == 0) {
+    MS_LOG(INFO) << "The nodes moved backward were not used by any other nodes, no need moved";
+    return nullptr;
+  }
+
+  for (; it < cnode_ptr_list.end() && AnfAlgo::GetGraphId((*it).get()) != subgraph_id; it++) {
+    auto inputs = GetInputKernels(*it);
+    for (auto &input : inputs) {
+      if (find(moved_backward_cnodes.begin(), moved_backward_cnodes.end(), input) != moved_backward_cnodes.end()) {
+        MS_LOG(INFO) << "The nodes moved backward were used by nodes on different subgraphs, no need moved";
+        return nullptr;
+      }
+    }
+  }
+  return first_output_node_ptr;
+}
+
+bool AscendStreamAssign::FinetuneSubgraphExecOrder(vector<CNodePtr> *cnodes) {
+  MS_EXCEPTION_IF_NULL(cnodes);
+  auto hcom_pos = find_if(cnodes->begin(), cnodes->end(),
+                          [](CNodePtr &node_ptr) -> bool { return AnfAlgo::GetCNodeName(node_ptr) == "AllReduce"; });
+  if (hcom_pos == cnodes->end()) {
+    return false;
+  }
+  CNodePtr hcom_ptr = *hcom_pos;
+
+  vector<CNodePtr> ori_cnodes(cnodes->begin(), cnodes->end());
+  cnodes->clear();
+  vector<CNodePtr> atomic_addr_clean;
+  for (auto iter = ori_cnodes.begin(); iter < ori_cnodes.end(); iter++) {
+    if (AnfAlgo::GetCNodeName(*iter) == kAtomicAddrCleanOpName) {
+      atomic_addr_clean.emplace_back(*iter);
+      continue;
+    }
+    auto last_input_pos = cnodes->end();
+    for (auto &input : GetInputKernels(*iter)) {
+      auto pos = find(cnodes->begin(), cnodes->end(), input);
+      if (pos != cnodes->end()) {
+        last_input_pos = (last_input_pos == cnodes->end() || last_input_pos < pos) ? pos : last_input_pos;
+      }
+    }
+    if (last_input_pos == cnodes->end()) {
+      auto hcom_it = find(cnodes->begin(), cnodes->end(), hcom_ptr);
+      if (hcom_it == cnodes->end() || AnfAlgo::GetCNodeName(*iter) == kLabelGotoOpName ||
+          AnfAlgo::GetCNodeName(*iter) == kLabelSetOpName || AnfAlgo::GetCNodeName(*iter) == kLabelSwitchOpName) {
+        cnodes->emplace_back(*iter);
+      } else {
+        cnodes->insert(hcom_it, *iter);
+      }
+    } else {
+      cnodes->insert(last_input_pos + 1, *iter);
+    }
+  }
+
+  for (auto &node : atomic_addr_clean) {
+    auto first_input_pos = cnodes->end();
+    for (auto &input : GetInputKernels(node)) {
+      auto pos = find(cnodes->begin(), cnodes->end(), input);
+      first_input_pos = (first_input_pos == cnodes->end() || first_input_pos > pos) ? pos : first_input_pos;
+    }
+    if (first_input_pos == cnodes->end()) {
+      return false;
+    } else {
+      cnodes->insert(first_input_pos, node);
+    }
+  }
+  return cnodes->size() == ori_cnodes.size();
+}
+
+// performance optimization for trailing time in distribute mode
+// allreduce of the last batch of gradients and the optimizer can be done parallel
+void AscendStreamAssign::TrailingTimeOptimizationByReorder(const NotNull<KernelGraphPtr> &graph_ptr) {
+  vector<CNodePtr> last_grad_and_status;
+  CheckScenario(graph_ptr, &last_grad_and_status);
+  if (last_grad_and_status.empty()) {
+    MS_LOG(INFO) << "Unsuitable scenario, no optimization needed";
+    return;
+  }
+
+  auto cnode_ptr_list = graph_ptr->execution_order();
+  vector<CNodePtr> moved_forward_cnodes;
+  vector<CNodePtr> moved_backward_cnodes;
+  CNodePtr first_output_ptr =
+    GetCNodesNeededMoved(&moved_backward_cnodes, &moved_forward_cnodes, last_grad_and_status, graph_ptr);
+  if (moved_backward_cnodes.empty() || first_output_ptr == nullptr) {
+    MS_LOG(INFO) << "Unsuitable scenario, no optimization needed";
+    return;
+  }
+
+  uint32_t subgraph_id = AnfAlgo::GetGraphId(first_output_ptr.get());
+  auto last_grad_ptr = last_grad_and_status[0];
+  auto last_grad_pos = find(cnode_ptr_list.begin(), cnode_ptr_list.end(), last_grad_ptr);
+  vector<CNodePtr> cnodes(cnode_ptr_list.begin(), last_grad_pos + 1);
+  cnodes.insert(cnodes.end(), moved_forward_cnodes.begin(), moved_forward_cnodes.end());
+  auto pos = last_grad_pos + moved_forward_cnodes.size() + moved_backward_cnodes.size() + 1;
+  while (pos < cnode_ptr_list.end() && AnfAlgo::GetGraphId((*pos).get()) != subgraph_id) {
+    cnodes.emplace_back(*pos);
+    pos++;
+  }
+
+  vector<CNodePtr> subgraph_cnodes;
+  while (pos < cnode_ptr_list.end() && AnfAlgo::GetGraphId((*pos).get()) == subgraph_id) {
+    if (*pos != first_output_ptr) {
+      subgraph_cnodes.emplace_back(*pos);
+    } else {
+      subgraph_cnodes.insert(subgraph_cnodes.end(), moved_backward_cnodes.begin(), moved_backward_cnodes.end());
+      subgraph_cnodes.emplace_back(*pos);
+    }
+    pos++;
+  }
+
+  if (!FinetuneSubgraphExecOrder(&subgraph_cnodes) || subgraph_cnodes.empty()) {
+    MS_LOG(INFO) << "Finetune subgraph execute order failed, no optimization needed";
+    return;
+  }
+
+  cnodes.insert(cnodes.end(), subgraph_cnodes.begin(), subgraph_cnodes.end());
+  cnodes.insert(cnodes.end(), pos, cnode_ptr_list.end());
+  if (cnodes.size() != cnode_ptr_list.size()) {
+    return;
+  }
+  for (auto &node : subgraph_cnodes) {
+    AnfAlgo::SetGraphId(subgraph_id, node.get());
+  }
+
+  graph_ptr->set_execution_order(cnodes);
 }
 
 // section 2
@@ -196,7 +510,7 @@ void AscendStreamAssign::AssignCommonStreamId(const CNodePtr &cur_cnode_ptr) {
 
 void AscendStreamAssign::AssignHcom(const NotNull<KernelGraphPtr> &graph_ptr) {
   auto cnode_ptr_list = graph_ptr->execution_order();
-  std::map<uint32_t, std::vector<CNodePtr>> graph_nodes_map;
+  std::map<std::string, std::map<uint32_t, std::vector<CNodePtr>>> group_graph_nodes_map;
   for (size_t i = 0; i < cnode_ptr_list.size(); ++i) {
     CNodePtr cur_cnode_ptr = cnode_ptr_list[i];
     // node has been assigned stream before
@@ -205,27 +519,48 @@ void AscendStreamAssign::AssignHcom(const NotNull<KernelGraphPtr> &graph_ptr) {
     }
 
     if (IsHcom(cur_cnode_ptr)) {
+      if (!AnfAlgo::HasNodeAttr(kAttrGroup, cur_cnode_ptr)) {
+        MS_LOG_EXCEPTION << "hcom cnode " << cur_cnode_ptr->DebugString() << " has no group attr";
+      }
+      auto group_name = AnfAlgo::GetNodeAttr<std::string>(cur_cnode_ptr, kAttrGroup);
       auto hcom_graph_id = AnfAlgo::GetGraphId(cur_cnode_ptr.get());
-      auto it = graph_nodes_map.find(hcom_graph_id);
-      if (it == graph_nodes_map.end()) {
+      auto iter = group_graph_nodes_map.find(group_name);
+      if (iter == group_graph_nodes_map.end()) {
+        std::map<uint32_t, std::vector<CNodePtr>> graph_nodes_map;
         graph_nodes_map[hcom_graph_id] = {cur_cnode_ptr};
+        group_graph_nodes_map[group_name] = graph_nodes_map;
       } else {
-        it->second.emplace_back(cur_cnode_ptr);
+        auto &graph_nodes_map = iter->second;
+        auto it = graph_nodes_map.find(hcom_graph_id);
+        if (it == graph_nodes_map.end()) {
+          graph_nodes_map[hcom_graph_id] = {cur_cnode_ptr};
+        } else {
+          it->second.emplace_back(cur_cnode_ptr);
+        }
       }
     }
   }
-  MS_LOG(INFO) << "hcom diff graph id size:" << graph_nodes_map.size();
-  for (const auto &item : graph_nodes_map) {
-    bool new_graph = true;
-    auto graph_id = item.first;
-    hcom_graph_map_[graph_id] = {};
-    for (const auto &hcom_node_ptr : item.second) {
-      auto assigned_stream_id = AssignHcomStreamId(hcom_node_ptr, new_graph);
-      hcom_graph_map_[graph_id].emplace(assigned_stream_id);
-      new_graph = false;
-    }
+
+  MS_LOG(INFO) << "hcom diff group size:" << group_graph_nodes_map.size();
+  for (const auto &item : group_graph_nodes_map) {
+    MS_LOG_INFO << "group id:" << item.first << "; diff graph id size:" << item.second.size();
   }
-  MS_LOG(INFO) << "hcom stream nums : " << hcom_stream_map_.size();
+
+  for (const auto &diff_group : group_graph_nodes_map) {
+    // group id:
+    std::map<uint32_t, std::set<uint32_t>> hcom_graph_map;
+    for (const auto &item : diff_group.second) {
+      bool new_graph = true;
+      auto graph_id = item.first;
+      hcom_graph_map[graph_id] = {};
+      for (const auto &hcom_node_ptr : item.second) {
+        auto assigned_stream_id = AssignHcomStreamId(hcom_node_ptr, new_graph);
+        hcom_graph_map[graph_id].emplace(assigned_stream_id);
+        new_graph = false;
+      }
+    }
+    group_hcom_graph_map_[diff_group.first] = hcom_graph_map;
+  }
 }
 
 uint32_t AscendStreamAssign::AssignHcomStreamId(const CNodePtr &cur_cnode_ptr, bool new_graph) {
@@ -337,7 +672,7 @@ void AscendStreamAssign::InsertStreamActive(const NotNull<KernelGraphPtr> &graph
 }
 
 void AscendStreamAssign::InsertStreamActiveForParallel(const NotNull<KernelGraphPtr> &graph_ptr) {
-  if (hcom_graph_map_.empty() && independent_graph_map_.empty()) {
+  if (group_hcom_graph_map_.empty() && independent_graph_map_.empty()) {
     MS_LOG(INFO) << "Hcom and independent is empty";
     return;
   }
@@ -347,17 +682,30 @@ void AscendStreamAssign::InsertStreamActiveForParallel(const NotNull<KernelGraph
     return;
   }
 
-  MS_LOG(DEBUG) << "Hcom grpah map size:" << hcom_graph_map_.size();
   std::map<uint32_t, std::set<uint32_t>> other_graph;
-  for (const auto &item : hcom_graph_map_) {
-    MS_LOG(INFO) << "Graph id:" << item.first;
-    if (item.first == root_graph_id) {
-      if (loop_sink_) {
-        ActiveRootGraphHcom(graph_ptr, item.second);
+  std::set<uint32_t> hcom_streams;
+  for (const auto &graph_nodes : group_hcom_graph_map_) {
+    for (const auto &item : graph_nodes.second) {
+      MS_LOG(INFO) << "Graph id:" << item.first;
+      if (item.first == root_graph_id) {
+        if (loop_sink_) {
+          hcom_streams.insert(item.second.begin(), item.second.end());
+        }
+      } else {
+        auto it = other_graph.find(item.first);
+        if (it == other_graph.end()) {
+          other_graph[item.first] = item.second;
+        } else {
+          for (const auto &stream : item.second) {
+            it->second.emplace(stream);
+          }
+        }
       }
-    } else {
-      other_graph[item.first] = item.second;
     }
+  }
+
+  if (!hcom_streams.empty()) {
+    ActiveRootGraphHcom(graph_ptr, hcom_streams);
   }
 
   MS_LOG(INFO) << "Independent graph map size:" << independent_graph_map_.size();
@@ -505,7 +853,6 @@ void AscendStreamAssign::ActiveRootGraphIndependent(const NotNull<KernelGraphPtr
   independent_stream_activated_ = true;
   graph_ptr->set_execution_order(update_cnode_list);
 }
-
 void AscendStreamAssign::InsertStreamActiveForCommon(const NotNull<KernelGraphPtr> &graph_ptr) {
   MS_LOG(INFO) << "Start";
   GetProcessedStream(graph_ptr);
@@ -574,7 +921,7 @@ void AscendStreamAssign::InsertStreamActiveForIndependent(const NotNull<KernelGr
   std::vector<CNodePtr> update_cnode_list;
   auto exe_orders = graph_ptr->execution_order();
 
-  // first independent is been actived, active other independent stream
+  // first independent is been activated, active other independent stream
   std::vector<uint32_t> streams;
   std::copy(independent_streams.begin(), independent_streams.end(), std::back_inserter(streams));
   std::sort(streams.begin(), streams.end());
@@ -674,10 +1021,10 @@ void AscendStreamAssign::UpdateStreamSwitch(const NotNull<KernelGraphPtr> &graph
   auto kind = AnfAlgo::GetNodeAttr<uint32_t>(switch_ptr, kAttrStreamSwitchKind);
   if (kind == kIndependentStreamSwitch) {
     bool independent_empty = independent_stream_map_.empty();
-    // if indepdent empty: delete independent streamswitch
+    // if independent empty: delete independent streamswitch
     if (!independent_empty) {
       for (const auto &item : independent_stream_map_) {
-        // first independetn stream id is minimum and order by std map;
+        // first independent stream id is minimum and order by std map;
         auto first_independent_stream = item.first;
         AnfAlgo::SetNodeAttr(kAttrTrueBranchStream, MakeValue<uint32_t>(first_independent_stream), switch_ptr);
         orders->emplace_back(switch_ptr);
@@ -703,7 +1050,7 @@ void AscendStreamAssign::UpdateStreamSwitch(const NotNull<KernelGraphPtr> &graph
       return;
     }
     auto true_stream_id = AnfAlgo::GetNodeAttr<uint32_t>(switch_ptr, kAttrTrueBranchStream);
-    MS_LOG(INFO) << "Swtich stream id:" << AnfAlgo::GetStreamId(switch_ptr) << "; active stream id:" << true_stream_id;
+    MS_LOG(INFO) << "Switch stream id:" << AnfAlgo::GetStreamId(switch_ptr) << "; active stream id:" << true_stream_id;
     CNodePtr active_ptr = KernelAdjust::GetInstance().CreateStreamActiveOp(graph_ptr);
     AnfAlgo::SetStreamId(true_stream_id, active_ptr.get());
     vector<uint32_t> active_ids;
@@ -729,11 +1076,44 @@ bool AscendStreamAssign::IsProcessedStream(uint32_t stream_id) {
   return false;
 }
 
+bool AscendStreamAssign::IsAllOutGraphOut(const KernelGraphPtr &graph, const CNodePtr &cnode) {
+  auto cnode_out_num = AnfAlgo::GetOutputTensorNum(cnode);
+  auto nodes = AnfAlgo::GetAllOutput(graph->output(), {prim::kPrimTupleGetItem});
+  std::set<int> output_index_set;
+  // Assign Communicate Op Memory firstly.
+  for (const auto &node : nodes) {
+    auto item_with_index = AnfAlgo::VisitKernelWithReturnType(node, 0, true);
+    MS_EXCEPTION_IF_NULL(item_with_index.first);
+    if (!item_with_index.first->isa<CNode>() || !AnfAlgo::IsRealKernel(item_with_index.first)) {
+      continue;
+    }
+    if (item_with_index.first == cnode) {
+      output_index_set.insert(item_with_index.second);
+    }
+  }
+
+  MS_LOG(INFO) << "Node " << cnode->fullname_with_scope() << " has " << cnode_out_num
+               << " outputs, in graph output num:" << output_index_set.size();
+  return cnode_out_num == output_index_set.size();
+}
+
+vector<CNodePtr>::iterator AscendStreamAssign::FindGraphEnd(vector<CNodePtr>::iterator begin,
+                                                            vector<CNodePtr>::iterator end) {
+  while (begin != end) {
+    if (AnfAlgo::HasNodeAttr(kAttrFpBpEnd, *begin)) {
+      MS_LOG(INFO) << "FpBp end op is " << (*begin)->fullname_with_scope();
+      return begin;
+    }
+    ++begin;
+  }
+  return end;
+}
+
 // section5
 void AscendStreamAssign::InsertEventForHcomParallel(const NotNull<KernelGraphPtr> &graph_ptr) {
   MS_LOG(INFO) << "Start";
   InsertEventCommonDependHcom(graph_ptr);
-  InsertEventHcomDependCommon(graph_ptr);
+  InsertEventHcomDependCommonBak(graph_ptr);
   InsertEventHcomDependHcom(graph_ptr);
   MS_LOG(INFO) << "End";
 }
@@ -747,20 +1127,23 @@ void AscendStreamAssign::InsertEventCommonDependHcom(const NotNull<KernelGraphPt
   while (it != cnodes.end()) {
     MS_EXCEPTION_IF_NULL(*it);
     if (IsHcom(*it)) {
+      auto cur_hcom_node = *it;
       CNodePtr send_cnode_ptr = CreateSendApplyKernel(graph_ptr, cur_event_id, AnfAlgo::GetStreamId(*it));
       it = cnodes.insert(it + 1, send_cnode_ptr);
 
-      auto target = FindTargetOp(it, cnodes.end(), *(it - 1));
+      auto target = FindTargetOp(it, cnodes.end(), cur_hcom_node, true);
       if (target == cnodes.end()) {
-        MS_LOG(WARNING) << "Hcom node:" << (*(it - 1))->fullname_with_scope()
-                        << ", can't find target for insert recv op, no insert send/recv";
-        it = cnodes.erase(it);
-        continue;
-      }
+        if (IsAllOutGraphOut(graph_ptr, cur_hcom_node)) {
+          // if hcom's all output is graph output, we need to insert send/recv to fpbp end in data sink mode
+          target = FindGraphEnd(it, cnodes.end());
+        }
 
-      if (IsHcom(*target)) {
-        it = cnodes.erase(it);
-        continue;
+        if (target == cnodes.end()) {
+          MS_LOG(WARNING) << "Hcom node:" << (*(it - 1))->fullname_with_scope()
+                          << ", can't find target for insert recv op, no insert send/recv";
+          it = cnodes.erase(it);
+          continue;
+        }
       }
 
       // deal recv op
@@ -775,36 +1158,6 @@ void AscendStreamAssign::InsertEventCommonDependHcom(const NotNull<KernelGraphPt
   resource_manager.DeleteEvent();
   graph_ptr->set_execution_order(cnodes);
   MS_LOG(INFO) << "After common depend hcom, total event nums:" << resource_manager.get_cur_event_num();
-}
-
-CNodePtr AscendStreamAssign::GetLastInputCnode(const NotNull<KernelGraphPtr> &graph_ptr,
-                                               const CNodePtr &cur_cnode_ptr) {
-  auto cnode_ptr_list = graph_ptr->execution_order();
-  auto &inputs = cur_cnode_ptr->inputs();
-  auto it_pos = cnode_ptr_list.begin();
-  for (size_t i = 1; i < inputs.size(); i++) {
-    if (inputs[i]->isa<CNode>()) {
-      auto cnode = inputs[i]->cast<CNodePtr>();
-      while (opt::IsNopNode(cnode)) {
-        cnode = cnode->inputs()[1]->cast<CNodePtr>();
-      }
-
-      auto it = std::find(it_pos, cnode_ptr_list.end(), cnode);
-      if (it != cnode_ptr_list.end()) {
-        it_pos = it;
-      }
-    } else {
-      continue;
-    }
-  }
-
-  if (it_pos == cnode_ptr_list.begin() && *it_pos != inputs[1]) {
-    MS_LOG(EXCEPTION) << "The input of node:" << AnfAlgo::GetCNodeName(cur_cnode_ptr) << "was not found";
-  }
-
-  MS_LOG(INFO) << "The las input of node:" << cur_cnode_ptr->DebugString() << " is:" << (*it_pos)->fullname_with_scope()
-               << "; name:" << (*it_pos)->DebugString();
-  return *it_pos;
 }
 
 // after memory reuse is correct, use this function
@@ -826,16 +1179,28 @@ void AscendStreamAssign::InsertEventHcomDependCommonBak(const NotNull<KernelGrap
       continue;
     }
 
-    // get the input which located in the lastr exe orders
-    auto last_input_cnode = GetLastInputCnode(graph_ptr, cur_cnode_ptr);
-    auto it = std::find(cnodes.begin(), cnodes.end(), last_input_cnode);
-    if (it == cnodes.end()) {
-      MS_LOG(ERROR) << "hcom:" << AnfAlgo::GetCNodeName(cur_cnode_ptr)
-                    << "get last input:" << AnfAlgo::GetCNodeName(last_input_cnode) << "; but last input not in cnodes";
-    } else {
+    // get the input which located in the last exe orders
+    vector<CNodePtr> inputs_cnode = GetLastInputCnode(graph_ptr, cur_cnode_ptr);
+    if (inputs_cnode.empty()) {
+      cnodes.emplace_back(cur_cnode_ptr);
+      MS_LOG(WARNING) << "Hcom op:" << AnfAlgo::GetCNodeName(cur_cnode_ptr) << " can't find inputs nodes";
+      continue;
+    }
+
+    MS_LOG(INFO) << "Current hcom:" << AnfAlgo::GetCNodeName(cur_cnode_ptr)
+                 << "; inputs cnode size:" << inputs_cnode.size();
+
+    for (size_t j = 0; j < inputs_cnode.size(); j++) {
+      auto &cur_input = inputs_cnode.at(j);
+      MS_LOG(INFO) << "The index:" << j << " input, name:" << AnfAlgo::GetCNodeName(cur_input);
       uint32_t cur_event_id = resource_manager.ApplyNewEvent();
-      auto last_stream_id = AnfAlgo::GetStreamId(last_input_cnode);
-      auto send = CreateSendApplyKernel(graph_ptr, cur_event_id, last_stream_id);
+      auto pre_stream_id = AnfAlgo::GetStreamId(cur_input);
+      auto send = CreateSendApplyKernel(graph_ptr, cur_event_id, pre_stream_id);
+      auto it = std::find(cnodes.begin(), cnodes.end(), cur_input);
+      if (it == cnodes.end()) {
+        MS_LOG_EXCEPTION << "Hcom:" << AnfAlgo::GetCNodeName(cur_cnode_ptr)
+                         << " can't find input node:" << AnfAlgo::GetCNodeName(cur_input);
+      }
       cnodes.insert(it + 1, send);
       uint32_t cur_stream_id = AnfAlgo::GetStreamId(cur_cnode_ptr);
       auto recv = CreateRecvApplyKernel(graph_ptr, cur_event_id, cur_stream_id);
@@ -846,6 +1211,88 @@ void AscendStreamAssign::InsertEventHcomDependCommonBak(const NotNull<KernelGrap
 
   graph_ptr->set_execution_order(cnodes);
   MS_LOG(INFO) << "After hcom depend common, total event nums:" << resource_manager.get_cur_event_num();
+}
+
+vector<CNodePtr> AscendStreamAssign::GetLastInputCnode(const NotNull<KernelGraphPtr> &graph_ptr,
+                                                       const CNodePtr &cur_cnode_ptr) {
+  auto cnode_ptr_list = graph_ptr->execution_order();
+  auto group_name = AnfAlgo::GetNodeAttr<std::string>(cur_cnode_ptr, kAttrGroup);
+  auto input_cnodes = GetInputKernels(cur_cnode_ptr);
+  if (input_cnodes.empty()) {
+    return {};
+  }
+  // record max index node for each stream
+  std::map<uint32_t, std::pair<CNodePtr, uint32_t>> result;
+  for (size_t i = 0; i < input_cnodes.size(); i++) {
+    auto &cur_input = input_cnodes.at(i);
+    auto stream_id = AnfAlgo::GetStreamId(cur_input);
+    auto cur_index = GetIndexByKey(graph_ptr, cur_input.get());
+    if (cur_index == UINT32_MAX) {
+      MS_LOG_EXCEPTION << "The input node:" << AnfAlgo::GetCNodeName(cur_input) << " is not found in graph";
+    }
+    auto it = result.find(stream_id);
+    if (it == result.end()) {
+      result[stream_id] = std::make_pair(cur_input, cur_index);
+    } else {
+      auto max_index = it->second.second;
+      if (cur_index > max_index) {
+        result[stream_id] = std::make_pair(cur_input, cur_index);
+      }
+    }
+  }
+
+  vector<CNodePtr> final_inputs;
+  uint32_t max = 0;
+  CNodePtr max_common_cnode = nullptr;
+  for (const auto &item : result) {
+    if (IsHcom(item.second.first)) {
+      auto cur_group = AnfAlgo::GetNodeAttr<std::string>(item.second.first, kAttrGroup);
+      if (cur_group == group_name) {
+        continue;
+      } else {
+        final_inputs.emplace_back(item.second.first);
+      }
+    } else {
+      if (item.second.second > max) {
+        max_common_cnode = item.second.first;
+      }
+    }
+  }
+
+  if (max_common_cnode != nullptr) {
+    final_inputs.emplace_back(max_common_cnode);
+  }
+  return final_inputs;
+}
+
+vector<CNodePtr> AscendStreamAssign::GetInputKernels(const CNodePtr &node) {
+  vector<CNodePtr> input_cnodes;
+  queue<CNodePtr> nop_nodes;
+  auto inputs = node->inputs();
+  for (size_t i = 1; i < inputs.size(); i++) {
+    auto real_input = AnfAlgo::VisitKernel(inputs[i], 0);
+    auto node = real_input.first;
+    if (opt::IsNopNode(node)) {
+      nop_nodes.push(node->cast<CNodePtr>());
+      while (!nop_nodes.empty()) {
+        auto cur_node = nop_nodes.front();
+        nop_nodes.pop();
+        auto new_inputs = cur_node->inputs();
+        for (size_t j = 1; j < new_inputs.size(); j++) {
+          auto new_real_input = AnfAlgo::VisitKernel(new_inputs[j], 0);
+          auto new_node = new_real_input.first;
+          if (opt::IsNopNode(new_node)) {
+            nop_nodes.push(new_node->cast<CNodePtr>());
+          } else if (new_node->isa<CNode>()) {
+            input_cnodes.emplace_back(new_node->cast<CNodePtr>());
+          }
+        }
+      }
+    } else if (node->isa<CNode>()) {
+      input_cnodes.emplace_back(node->cast<CNodePtr>());
+    }
+  }
+  return input_cnodes;
 }
 
 void AscendStreamAssign::InsertEventHcomDependCommon(const NotNull<KernelGraphPtr> &graph_ptr) {
@@ -894,53 +1341,69 @@ void AscendStreamAssign::InsertEventHcomDependCommon(const NotNull<KernelGraphPt
 }
 
 void AscendStreamAssign::InsertEventHcomDependHcom(const NotNull<KernelGraphPtr> &graph_ptr) {
-  AscendResourceMng &resource_manager = AscendResourceMng::GetInstance();
-  auto cnode_ptr_list = graph_ptr->execution_order();
-  uint32_t first_hcom_stream = kInvalidStreamId;
-  uint32_t last_hcom_stream = kInvalidStreamId;
-  // key: stream id, value:hcom index
-  std::map<uint32_t, vector<size_t>> hcom_index;
-  for (size_t i = 0; i < cnode_ptr_list.size(); i++) {
-    auto cur_cnode = cnode_ptr_list[i];
-    if (!IsHcom(cur_cnode)) {
-      continue;
-    }
-    uint32_t cur_stream_id = AnfAlgo::GetStreamId(cur_cnode);
-    auto it = hcom_index.find(cur_stream_id);
-    if (it != hcom_index.end()) {
-      hcom_index[cur_stream_id].emplace_back(i);
-    } else {
-      hcom_index[cur_stream_id] = {i};
-    }
-
-    // record first hcom stream id
-    if (first_hcom_stream == kInvalidStreamId) {
-      first_hcom_stream = cur_stream_id;
-    }
-
-    // record last hcom stream id
-    if (cur_stream_id != last_hcom_stream) {
-      last_hcom_stream = cur_stream_id;
-    }
-  }
-
-  if (hcom_index.size() < 2) {
-    MS_LOG(INFO) << "Different stream hcom size is less than 2, no need insert event between them";
+  if (group_hcom_graph_map_.empty()) {
     return;
   }
-  InsertEventBetweenHcom(graph_ptr, hcom_index, first_hcom_stream, last_hcom_stream);
-  MS_LOG(INFO) << "After hcom depend hcom, total event nums:" << resource_manager.get_cur_event_num();
+  std::vector<string> groups;
+  for (const auto &item : group_hcom_graph_map_) {
+    groups.emplace_back(item.first);
+  }
+  for (const auto &group : groups) {
+    auto cnode_ptr_list = graph_ptr->execution_order();
+    std::vector<std::pair<uint32_t, vector<size_t>>> stream_indices;
+    for (size_t i = 0; i < cnode_ptr_list.size(); i++) {
+      auto cur_cnode = cnode_ptr_list[i];
+      if (!IsHcom(cur_cnode)) {
+        continue;
+      }
+
+      uint32_t cur_stream_id = AnfAlgo::GetStreamId(cur_cnode);
+      if (!AnfAlgo::HasNodeAttr(kAttrGroup, cur_cnode)) {
+        MS_LOG_EXCEPTION << "hcom cnode " << cur_cnode->DebugString() << " has no group attr";
+      }
+      auto group_name = AnfAlgo::GetNodeAttr<std::string>(cur_cnode, kAttrGroup);
+      MS_LOG(INFO) << "Hcom node name:" << AnfAlgo::GetCNodeName(cur_cnode) << "; group:" << group_name
+                   << "; stream id:" << cur_stream_id;
+      if (group_name != group) {
+        continue;
+      }
+
+      if (stream_indices.empty()) {
+        stream_indices.emplace_back(std::make_pair(cur_stream_id, std::vector<size_t>{i}));
+      } else {
+        bool exit = false;
+        for (auto &item : stream_indices) {
+          if (item.first == cur_stream_id) {
+            item.second.emplace_back(i);
+            exit = true;
+            break;
+          }
+        }
+        if (!exit) {
+          stream_indices.emplace_back(std::make_pair(cur_stream_id, std::vector<size_t>{i}));
+        }
+      }
+    }
+
+    if (stream_indices.size() < 2) {
+      MS_LOG(INFO) << "Group:" << group
+                   << "; different stream hcom size is less than 2, no need insert event between them";
+      continue;
+    }
+    InsertEventBetweenHcom(graph_ptr, stream_indices);
+  }
 }
 
 void AscendStreamAssign::InsertEventBetweenHcom(const NotNull<KernelGraphPtr> &graph_ptr,
-                                                const map<uint32_t, vector<size_t>> &hcom_index,
-                                                uint32_t first_hcom_stream, uint32_t last_hcom_stream) {
+                                                const std::vector<std::pair<uint32_t, vector<size_t>>> &hcom_index) {
   vector<CNodePtr> orders;
   AscendResourceMng &resource_manager = AscendResourceMng::GetInstance();
   auto cnode_ptr_list = graph_ptr->execution_order();
   uint32_t cur_event_id = resource_manager.ApplyNewEvent();
-  size_t first_stream_last_index = hcom_index.at(first_hcom_stream).back();
-  size_t last_stream_first_index = hcom_index.at(last_hcom_stream).front();
+  size_t first_stream_last_index = hcom_index[0].second.back();
+  size_t last_stream_first_index = hcom_index.back().second.front();
+  MS_LOG(INFO) << "First stream last index:" << first_stream_last_index
+               << "; last stream first index:" << last_stream_first_index;
   std::copy(cnode_ptr_list.begin(), cnode_ptr_list.begin() + first_stream_last_index, std::back_inserter(orders));
   for (size_t i = first_stream_last_index; i <= last_stream_first_index; i++) {
     auto cur_cnode = cnode_ptr_list[i];
@@ -960,7 +1423,17 @@ void AscendStreamAssign::InsertEventBetweenHcom(const NotNull<KernelGraphPtr> &g
       orders.emplace_back(recv);
       orders.emplace_back(cur_cnode);
     } else {
-      auto cur_stream_hcom_size = hcom_index.at(cur_hcom_stream_id).size();
+      size_t cur_stream_hcom_size = UINT32_MAX;
+      size_t first_index = UINT32_MAX;
+      size_t last_index = UINT32_MAX;
+      for (const auto &item : hcom_index) {
+        if (item.first == cur_hcom_stream_id) {
+          cur_stream_hcom_size = item.second.size();
+          first_index = item.second.front();
+          last_index = item.second.back();
+        }
+      }
+
       if (cur_stream_hcom_size == 1) {
         auto recv = CreateRecvApplyKernel(graph_ptr, cur_event_id, cur_hcom_stream_id);
         orders.emplace_back(recv);
@@ -970,12 +1443,12 @@ void AscendStreamAssign::InsertEventBetweenHcom(const NotNull<KernelGraphPtr> &g
         orders.emplace_back(send);
       } else {
         // current stream, first hcom:add recv op
-        if (i == hcom_index.at(cur_hcom_stream_id).front()) {
+        if (i == first_index) {
           auto recv = CreateRecvApplyKernel(graph_ptr, cur_event_id, cur_hcom_stream_id);
           orders.emplace_back(recv);
           cur_event_id = resource_manager.ApplyNewEvent();
           orders.emplace_back(cur_cnode);
-        } else if (i == hcom_index.at(cur_hcom_stream_id).back()) {
+        } else if (i == last_index) {
           // current stream, last hcom:add send op
           orders.emplace_back(cur_cnode);
           auto send = CreateSendApplyKernel(graph_ptr, cur_event_id, cur_hcom_stream_id);
@@ -991,19 +1464,19 @@ void AscendStreamAssign::InsertEventBetweenHcom(const NotNull<KernelGraphPtr> &g
   graph_ptr->set_execution_order(orders);
 }
 
-bool AscendStreamAssign::IsSatisfiedHcom(const std::map<uint32_t, vector<size_t>> &hcom_index, const CNodePtr &node_ptr,
-                                         size_t index) {
+bool AscendStreamAssign::IsSatisfiedHcom(const std::vector<std::pair<uint32_t, vector<size_t>>> &hcom_index,
+                                         const CNodePtr &node_ptr, size_t index) {
   MS_EXCEPTION_IF_NULL(node_ptr);
   auto cur_hcom_stream_id = AnfAlgo::GetStreamId(node_ptr);
-  auto it = hcom_index.find(cur_hcom_stream_id);
-  if (it == hcom_index.end()) {
-    return false;
+  for (const auto &item : hcom_index) {
+    if (item.first == cur_hcom_stream_id) {
+      auto it = std::find(item.second.begin(), item.second.end(), index);
+      if (it != item.second.end()) {
+        return true;
+      }
+    }
   }
-  auto iter = std::find(hcom_index.at(cur_hcom_stream_id).begin(), hcom_index.at(cur_hcom_stream_id).end(), index);
-  if (iter == hcom_index.at(cur_hcom_stream_id).end()) {
-    return false;
-  }
-  return true;
+  return false;
 }
 
 // section6
@@ -1021,9 +1494,9 @@ void AscendStreamAssign::InsertEventForIndependentParallel(const NotNull<KernelG
       CNodePtr send_cnode_ptr = CreateSendApplyKernel(graph_ptr, cur_event_id, AnfAlgo::GetStreamId(*it));
       it = cnodes.insert(it + 1, send_cnode_ptr);
 
-      auto target = FindTargetOp(it, cnodes.end(), *(it - 1));
+      auto target = FindTargetOp(it, cnodes.end(), *(it - 1), false);
       if (target == cnodes.end()) {
-        MS_LOG(DEBUG) << "Independ node[" << (*(it - 1))->fullname_with_scope()
+        MS_LOG(DEBUG) << "Independent node[" << (*(it - 1))->fullname_with_scope()
                       << "] can't find target for insert recv op, no insert send/recv";
         it = cnodes.erase(it);
         continue;
@@ -1107,16 +1580,16 @@ uint32_t AscendStreamAssign::GetMaxIndexTarget(const NotNull<KernelGraphPtr> &gr
     return UINT32_MAX;
   }
 
-  std::set<uint32_t> indexs;
+  std::set<uint32_t> indices;
   for (const auto &key : independent_targets_) {
     auto index = GetIndexByKey(graph_ptr, key);
     if (index == UINT32_MAX) {
       MS_LOG(EXCEPTION) << "graph has no correspond key";
     }
-    indexs.emplace(index);
+    indices.emplace(index);
   }
 
-  return *(std::max_element(indexs.begin(), indexs.end()));
+  return *(std::max_element(indices.begin(), indices.end()));
 }
 
 uint32_t AscendStreamAssign::GetIndependentStreamSwitchStreamId(const NotNull<KernelGraphPtr> &graph_ptr) {
@@ -1172,7 +1645,7 @@ void AscendStreamAssign::GetNeedActiveStreams(const NotNull<KernelGraphPtr> &gra
   CNodePtr cur_cnode_ptr = nullptr;
   auto cnode_ptr_list = graph_ptr->execution_order();
 
-  // 1)stream witch kStreamNeedActivedFirst attr should be actived;
+  // 1)stream witch kStreamNeedActivedFirst attr should be activated;
   for (size_t i = 0; i < cnode_ptr_list.size(); ++i) {
     cur_cnode_ptr = cnode_ptr_list[i];
     MS_EXCEPTION_IF_NULL(cur_cnode_ptr);
@@ -1183,7 +1656,7 @@ void AscendStreamAssign::GetNeedActiveStreams(const NotNull<KernelGraphPtr> &gra
     auto need_active = AnfAlgo::GetNodeAttr<bool>(cur_cnode_ptr, kStreamNeedActivedFirst);
     if (need_active) {
       auto stream_id = AnfAlgo::GetStreamId(cur_cnode_ptr);
-      MS_LOG(INFO) << "Stream id:" << stream_id << " is need actived at first";
+      MS_LOG(INFO) << "Stream id:" << stream_id << " is need activated at first";
       need_first_active_streams_.push_back(stream_id);
     }
   }
@@ -1199,13 +1672,16 @@ void AscendStreamAssign::GetNeedActiveStreams(const NotNull<KernelGraphPtr> &gra
 
   // 3)hcom stream:if has not been activate, push to need active vector
   if (!hcom_stream_activated_) {
-    auto it = hcom_graph_map_.find(root_graph_id);
-    if (it != hcom_graph_map_.end()) {
-      std::copy(it->second.begin(), it->second.end(), std::back_inserter(need_first_active_streams_));
+    for (const auto &item : group_hcom_graph_map_) {
+      auto &hcom_graph_map = item.second;
+      auto it = hcom_graph_map.find(root_graph_id);
+      if (it != hcom_graph_map.end()) {
+        std::copy(it->second.begin(), it->second.end(), std::back_inserter(need_first_active_streams_));
+      }
     }
   }
 
-  // 4)first stream 0 should be actived first;
+  // 4)first stream 0 should be activated first;
   auto it = std::find(need_first_active_streams_.begin(), need_first_active_streams_.end(), 0);
   if (it == need_first_active_streams_.end()) {
     need_first_active_streams_.emplace_back(0);
@@ -1349,7 +1825,8 @@ CNodePtr AscendStreamAssign::CreateRecvApplyKernel(const NotNull<KernelGraphPtr>
 }
 
 vector<CNodePtr>::iterator AscendStreamAssign::FindTargetOp(vector<CNodePtr>::iterator begin,
-                                                            vector<CNodePtr>::iterator end, const CNodePtr &node) {
+                                                            vector<CNodePtr>::iterator end, const CNodePtr &node,
+                                                            bool exclude_hcom) {
   while (begin != end) {
     auto inputs = (*begin)->inputs();
     for (size_t i = 1; i < inputs.size(); i++) {
@@ -1359,16 +1836,22 @@ vector<CNodePtr>::iterator AscendStreamAssign::FindTargetOp(vector<CNodePtr>::it
         auto new_inputs = cnode->inputs();
         for (size_t j = 1; j < new_inputs.size(); j++) {
           auto new_real_input = AnfAlgo::VisitKernel(new_inputs[j], 0);
+          // find target node except hcom op. insert event for hcom in:InsertEventHcomDependCommonBak function
+          // only insert one time
           if (node == new_real_input.first) {
-            MS_LOG(DEBUG) << "Nop node find target op[" << (*begin)->DebugString() << "]";
-            return begin;
+            if (!(exclude_hcom && IsHcom(*begin))) {
+              MS_LOG(DEBUG) << "Nop node find target op[" << (*begin)->DebugString() << "]";
+              return begin;
+            }
           }
         }
       } else {
         auto real_input = AnfAlgo::VisitKernel(input, 0);
         if (node == real_input.first) {
-          MS_LOG(DEBUG) << "Find target op[" << (*begin)->DebugString() << "]";
-          return begin;
+          if (!(exclude_hcom && IsHcom(*begin))) {
+            MS_LOG(DEBUG) << "Nop node find target op[" << (*begin)->DebugString() << "]";
+            return begin;
+          }
         }
       }
     }
@@ -1434,7 +1917,7 @@ void AscendStreamAssign::Reset() {
   event_map_.clear();
   independent_targets_.clear();
   independent_graph_map_.clear();
-  hcom_graph_map_.clear();
+  group_hcom_graph_map_.clear();
   middle_active_streams_.clear();
 }
 
@@ -1564,7 +2047,7 @@ void AscendStreamAssign::GetStreamActiveStreamRelation(const NotNull<KernelGraph
 
     for (const auto &item : active_list) {
       if (item <= active_current_node) {
-        MS_LOG(WARNING) << "Actived stream is less than activing stream";
+        MS_LOG(WARNING) << "Activated stream is less than activing stream";
         continue;
       }
       auto it =
@@ -1593,7 +2076,7 @@ void AscendStreamAssign::GetStreamActiveStreamRelation(const NotNull<KernelGraph
     } else {
       for (const auto &stream : active_list) {
         if (stream <= cur_stream_id) {
-          MS_LOG(WARNING) << "Actived stream is less than activing stream";
+          MS_LOG(WARNING) << "Activated stream is less than activing stream";
           continue;
         }
         auto iter = std::find(stream_relations_[cur_stream_id].begin(), stream_relations_[cur_stream_id].end(), stream);
@@ -1670,25 +2153,7 @@ StreamActiveKind AscendStreamAssign::GetStreamActiveKind(const NotNull<KernelGra
     break;
   }
 
-  // pre_stream_id = UINT32_MAX:means no node active current StreamActive
-  // next_stream_id = UINT32_MAX:means current StreamActive active no node
-  if (pre_stream_id == UINT32_MAX || next_stream_id == UINT32_MAX) {
-    return kInvalid;
-  }
-
-  if (cur_stream_id == pre_stream_id && cur_stream_id == next_stream_id) {
-    return kMiddle;
-  }
-
-  if (cur_stream_id == pre_stream_id) {
-    return kTail;
-  }
-
-  if (cur_stream_id == next_stream_id) {
-    return kHead;
-  }
-
-  return kInvalid;
+  return GetStreamKind(cur_stream_id, pre_stream_id, next_stream_id);
 }
 
 uint32_t AscendStreamAssign::GetStreamByActivedStream(uint32_t actived_stream_id) {
@@ -1711,7 +2176,7 @@ void AscendStreamAssign::PrintStreamRelations() {
   for (const auto &item : stream_relations_) {
     MS_LOG(INFO) << "Stream:" << item.first;
     for (const auto &stream : item.second) {
-      MS_LOG(INFO) << "--actived stream id:" << stream;
+      MS_LOG(INFO) << "--activated stream id:" << stream;
     }
   }
 }
@@ -1832,7 +2297,6 @@ void AscendStreamAssign::AdjustAtomicAddrCleanOrder(const NotNull<KernelGraphPtr
 
   graph_ptr->set_execution_order(update_orders);
 }
-
 }  // namespace ascend
 }  // namespace device
 }  // namespace mindspore

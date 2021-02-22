@@ -15,6 +15,7 @@
  */
 #include "minddata/dataset/engine/datasetops/source/sampler/sampler.h"
 
+#include <algorithm>
 #include <string>
 
 namespace mindspore {
@@ -26,14 +27,18 @@ Status RandomAccessOp::GetNumRowsInDataset(int64_t *num) const {
   // Here, it is just a getter method to return the value.  However, it is invalid if there is
   // not a value set for this count, so generate a failure if that is the case.
   if (num == nullptr || num_rows_ == 0) {
-    RETURN_STATUS_UNEXPECTED("RandomAccessOp has not computed it's num rows yet.");
+    RETURN_STATUS_UNEXPECTED("RandomAccessOp has not computed its num rows yet.");
   }
   (*num) = num_rows_;
   return Status::OK();
 }
 
 SamplerRT::SamplerRT(int64_t num_samples, int64_t samples_per_buffer)
-    : num_rows_(0), num_samples_(num_samples), samples_per_buffer_(samples_per_buffer), col_desc_(nullptr) {}
+    : num_rows_(0),
+      num_samples_(num_samples),
+      samples_per_buffer_(samples_per_buffer),
+      col_desc_(nullptr),
+      is_initialized(false) {}
 
 Status SamplerRT::HandshakeRandomAccessOp(const RandomAccessOp *op) {
   std::shared_ptr<SamplerRT> child_sampler;
@@ -77,7 +82,7 @@ Status SamplerRT::CreateSamplerTensor(std::shared_ptr<Tensor> *sample_ids, int64
   return Status::OK();
 }
 
-void SamplerRT::Print(std::ostream &out, bool show_all) const {
+void SamplerRT::SamplerPrint(std::ostream &out, bool show_all) const {
   // Sampler printing is usually only called in the show_all mode.
   // Derived classes will display the name, then call back to this base
   // for common info.
@@ -111,12 +116,12 @@ Status SamplerRT::GetAllIdsThenReset(py::array *data) {
   {
     py::gil_scoped_acquire gil_acquire;
     if (Py_IsInitialized() == 0) {
-      return Status(StatusCode::kPythonInterpreterFailure, "Python Interpreter is finalized");
+      return Status(StatusCode::kMDPythonInterpreterFailure, "Python Interpreter is finalized");
     }
     try {
       RETURN_IF_NOT_OK(sample_ids->GetDataAsNumpy(data));
     } catch (const std::runtime_error &e) {
-      return Status(StatusCode::kPyFuncException, e.what());
+      return Status(StatusCode::kMDPyFuncException, e.what());
     }
   }
   return Status::OK();
@@ -131,8 +136,19 @@ Status SamplerRT::SetNumSamples(int64_t num_samples) {
 
 int64_t SamplerRT::GetNumSamples() { return num_samples_; }
 
+int64_t SamplerRT::CalculateNumSamples(int64_t num_rows) {
+  int64_t child_num_rows = num_rows;
+  if (!child_.empty()) {
+    child_num_rows = child_[0]->CalculateNumSamples(num_rows);
+  }
+
+  return (num_samples_ > 0) ? std::min(child_num_rows, num_samples_) : child_num_rows;
+}
+
 Status SamplerRT::SetNumRowsInDataset(int64_t num_rows) {
-  CHECK_FAIL_RETURN_UNEXPECTED(num_rows > 0, "Invalid parameter, num_rows must be greater than 0.");
+  CHECK_FAIL_RETURN_UNEXPECTED(
+    num_rows > 0,
+    "Invalid data, data rows of input dataset must not be less than or equal to 0, please check the input dataset.");
   num_rows_ = num_rows;
   return Status::OK();
 }

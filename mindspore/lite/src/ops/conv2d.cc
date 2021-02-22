@@ -24,7 +24,7 @@
 #include "src/common/log_adapter.h"
 #ifdef PRIMITIVE_WRITEABLE
 #include <float.h>
-#include "tools/converter/quantizer/quantize_util.h"
+#include "src/param_value_lite.h"
 #endif
 
 #ifndef PRIMITIVE_WRITEABLE
@@ -53,7 +53,6 @@ int Conv2D::GetPadLeft() const { return this->primitive_->value.AsConv2D()->padL
 int Conv2D::GetPadRight() const { return this->primitive_->value.AsConv2D()->padRight; }
 int Conv2D::GetDilateW() const { return this->primitive_->value.AsConv2D()->dilateW; }
 int Conv2D::GetDilateH() const { return this->primitive_->value.AsConv2D()->dilateH; }
-bool Conv2D::GetHasBias() const { return this->primitive_->value.AsConv2D()->hasBias; }
 int Conv2D::GetActivationType() const { return this->primitive_->value.AsConv2D()->activationType; }
 
 void Conv2D::SetFormat(int format) { this->primitive_->value.AsConv2D()->format = (schema::Format)format; }
@@ -71,7 +70,6 @@ void Conv2D::SetPadLeft(int pad_left) { this->primitive_->value.AsConv2D()->padL
 void Conv2D::SetPadRight(int pad_right) { this->primitive_->value.AsConv2D()->padRight = pad_right; }
 void Conv2D::SetDilateW(int dilate_w) { this->primitive_->value.AsConv2D()->dilateW = dilate_w; }
 void Conv2D::SetDilateH(int dilate_h) { this->primitive_->value.AsConv2D()->dilateH = dilate_h; }
-void Conv2D::SetHasBias(bool has_bias) { this->primitive_->value.AsConv2D()->hasBias = has_bias; }
 void Conv2D::SetActivationType(int activation_type) {
   this->primitive_->value.AsConv2D()->activationType = (schema::ActivationType)activation_type;
 }
@@ -82,7 +80,8 @@ void ConvertConvWeight(const ParameterPtr &param_node) {
   auto weight = std::dynamic_pointer_cast<ParamValueLite>(param);
   MS_ASSERT(weight != nullptr);
 
-  std::unique_ptr<T> buf(new (std::nothrow) T[weight->tensor_shape_size()]);
+  std::unique_ptr<T[]> buf(new (std::nothrow) T[weight->tensor_shape_size()]);
+
   if (buf == nullptr) {
     MS_LOG(ERROR) << "new buf failed";
     return;
@@ -143,21 +142,25 @@ void Conv2D::PopulaterConv2DMultiGroup(const Primitive &prim, schema::PrimitiveT
   } else {
     attr->format = schema::Format::Format_NUM_OF_FORMAT;
   }
-  auto pad_list = GetValue<std::vector<int>>(prim.GetAttr("pad_list"));
+  auto pad_list = CastToInt(prim.GetAttr("pad_list"));
   attr->padUp = pad_list.at(0);
   attr->padDown = pad_list.at(1);
   attr->padLeft = pad_list.at(2);
   attr->padRight = pad_list.at(3);
 
-  auto dilation = GetValue<std::vector<int>>(prim.GetAttr("dilation"));
-  attr->dilateH = dilation.at(0);
-  attr->dilateW = dilation.at(1);
-
-  auto kernel_size = GetValue<std::vector<int>>(prim.GetAttr("kernel_size"));
+  auto dilation = CastToInt(prim.GetAttr("dilation"));
+  if (train_flag()) {
+    attr->dilateH = dilation.at(2);
+    attr->dilateW = dilation.at(3);
+  } else {
+    attr->dilateH = dilation.at(0);
+    attr->dilateW = dilation.at(1);
+  }
+  auto kernel_size = CastToInt(prim.GetAttr("kernel_size"));
   attr->kernelH = kernel_size.at(0);
-  attr->kernelW = kernel_size.at(1);
+  attr->kernelW = (kernel_size.size() > 1) ? kernel_size.at(1) : kernel_size.at(0);
 
-  auto stride = GetValue<std::vector<int>>(prim.GetAttr("stride"));
+  auto stride = CastToInt(prim.GetAttr("stride"));
   attr->strideH = stride.at(2);
   attr->strideW = stride.at(3);
 
@@ -179,7 +182,7 @@ void Conv2D::PopulaterConv2DMultiGroup(const Primitive &prim, schema::PrimitiveT
 
   int channel_mutiplier = 1;
   if (prim.GetAttr("channel_mutiplier") != nullptr) {
-    channel_mutiplier = GetValue<int>(prim.GetAttr("channel_multiplier"));
+    channel_mutiplier = CastToInt(prim.GetAttr("channel_multiplier")).front();
   }
   attr->channelMultiplier = channel_mutiplier;
 
@@ -199,6 +202,9 @@ void Conv2D::PopulaterConv2DMultiGroup(const Primitive &prim, schema::PrimitiveT
         attr->channelIn = dims.at(kAnfPopulaterInputNumOne);
       }
     }
+  } else if (input_node->isa<CNode>()) {
+    // The weight of convolution is the output from the other operators which could be folded by const folding pass.
+    attr->channelIn = -1;
   }
 
   primitive->value.type = schema::PrimitiveType_DepthwiseConv2D;
@@ -220,25 +226,25 @@ void Conv2D::PopulaterConv2DSingleGroup(const Primitive &prim, schema::Primitive
   } else {
     attr->format = schema::Format::Format_NUM_OF_FORMAT;
   }
-  auto pad_list = GetValue<std::vector<int>>(prim.GetAttr("pad_list"));
+  auto pad_list = CastToInt(prim.GetAttr("pad_list"));
   attr->padUp = pad_list.at(0);
   attr->padDown = pad_list.at(1);
   attr->padLeft = pad_list.at(2);
   attr->padRight = pad_list.at(3);
 
-  auto dilation = GetValue<std::vector<int>>(prim.GetAttr("dilation"));
-  attr->dilateH = dilation.at(0);
-  attr->dilateW = dilation.at(1);
+  auto dilation = CastToInt(prim.GetAttr("dilation"));
+  attr->dilateH = dilation.at(2);
+  attr->dilateW = dilation.at(3);
 
-  auto kernel_size = GetValue<std::vector<int>>(prim.GetAttr("kernel_size"));
+  auto kernel_size = CastToInt(prim.GetAttr("kernel_size"));
   attr->kernelH = kernel_size.at(0);
-  attr->kernelW = kernel_size.at(1);
+  attr->kernelW = (kernel_size.size() > 1) ? kernel_size.at(1) : kernel_size.at(0);
 
-  auto stride = GetValue<std::vector<int>>(prim.GetAttr("stride"));
+  auto stride = CastToInt(prim.GetAttr("stride"));
   attr->strideH = stride.at(2);
   attr->strideW = stride.at(3);
 
-  attr->channelOut = GetValue<int>(prim.GetAttr("out_channel"));
+  attr->channelOut = CastToInt(prim.GetAttr("out_channel")).front();
 
   auto pad_mode = GetValue<std::string>(prim.GetAttr("pad_mode"));
   if (pad_mode == "valid") {
@@ -278,7 +284,7 @@ int Conv2D::UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &inp
     MS_LOG(ERROR) << "conv2d op has no group attr,please check pb model";
     return RET_NULL_PTR;
   }
-  int group = GetValue<int>(groupAttr);
+  int group = CastToInt(groupAttr).front();
   if (group > 1) {
     PopulaterConv2DMultiGroup(prim, this->primitive_, group, inputs);
   } else {
@@ -322,7 +328,6 @@ int Conv2D::GetPadLeft() const { return this->primitive_->value_as_Conv2D()->pad
 int Conv2D::GetPadRight() const { return this->primitive_->value_as_Conv2D()->padRight(); }
 int Conv2D::GetDilateW() const { return this->primitive_->value_as_Conv2D()->dilateW(); }
 int Conv2D::GetDilateH() const { return this->primitive_->value_as_Conv2D()->dilateH(); }
-bool Conv2D::GetHasBias() const { return this->primitive_->value_as_Conv2D()->hasBias(); }
 int Conv2D::GetActivationType() const { return this->primitive_->value_as_Conv2D()->activationType(); }
 
 PrimitiveC *Conv2DCreator(const schema::Primitive *primitive) { return PrimitiveC::NewPrimitiveC<Conv2D>(primitive); }
@@ -367,11 +372,11 @@ void Conv2D::ConvInferShape(int input_h, int input_w, int *output_h, int *output
 
 int Conv2D::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> outputs_) {
   if (inputs_.size() != 2 && inputs_.size() != 3) {
-    MS_LOG(ERROR) << "Add should has two or three inputs";
+    MS_LOG(ERROR) << "Conv2d should has two or three inputs";
     return RET_ERROR;
   }
   if (outputs_.size() != 1) {
-    MS_LOG(ERROR) << "Add should has one outputs";
+    MS_LOG(ERROR) << "Conv2d should has one outputs";
     return RET_ERROR;
   }
   auto *input_tensor = inputs_.front();
@@ -388,9 +393,12 @@ int Conv2D::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> outp
   pad_r_ = GetPadRight();
 
   if (!infer_flag()) {
-    return RET_OK;
+    return RET_INFER_INVALID;
   }
   auto in_shape = input_tensor->shape();
+  if (in_shape.size() == 0) {
+    return RET_INFER_INVALID;
+  }
   int input_h = in_shape.at(1);
   int input_w = in_shape.at(2);
   int output_w = 0, output_h = 0;
@@ -398,8 +406,8 @@ int Conv2D::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> outp
   this->ConvInferShape(input_h, input_w, &output_h, &output_w);
 
   std::vector<int> out_shape{input_tensor->shape()};
-  out_shape.at(1) = output_h;
-  out_shape.at(2) = output_w;
+  out_shape.at(1) = output_h >= 0 ? output_h : 1;
+  out_shape.at(2) = output_w >= 0 ? output_w : 1;
   out_shape.at(3) = weight_tensor->shape()[0];
   out_tensor->set_shape(out_shape);
 

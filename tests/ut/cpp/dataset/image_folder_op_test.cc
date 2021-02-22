@@ -1,5 +1,5 @@
 /**
- * Copyright 2019 Huawei Technologies Co., Ltd
+ * Copyright 2019-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,7 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <fstream>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -29,7 +28,6 @@
 #include "minddata/dataset/engine/datasetops/source/sampler/sequential_sampler.h"
 #include "minddata/dataset/engine/datasetops/source/sampler/subset_random_sampler.h"
 #include "minddata/dataset/engine/datasetops/source/sampler/weighted_random_sampler.h"
-#include "minddata/dataset/util/path.h"
 #include "minddata/dataset/util/status.h"
 #include "gtest/gtest.h"
 #include "utils/log_adapter.h"
@@ -38,9 +36,9 @@
 namespace common = mindspore::common;
 
 using namespace mindspore::dataset;
-using mindspore::MsLogLevel::ERROR;
-using mindspore::ExceptionType::NoExceptionType;
 using mindspore::LogStream;
+using mindspore::ExceptionType::NoExceptionType;
+using mindspore::MsLogLevel::ERROR;
 
 std::shared_ptr<BatchOp> Batch(int batch_size = 1, bool drop = false, int rows_per_buf = 2);
 
@@ -54,14 +52,17 @@ std::shared_ptr<ImageFolderOp> ImageFolder(int64_t num_works, int64_t rows, int6
   std::shared_ptr<ImageFolderOp> so;
   ImageFolderOp::Builder builder;
   Status rc = builder.SetNumWorkers(num_works)
-                     .SetImageFolderDir(path)
-                     .SetRowsPerBuffer(rows)
-                     .SetOpConnectorSize(conns)
-                     .SetExtensions({".jpg", ".JPEG"})
-                     .SetSampler(std::move(sampler))
-                     .SetClassIndex(map)
-                     .SetDecode(decode)
-                     .Build(&so);
+                .SetImageFolderDir(path)
+                .SetRowsPerBuffer(rows)
+                .SetOpConnectorSize(conns)
+                .SetExtensions({".jpg", ".JPEG"})
+                .SetSampler(std::move(sampler))
+                .SetClassIndex(map)
+                .SetDecode(decode)
+                .Build(&so);
+  if (rc.IsError()) {
+    MS_LOG(ERROR) << "Fail to build ImageFolderOp: " << rc.ToString() << "\n";
+  }
   return so;
 }
 
@@ -79,7 +80,11 @@ class MindDataTestImageFolderSampler : public UT::DatasetOpTesting {
 
 TEST_F(MindDataTestImageFolderSampler, TestSequentialImageFolderWithRepeat) {
   std::string folder_path = datasets_root_path_ + "/testPK/data";
-  auto tree = Build({ImageFolder(16, 2, 32, folder_path, false), Repeat(2)});
+  auto op1 = ImageFolder(16, 2, 32, folder_path, false);
+  auto op2 = Repeat(2);
+  op1->set_total_repeats(2);
+  op1->set_num_repeats_per_epoch(2);
+  auto tree = Build({op1, op2});
   tree->Prepare();
   int32_t res[] = {0, 1, 2, 3};
   Status rc = tree->Launch();
@@ -163,12 +168,17 @@ TEST_F(MindDataTestImageFolderSampler, TestRandomSamplerImageFolder) {
 
 TEST_F(MindDataTestImageFolderSampler, TestSequentialImageFolderWithRepeatBatch) {
   std::string folder_path = datasets_root_path_ + "/testPK/data";
-  auto tree = Build({ImageFolder(16, 2, 32, folder_path, false), Repeat(2), Batch(11)});
+  auto op1 = ImageFolder(16, 2, 32, folder_path, false);
+  auto op2 = Repeat(2);
+  auto op3 = Batch(11);
+  op1->set_total_repeats(2);
+  op1->set_num_repeats_per_epoch(2);
+  auto tree = Build({op1, op2, op3});
   tree->Prepare();
   int32_t res[4][11] = {{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-                         {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
-                         {2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2},
-                         {3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3}};
+                        {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
+                        {2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2},
+                        {3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3}};
   Status rc = tree->Launch();
   if (rc.IsError()) {
     MS_LOG(ERROR) << "Return code error detected during tree launch: " << common::SafeCStr(rc.ToString()) << ".";
@@ -184,7 +194,7 @@ TEST_F(MindDataTestImageFolderSampler, TestSequentialImageFolderWithRepeatBatch)
       Create1DTensor(&label, 11, reinterpret_cast<unsigned char *>(res[i % 4]), DataType::DE_INT32);
       EXPECT_TRUE((*label) == (*tensor_map["label"]));
       MS_LOG(DEBUG) << "row: " << i << " " << tensor_map["image"]->shape() << " (*label):" << (*label)
-                << " *tensor_map[label]: " << *tensor_map["label"] << std::endl;
+                    << " *tensor_map[label]: " << *tensor_map["label"] << std::endl;
       i++;
       di.GetNextAsMap(&tensor_map);
     }
@@ -294,7 +304,11 @@ TEST_F(MindDataTestImageFolderSampler, TestDistributedSampler) {
   int64_t num_samples = 0;
   std::shared_ptr<SamplerRT> sampler = std::make_shared<DistributedSamplerRT>(num_samples, 11, 10, false);
   std::string folder_path = datasets_root_path_ + "/testPK/data";
-  auto tree = Build({ImageFolder(16, 2, 32, folder_path, false, std::move(sampler)), Repeat(4)});
+  auto op1 = ImageFolder(16, 2, 32, folder_path, false, std::move(sampler));
+  auto op2 = Repeat(4);
+  op1->set_total_repeats(4);
+  op1->set_num_repeats_per_epoch(4);
+  auto tree = Build({op1, op2});
   tree->Prepare();
   Status rc = tree->Launch();
   if (rc.IsError()) {
@@ -373,8 +387,8 @@ TEST_F(MindDataTestImageFolderSampler, TestImageFolderDecode) {
     while (tensor_map.size() != 0) {
       tensor_map["label"]->GetItemAt<int32_t>(&label, {});
       EXPECT_TRUE(label == res[i / 11]);
-      EXPECT_TRUE(
-        tensor_map["image"]->shape() == TensorShape({2268, 4032, 3}));  // verify shapes are correct after decode
+      EXPECT_TRUE(tensor_map["image"]->shape() ==
+                  TensorShape({2268, 4032, 3}));  // verify shapes are correct after decode
       MS_LOG(DEBUG) << "row: " << i << "\t" << tensor_map["image"]->shape() << "label:" << label << "\n";
       i++;
       di.GetNextAsMap(&tensor_map);

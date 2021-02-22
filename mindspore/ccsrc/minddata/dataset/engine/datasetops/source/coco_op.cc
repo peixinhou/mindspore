@@ -1,5 +1,5 @@
 /**
- * Copyright 2019 Huawei Technologies Co., Ltd
+ * Copyright 2019-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@
 #include "minddata/dataset/core/tensor_shape.h"
 #include "minddata/dataset/engine/datasetops/source/sampler/sequential_sampler.h"
 #include "minddata/dataset/engine/db_connector.h"
-#include "minddata/dataset/engine/opt/pass.h"
+#include "minddata/dataset/engine/execution_tree.h"
 
 namespace mindspore {
 namespace dataset {
@@ -97,7 +97,7 @@ Status CocoOp::Builder::Build(std::shared_ptr<CocoOp> *ptr) {
         ColDescriptor(std::string(kJsonAnnoArea), DataType(DataType::DE_UINT32), TensorImpl::kFlexible, 1)));
       break;
     default:
-      RETURN_STATUS_UNEXPECTED("Invalid parameter, task type shoule be Detection, Stuff, Keypoint or Panoptic.");
+      RETURN_STATUS_UNEXPECTED("Invalid parameter, task type should be Detection, Stuff, Keypoint or Panoptic.");
   }
   *ptr = std::make_shared<CocoOp>(builder_task_type_, builder_dir_, builder_file_, builder_num_workers_,
                                   builder_rows_per_buffer_, builder_op_connector_size_, builder_decode_,
@@ -118,7 +118,7 @@ Status CocoOp::Builder::SanityCheck() {
   err_msg += builder_num_workers_ <= 0 ? "Invalid parameter, num_parallel_workers must be greater than 0, but got " +
                                            std::to_string(builder_num_workers_) + ".\n"
                                        : "";
-  return err_msg.empty() ? Status::OK() : Status(StatusCode::kUnexpectedError, __LINE__, __FILE__, err_msg);
+  return err_msg.empty() ? Status::OK() : Status(StatusCode::kMDUnexpectedError, __LINE__, __FILE__, err_msg);
 }
 
 CocoOp::CocoOp(const TaskType &task_type, const std::string &image_folder_path, const std::string &annotation_path,
@@ -210,7 +210,8 @@ void CocoOp::Print(std::ostream &out, bool show_all) const {
     // Call the super class for displaying any common detailed info
     ParallelOp::Print(out, show_all);
     // Then show any custom derived-internal stuff
-    out << "\nNumber of rows: " << num_rows_ << "\nCOCO Directory: " << image_folder_path_ << "\n\n";
+    out << "\nNumber of rows: " << num_rows_ << "\nCOCO Directory: " << image_folder_path_
+        << "\nDecode: " << (decode_ ? "yes" : "no") << "\n\n";
   }
 }
 
@@ -262,7 +263,7 @@ Status CocoOp::LoadTensorRow(row_id_type row_id, const std::string &image_id, Te
   } else if (task_type_ == TaskType::Panoptic) {
     RETURN_IF_NOT_OK(LoadMixTensorRow(row_id, image_id, image, coordinate, trow));
   } else {
-    RETURN_STATUS_UNEXPECTED("Invalid parameter, task type shoule be Detection, Stuff or Panoptic.");
+    RETURN_STATUS_UNEXPECTED("Invalid parameter, task type should be Detection, Stuff or Panoptic.");
   }
 
   return Status::OK();
@@ -301,6 +302,8 @@ Status CocoOp::LoadDetectionTensorRow(row_id_type row_id, const std::string &ima
     Tensor::CreateFromVector(iscrowd_row, TensorShape({static_cast<dsize_t>(iscrowd_row.size()), 1}), &iscrowd));
 
   (*trow) = TensorRow(row_id, {std::move(image), std::move(coordinate), std::move(category_id), std::move(iscrowd)});
+  std::string image_full_path = image_folder_path_ + std::string("/") + image_id;
+  trow->setPath({image_full_path, annotation_path_, annotation_path_, annotation_path_});
   return Status::OK();
 }
 
@@ -323,6 +326,8 @@ Status CocoOp::LoadSimpleTensorRow(row_id_type row_id, const std::string &image_
   RETURN_IF_NOT_OK(Tensor::CreateFromVector(item_queue, TensorShape(bbox_dim), &item));
 
   (*trow) = TensorRow(row_id, {std::move(image), std::move(coordinate), std::move(item)});
+  std::string image_full_path = image_folder_path_ + std::string("/") + image_id;
+  trow->setPath({image_full_path, annotation_path_, annotation_path_});
   return Status::OK();
 }
 
@@ -331,7 +336,7 @@ Status CocoOp::LoadSimpleTensorRow(row_id_type row_id, const std::string &image_
 // column ["bbox"] with datatype=float32
 // column ["category_id"] with datatype=uint32
 // column ["iscrowd"] with datatype=uint32
-// column ["area"] with datattype=uint32
+// column ["area"] with datatype=uint32
 Status CocoOp::LoadMixTensorRow(row_id_type row_id, const std::string &image_id, std::shared_ptr<Tensor> image,
                                 std::shared_ptr<Tensor> coordinate, TensorRow *trow) {
   std::shared_ptr<Tensor> category_id, iscrowd, area;
@@ -364,6 +369,8 @@ Status CocoOp::LoadMixTensorRow(row_id_type row_id, const std::string &image_id,
 
   (*trow) = TensorRow(
     row_id, {std::move(image), std::move(coordinate), std::move(category_id), std::move(iscrowd), std::move(area)});
+  std::string image_full_path = image_folder_path_ + std::string("/") + image_id;
+  trow->setPath({image_full_path, annotation_path_, annotation_path_, annotation_path_, annotation_path_});
   return Status::OK();
 }
 
@@ -418,9 +425,13 @@ Status CocoOp::SearchNodeInJson(const nlohmann::json &input_tree, std::string no
 }
 
 Status CocoOp::ParseAnnotationIds() {
-  std::ifstream in(annotation_path_);
   nlohmann::json js;
-  in >> js;
+  try {
+    std::ifstream in(annotation_path_);
+    in >> js;
+  } catch (const std::exception &err) {
+    RETURN_STATUS_UNEXPECTED("Invalid file, failed to open json file: " + annotation_path_);
+  }
 
   std::vector<std::string> image_que;
   nlohmann::json image_list;
@@ -460,7 +471,7 @@ Status CocoOp::ParseAnnotationIds() {
         RETURN_IF_NOT_OK(PanopticColumnLoad(annotation, file_name, image_id));
         break;
       default:
-        RETURN_STATUS_UNEXPECTED("Invalid parameter, task type shoule be Detection, Stuff, Keypoint or Panoptic.");
+        RETURN_STATUS_UNEXPECTED("Invalid parameter, task type should be Detection, Stuff, Keypoint or Panoptic.");
     }
   }
   for (auto img : image_que) {
@@ -608,7 +619,7 @@ Status CocoOp::CategoriesColumnLoad(const nlohmann::json &categories_tree) {
     if (task_type_ == TaskType::Panoptic) {
       auto itr_isthing = category.find(kJsonCategoriesIsthing);
       CHECK_FAIL_RETURN_UNEXPECTED(itr_isthing != category.end(),
-                                   "Invalid data, no isthing found in categories of " + annotation_path_);
+                                   "Invalid data, nothing found in categories of " + annotation_path_);
       label_info.push_back(*itr_isthing);
     }
     label_index_.emplace_back(std::make_pair(name, label_info));
@@ -627,7 +638,8 @@ Status CocoOp::LaunchThreadsAndInitOp() {
   }
   RETURN_IF_NOT_OK(io_block_queues_.Register(tree_->AllTasks()));
   RETURN_IF_NOT_OK(wait_for_workers_post_.Register(tree_->AllTasks()));
-  RETURN_IF_NOT_OK(tree_->LaunchWorkers(num_workers_, std::bind(&CocoOp::WorkerEntry, this, std::placeholders::_1)));
+  RETURN_IF_NOT_OK(
+    tree_->LaunchWorkers(num_workers_, std::bind(&CocoOp::WorkerEntry, this, std::placeholders::_1), "", id()));
   TaskManager::FindMe()->Post();
   RETURN_IF_NOT_OK(this->ParseAnnotationIds());
   RETURN_IF_NOT_OK(this->InitSampler());
@@ -662,12 +674,6 @@ Status CocoOp::GetClassIndexing(const std::string &dir, const std::string &file,
   return Status::OK();
 }
 
-// Visitor accept method for NodePass
-Status CocoOp::Accept(NodePass *p, bool *modified) {
-  // Downcast shared pointer then call visitor
-  return p->RunOnNode(shared_from_base<CocoOp>(), modified);
-}
-
 Status CocoOp::ComputeColMap() {
   // Set the column name map (base class field)
   if (column_name_id_map_.empty()) {
@@ -680,34 +686,28 @@ Status CocoOp::ComputeColMap() {
   return Status::OK();
 }
 
-// Get Dataset size
-Status CocoOp::GetDatasetSize(int64_t *dataset_size) {
-  if (dataset_size_ > 0) {
-    *dataset_size = dataset_size_;
-    return Status::OK();
+Status CocoOp::GetClassIndexing(std::vector<std::pair<std::string, std::vector<int32_t>>> *output_class_indexing) {
+  if ((*output_class_indexing).empty()) {
+    if ((task_type_ != TaskType::Detection) && (task_type_ != TaskType::Panoptic)) {
+      MS_LOG(ERROR) << "Class index only valid in \"Detection\" and \"Panoptic\" task.";
+      RETURN_STATUS_UNEXPECTED("GetClassIndexing: Get Class Index failed in CocoOp.");
+    }
+    std::shared_ptr<CocoOp> op;
+    std::string task_type;
+    switch (task_type_) {
+      case TaskType::Detection:
+        task_type = "Detection";
+        break;
+      case TaskType::Panoptic:
+        task_type = "Panoptic";
+        break;
+    }
+    RETURN_IF_NOT_OK(Builder().SetDir(image_folder_path_).SetFile(annotation_path_).SetTask(task_type).Build(&op));
+    RETURN_IF_NOT_OK(op->ParseAnnotationIds());
+    for (const auto label : op->label_index_) {
+      (*output_class_indexing).emplace_back(std::make_pair(label.first, label.second));
+    }
   }
-  int64_t num_rows = 0, sample_size;
-  std::string task_type;
-  switch (task_type_) {
-    case TaskType::Detection:
-      task_type = "Detection";
-      break;
-    case TaskType::Keypoint:
-      task_type = "Keypoint";
-      break;
-    case TaskType::Panoptic:
-      task_type = "Panoptic";
-      break;
-    case TaskType::Stuff:
-      task_type = "Stuff";
-      break;
-  }
-  if (image_ids_.size() == 0) {
-    RETURN_IF_NOT_OK(CountTotalRows(image_folder_path_, annotation_path_, task_type, &num_rows));
-  }
-  sample_size = sampler_->GetNumSamples();
-  *dataset_size = sample_size != 0 ? std::min(num_rows, sample_size) : num_rows;
-  dataset_size_ = *dataset_size;
   return Status::OK();
 }
 }  // namespace dataset

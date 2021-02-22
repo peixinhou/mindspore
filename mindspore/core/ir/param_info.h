@@ -75,6 +75,18 @@ class ParamInfo {
     return clone;
   }
 
+  int32_t comm_fusion() const { return fusion_type_; }
+  void set_comm_fusion(int32_t fusion_type) { fusion_type_ = fusion_type; }
+
+  bool parallel_optimizer() const { return parallel_optimizer_; }
+  void set_parallel_optimizer(bool parallel_optimizer) { parallel_optimizer_ = parallel_optimizer; }
+
+  bool cache_enable() const { return cache_enable_; }
+  void set_cache_enable(bool cache_enable) { cache_enable_ = cache_enable; }
+
+  std::vector<int64_t> cache_shape() const { return cache_shape_; }
+  void set_cache_shape(const std::vector<int64_t> &cache_shape) { cache_shape_ = cache_shape; }
+
  private:
   std::string name_{"Parameter"};
   bool requires_grad_{true};
@@ -84,6 +96,10 @@ class ParamInfo {
   bool cloned_{false};
   std::vector<int32_t> be_cloned_index_;
   int32_t cloned_index_{0};
+  int32_t fusion_type_{1};
+  bool parallel_optimizer_{true};
+  bool cache_enable_{false};
+  std::vector<int64_t> cache_shape_;
 };
 }  // namespace mindspore
 #endif  // MINDSPORE_CORE_IR_PARAM_INFO_H_

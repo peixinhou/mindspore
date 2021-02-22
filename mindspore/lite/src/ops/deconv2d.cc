@@ -21,8 +21,7 @@
 #include "src/common/log_adapter.h"
 #ifdef PRIMITIVE_WRITEABLE
 #include <float.h>
-
-#include "tools/converter/quantizer/quantize_util.h"
+#include "src/param_value_lite.h"
 #endif
 
 #ifndef PRIMITIVE_WRITEABLE
@@ -47,8 +46,9 @@ int DeConv2D::GetPadLeft() const { return this->primitive_->value.AsDeConv2D()->
 int DeConv2D::GetPadRight() const { return this->primitive_->value.AsDeConv2D()->padRight; }
 int DeConv2D::GetDilateW() const { return this->primitive_->value.AsDeConv2D()->dilateW; }
 int DeConv2D::GetDilateH() const { return this->primitive_->value.AsDeConv2D()->dilateH; }
-bool DeConv2D::GetHasBias() const { return this->primitive_->value.AsDeConv2D()->hasBias; }
 int DeConv2D::GetActivationType() const { return this->primitive_->value.AsDeConv2D()->activationType; }
+int DeConv2D::GetOutputPaddingW() const { return this->primitive_->value.AsDeConv2D()->outputPaddingW; }
+int DeConv2D::GetOutputPaddingH() const { return this->primitive_->value.AsDeConv2D()->outputPaddingH; }
 
 void DeConv2D::SetFormat(int format) { this->primitive_->value.AsDeConv2D()->format = (schema::Format)format; }
 void DeConv2D::SetGroup(int group) { this->primitive_->value.AsDeConv2D()->group = group; }
@@ -65,7 +65,6 @@ void DeConv2D::SetPadLeft(int pad_left) { this->primitive_->value.AsDeConv2D()->
 void DeConv2D::SetPadRight(int pad_right) { this->primitive_->value.AsDeConv2D()->padRight = pad_right; }
 void DeConv2D::SetDilateW(int dilate_w) { this->primitive_->value.AsDeConv2D()->dilateW = dilate_w; }
 void DeConv2D::SetDilateH(int dilate_h) { this->primitive_->value.AsDeConv2D()->dilateH = dilate_h; }
-void DeConv2D::SetHasBias(bool has_bias) { this->primitive_->value.AsDeConv2D()->hasBias = has_bias; }
 void DeConv2D::SetActivationType(int activation_type) {
   this->primitive_->value.AsDeConv2D()->activationType = (schema::ActivationType)activation_type;
 }
@@ -76,7 +75,7 @@ void ConvertConvWeight(const ParameterPtr &param_node) {
   auto weight = std::dynamic_pointer_cast<ParamValueLite>(param);
   MS_ASSERT(weight != nullptr);
 
-  std::unique_ptr<T> buf(new (std::nothrow) T[weight->tensor_shape_size()]);
+  std::unique_ptr<T[]> buf(new (std::nothrow) T[weight->tensor_shape_size()]);
   if (buf == nullptr) {
     MS_LOG(ERROR) << "new buf failed";
     return;
@@ -136,21 +135,21 @@ void DeConv2D::PopulaterConv2DMultiGroup(const Primitive &prim, schema::Primitiv
   } else {
     attr->format = schema::Format::Format_NUM_OF_FORMAT;
   }
-  auto pad_list = GetValue<std::vector<int>>(prim.GetAttr("pad_list"));
+  auto pad_list = CastToInt(prim.GetAttr("pad_list"));
   attr->padUp = pad_list.at(0);
   attr->padDown = pad_list.at(1);
   attr->padLeft = pad_list.at(2);
   attr->padRight = pad_list.at(3);
 
-  auto dilation = GetValue<std::vector<int>>(prim.GetAttr("dilation"));
+  auto dilation = CastToInt(prim.GetAttr("dilation"));
   attr->dilateH = dilation.at(0);
   attr->dilateW = dilation.at(1);
 
-  auto kernel_size = GetValue<std::vector<int>>(prim.GetAttr("kernel_size"));
+  auto kernel_size = CastToInt(prim.GetAttr("kernel_size"));
   attr->kernelH = kernel_size.at(0);
   attr->kernelW = kernel_size.at(1);
 
-  auto stride = GetValue<std::vector<int>>(prim.GetAttr("stride"));
+  auto stride = CastToInt(prim.GetAttr("stride"));
   attr->strideH = stride.at(0);
   attr->strideW = stride.at(1);
 
@@ -172,7 +171,7 @@ void DeConv2D::PopulaterConv2DMultiGroup(const Primitive &prim, schema::Primitiv
 
   int channel_mutiplier = 1;
   if (prim.GetAttr("channel_mutiplier") != nullptr) {
-    channel_mutiplier = GetValue<int>(prim.GetAttr("channel_multiplier"));
+    channel_mutiplier = CastToInt(prim.GetAttr("channel_multiplier")).front();
   }
   attr->channelMultiplier = channel_mutiplier;
 
@@ -203,25 +202,25 @@ void DeConv2D::PopulaterDeConv2DSingleGroup(const Primitive &prim, schema::Primi
   } else {
     attr->format = schema::Format_NUM_OF_FORMAT;
   }
-  auto pad_list = GetValue<std::vector<int>>(prim.GetAttr("pad_list"));
+  auto pad_list = CastToInt(prim.GetAttr("pad_list"));
   attr->padUp = pad_list.at(0);
   attr->padDown = pad_list.at(1);
   attr->padLeft = pad_list.at(2);
   attr->padRight = pad_list.at(3);
 
-  auto dilation = GetValue<std::vector<int>>(prim.GetAttr("dilation"));
+  auto dilation = CastToInt(prim.GetAttr("dilation"));
   attr->dilateH = dilation.at(0);
   attr->dilateW = dilation.at(1);
 
-  auto kernel_size = GetValue<std::vector<int>>(prim.GetAttr("kernel_size"));
+  auto kernel_size = CastToInt(prim.GetAttr("kernel_size"));
   attr->kernelH = kernel_size.at(0);
   attr->kernelW = kernel_size.at(1);
 
-  auto stride = GetValue<std::vector<int>>(prim.GetAttr("stride"));
+  auto stride = CastToInt(prim.GetAttr("stride"));
   attr->strideH = stride.at(0);
   attr->strideW = stride.at(1);
 
-  attr->channelOut = GetValue<int>(prim.GetAttr("out_channel"));
+  attr->channelOut = CastToInt(prim.GetAttr("out_channel")).front();
 
   auto pad_mode = GetValue<std::string>(prim.GetAttr("pad_mode"));
   if (pad_mode == "valid" || pad_mode == "VALID") {
@@ -256,7 +255,7 @@ int DeConv2D::UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &i
     MS_LOG(ERROR) << "primitive_ type is error:" << this->primitive_->value.type;
     return RET_ERROR;
   }
-  int group = GetValue<int>(prim.GetAttr("group"));
+  int group = CastToInt(prim.GetAttr("group")).front();
   if (group == 1) {
     PopulaterDeConv2DSingleGroup(prim, this->primitive_, group);
   } else if (group > 1) {
@@ -274,10 +273,11 @@ int DeConv2D::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffer
     MS_LOG(ERROR) << "value_as_DeConv2D return nullptr";
     return RET_ERROR;
   }
-  auto val_offset = schema::CreateDeConv2D(
-    *fbb, attr->format(), attr->group(), attr->channelIn(), attr->channelOut(), attr->kernelW(), attr->kernelH(),
-    attr->strideW(), attr->strideH(), attr->padMode(), attr->padUp(), attr->padDown(), attr->padLeft(),
-    attr->padRight(), attr->dilateW(), attr->dilateH(), attr->hasBias(), attr->activationType());
+  auto val_offset =
+    schema::CreateDeConv2D(*fbb, attr->format(), attr->group(), attr->channelIn(), attr->channelOut(), attr->kernelW(),
+                           attr->kernelH(), attr->strideW(), attr->strideH(), attr->padMode(), attr->padUp(),
+                           attr->padDown(), attr->padLeft(), attr->padRight(), attr->dilateW(), attr->dilateH(),
+                           attr->hasBias(), attr->activationType(), attr->outputPaddingW(), attr->outputPaddingH());
   auto prim_offset = schema::CreatePrimitive(*fbb, schema::PrimitiveType_DeConv2D, val_offset.o);
   fbb->Finish(prim_offset);
   return RET_OK;
@@ -297,8 +297,9 @@ int DeConv2D::GetPadLeft() const { return this->primitive_->value_as_DeConv2D()-
 int DeConv2D::GetPadRight() const { return this->primitive_->value_as_DeConv2D()->padRight(); }
 int DeConv2D::GetDilateW() const { return this->primitive_->value_as_DeConv2D()->dilateW(); }
 int DeConv2D::GetDilateH() const { return this->primitive_->value_as_DeConv2D()->dilateH(); }
-bool DeConv2D::GetHasBias() const { return this->primitive_->value_as_DeConv2D()->hasBias(); }
 int DeConv2D::GetActivationType() const { return this->primitive_->value_as_DeConv2D()->activationType(); }
+int DeConv2D::GetOutputPaddingW() const { return this->primitive_->value_as_DeConv2D()->outputPaddingW(); }
+int DeConv2D::GetOutputPaddingH() const { return this->primitive_->value_as_DeConv2D()->outputPaddingH(); }
 
 PrimitiveC *DeConv2DCreator(const schema::Primitive *primitive) {
   return PrimitiveC::NewPrimitiveC<DeConv2D>(primitive);
@@ -317,7 +318,7 @@ int DeConv2D::InferShape(std::vector<lite::Tensor *> inputs_, std::vector<lite::
   output->set_format(input->format());
   output->set_data_type(input->data_type());
   if (!infer_flag()) {
-    return RET_OK;
+    return RET_INFER_INVALID;
   }
   int32_t input_h = input->Height();
   int32_t input_w = input->Width();
@@ -351,6 +352,8 @@ int DeConv2D::InferShape(std::vector<lite::Tensor *> inputs_, std::vector<lite::
     MS_LOG(ERROR) << "unsupported pad mode for deconv";
     return RET_ERROR;
   }
+  output_h += GetOutputPaddingH();
+  output_w += GetOutputPaddingW();
   std::vector<int> out_shape = {output_n, output_h, output_w, output_c};
   output->set_shape(out_shape);
 

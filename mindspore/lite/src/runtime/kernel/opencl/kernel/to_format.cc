@@ -27,23 +27,51 @@ using mindspore::kernel::KERNEL_ARCH::kGPU;
 using mindspore::lite::KernelRegistrar;
 using mindspore::lite::RET_ERROR;
 using mindspore::lite::RET_OK;
+using mindspore::lite::opencl::MemType;
 using mindspore::schema::PrimitiveType_ToFormat;
 
 namespace mindspore::kernel {
 
-int ToFormatOpenCLKernel::Init() {
+int ToFormatOpenCLKernel::CheckSpecs() {
   if (in_tensors_.size() != 1 || out_tensors_.size() != 1) {
-    MS_LOG(ERROR) << "Invalid input size: " << in_tensors_.size() << ", output size: " << out_tensors_.size();
+    MS_LOG(ERROR) << "in size: " << in_tensors_.size() << ", out size: " << out_tensors_.size();
+    return RET_ERROR;
+  }
+  auto data_type = in_tensors_.front()->data_type();
+  if (data_type != kNumberTypeFloat32 && data_type != kNumberTypeFloat16 && data_type != kNumberTypeInt32) {
+    MS_LOG(ERROR) << "Unsupported data type " << data_type;
     return RET_ERROR;
   }
   auto parameter = reinterpret_cast<OpenCLToFormatParameter *>(op_parameter_);
   out_mem_type_ = parameter->out_mem_type;
-  std::map<TypeId, std::string> dtype_str{{kNumberTypeFloat32, "float"}, {kNumberTypeFloat16, "half"}};
+  return RET_OK;
+}
+
+void ToFormatOpenCLKernel::SetConstArgs() {
+  cl_int4 shape{(cl_int)N_, (cl_int)H_, (cl_int)W_, (cl_int)C_};
+  cl_int4 gsize{(cl_int)(N_ * H_), (cl_int)W_, (cl_int)UP_DIV(C_, C4NUM), 1};
+  ocl_runtime_->SetKernelArg(kernel_, 2, gsize);
+  ocl_runtime_->SetKernelArg(kernel_, 3, shape);
+}
+
+void ToFormatOpenCLKernel::SetGlobalLocal() {
+  global_size_ = {N_ * H_, W_, UP_DIV(C_, C4NUM)};
+  local_size_ = {8, 16, 3};
+  size_t max_work_group_size = ocl_runtime_->DeviceMaxWorkGroupSize();
+  if (max_work_group_size < 384) {
+    local_size_[2] = 1;
+  }
+  OpenCLKernel::AlignGlobalLocal(global_size_, local_size_);
+}
+
+int ToFormatOpenCLKernel::Prepare() {
+  std::map<TypeId, std::string> dtype_str{
+    {kNumberTypeFloat32, "float"}, {kNumberTypeFloat16, "half"}, {kNumberTypeInt32, "float"}};
   std::string kernel_name;
-  if (parameter->out_mem_type == OpenCLMemType::IMG) {
-    kernel_name = "to_format_NHWC_to_NHWC4_IMG_" + dtype_str[in_tensors_[0]->data_type()];
+  if (out_mem_type_ == MemType::IMG) {
+    kernel_name = "to_format_NHWC_to_NHWC4_IMG_" + dtype_str[in_tensors_.front()->data_type()];
   } else {
-    kernel_name = "to_format_NHWC4_to_NHWC_BUF_" + dtype_str[out_tensors_[0]->data_type()];
+    kernel_name = "to_format_NHWC4_to_NHWC_BUF_" + dtype_str[out_tensors_.front()->data_type()];
   }
   this->set_name(kernel_name);
 
@@ -51,82 +79,52 @@ int ToFormatOpenCLKernel::Init() {
   kernel_ = ocl_runtime_->GetKernelFromBinary(kernel_name);
 #else
   std::string program_name = "to_format";
-  std::set<std::string> build_options;
   std::string source = to_format_source;
   ocl_runtime_->LoadSource(program_name, source);
-  ocl_runtime_->BuildKernel(kernel_, program_name, kernel_name, build_options);
+  std::vector<std::string> ext_build_opt;
+  if (in_tensors_[0]->data_type() == kNumberTypeFloat32) {
+    ext_build_opt.push_back("-DREAD_IMAGEIN=read_imagef");
+  } else {
+    ext_build_opt.push_back("-DREAD_IMAGEIN=read_imageh");
+  }
+  ocl_runtime_->BuildKernel(kernel_, program_name, kernel_name, ext_build_opt);
 #endif
 
-  InitNHWC();
-  MS_LOG(DEBUG) << kernel_name << " Init Done!";
-  return RET_OK;
-}
+  auto output = GpuTensorInfo(out_tensors_.front());
+  N_ = output.N;
+  H_ = output.H;
+  W_ = output.W;
+  C_ = output.C;
 
-int ToFormatOpenCLKernel::InitNHWC() {
-  std::vector<int> out_shape = out_tensors_[0]->shape();
-  if (out_shape.size() == 1) {
-    N_ = out_shape[0];
-    H_ = 1;
-    W_ = 1;
-    C_ = 1;
-  } else if (out_shape.size() == 2) {
-    N_ = out_shape[0];
-    H_ = 1;
-    W_ = 1;
-    C_ = out_shape[1];
-  } else if (out_shape.size() == 3) {
-    N_ = out_shape[0];
-    H_ = 1;
-    W_ = out_shape[1];
-    C_ = out_shape[2];
-  } else if (out_shape.size() == 4) {
-    N_ = out_shape[0];
-    H_ = out_shape[1];
-    W_ = out_shape[2];
-    C_ = out_shape[3];
-  }
+  SetGlobalLocal();
+  SetConstArgs();
+  MS_LOG(DEBUG) << kernel_name << " Init Done!";
   return RET_OK;
 }
 
 int ToFormatOpenCLKernel::Run() {
   MS_LOG(DEBUG) << this->name() << " Running!";
-  std::vector<size_t> global = {N_ * H_, W_, UP_DIV(C_, C4NUM)};
-  std::vector<size_t> local = {8, 16, 3};
-  size_t max_work_group_size = ocl_runtime_->GetKernelMaxWorkGroupSize(kernel_(), (*ocl_runtime_->Device())());
-  if (max_work_group_size < 384) {
-    local[2] = 1;
-  }
-  cl_int4 shape{(cl_int)N_, (cl_int)H_, (cl_int)W_, (cl_int)C_};
-  cl_int4 gsize{(cl_int)global[0], (cl_int)global[1], (cl_int)global[2], 1};
-
-  auto src_mem_type = (out_mem_type_ == OpenCLMemType::IMG) ? lite::opencl::MemType::BUF : lite::opencl::MemType::IMG;
-  auto dst_mem_type = (out_mem_type_ == OpenCLMemType::IMG) ? lite::opencl::MemType::IMG : lite::opencl::MemType::BUF;
-  ocl_runtime_->SetKernelArg(kernel_, 0, in_tensors_[0]->data_c(), src_mem_type);
-  ocl_runtime_->SetKernelArg(kernel_, 1, out_tensors_[0]->data_c(), dst_mem_type);
-  ocl_runtime_->SetKernelArg(kernel_, 2, gsize);
-  ocl_runtime_->SetKernelArg(kernel_, 3, shape);
-  ocl_runtime_->RunKernel(kernel_, global, local, nullptr);
+  auto src_mem_type = (out_mem_type_ == MemType::IMG) ? lite::opencl::MemType::BUF : lite::opencl::MemType::IMG;
+  auto dst_mem_type = out_mem_type_;
+  ocl_runtime_->SetKernelArg(kernel_, 0, in_tensors_.front()->data_c(), src_mem_type);
+  ocl_runtime_->SetKernelArg(kernel_, 1, out_tensors_.front()->data_c(), dst_mem_type);
+  ocl_runtime_->RunKernel(kernel_, global_range_, local_range_, nullptr, &event_);
   return RET_OK;
 }
 
-kernel::LiteKernel *OpenCLToFormatKernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                                const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter,
-                                                const lite::InnerContext *ctx, const kernel::KernelKey &desc,
-                                                const mindspore::lite::PrimitiveC *primitive) {
-  auto *kernel = new (std::nothrow) ToFormatOpenCLKernel(reinterpret_cast<OpParameter *>(opParameter), inputs, outputs);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "kernel " << opParameter->name_ << " create failed.";
-    free(opParameter);
-    return nullptr;
+int ToFormatOpenCLKernel::InferShape() {
+  if (infer_shape_flag_) {
+    return RET_OK;
   }
-  auto ret = kernel->Init();
-  if (ret != mindspore::lite::RET_OK) {
-    delete kernel;
-    return nullptr;
+  if (in_tensors_[0]->shape().size() == 0 || in_tensors_[0]->ElementsNum() < 0) {
+    MS_LOG(ERROR) << "to_format op in tensor shape is 0, infer shape failed!";
+    return RET_ERROR;
   }
-  return kernel;
+  out_tensors_[0]->set_shape(in_tensors_[0]->shape());
+  infer_shape_flag_ = true;
+  return RET_OK;
 }
 
-REG_KERNEL(kGPU, kNumberTypeFloat16, PrimitiveType_ToFormat, OpenCLToFormatKernelCreator)
-REG_KERNEL(kGPU, kNumberTypeFloat32, PrimitiveType_ToFormat, OpenCLToFormatKernelCreator)
+REG_KERNEL(kGPU, kNumberTypeFloat16, PrimitiveType_ToFormat, OpenCLKernelCreator<ToFormatOpenCLKernel>)
+REG_KERNEL(kGPU, kNumberTypeFloat32, PrimitiveType_ToFormat, OpenCLKernelCreator<ToFormatOpenCLKernel>)
 }  // namespace mindspore::kernel

@@ -1,5 +1,5 @@
 /**
- * Copyright 2019 Huawei Technologies Co., Ltd
+ * Copyright 2019-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -107,14 +107,8 @@ class RenameOp : public PipelineOp {
   // Class functor operator () override.
   // All dataset ops operate by launching a thread (see ExecutionTree). This class functor will
   // provide the master loop that drives the logic for performing the work
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status operator()() override;
-
-  // Base-class override for NodePass visitor acceptor.
-  // @param p - Pointer to the NodePass to be accepted.
-  // @param modified - Whether this node visit modified the pipeline.
-  // @return - Status of the node visit.
-  Status Accept(NodePass *p, bool *modified) override;
 
   // Op name getter
   // @return Name of the current Op

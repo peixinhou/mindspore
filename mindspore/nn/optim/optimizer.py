@@ -83,6 +83,9 @@ class Optimizer(Cell):
     Raises:
         ValueError: If the learning_rate is a Tensor, but the dimension of tensor is greater than 1.
         TypeError: If the learning_rate is not any of the three types: float, Tensor, nor Iterable.
+
+    Supported Platforms:
+        ``Ascend`` ``GPU``
     """
 
     def __init__(self, learning_rate, parameters, weight_decay=0.0, loss_scale=1.0):
@@ -105,7 +108,7 @@ class Optimizer(Cell):
         weight_decay = self._preprocess_weight_decay(weight_decay)
 
         self._unique = True
-        self._target = 'Ascend'
+        self._target = context.get_context("device_target")
         self.dynamic_lr = False
         self.assignadd = None
         self.global_step = None
@@ -135,23 +138,37 @@ class Optimizer(Cell):
         if self.is_group:
             self.parameters = ParameterTuple(self.group_params)
             self.weight_decay = tuple(self.group_weight_decay)
+            self.weight_decay_tensor_tuple = tuple(Tensor(x, mstype.float32) for x in self.group_weight_decay)
             decay_filter = lambda x: x > 0
             self.decay_flags = tuple(decay_filter(x) for x in self.weight_decay)
             self.exec_weight_decay = any(self.decay_flags)
         else:
             self.parameters = ParameterTuple(parameters)
             self.weight_decay = weight_decay * loss_scale
+            self.weight_decay_tensor = Tensor(self.weight_decay, mstype.float32)
             decay_filter = lambda x: 'beta' not in x.name and 'gamma' not in x.name
             self.decay_flags = tuple(decay_filter(x) for x in self.parameters)
             self.exec_weight_decay = self.weight_decay > 0
+        # when a parameter has been unique, there is no need do another unique in optimizer.
+        for param in self.parameters:
+            if param.unique:
+                self._unique = False
+                break
         ps_filter = lambda x: x.is_param_ps
         self.ps_parameters = tuple(ps_filter(x) for x in self.parameters)
-        self.reciprocal_scale = 1.0 / loss_scale
+        cache_filter = lambda x: x.cache_enable
+        self.cache_enable = tuple(cache_filter(x) for x in self.parameters)
+        self.reciprocal_scale = Tensor(1.0 / loss_scale, mstype.float32)
+        self.need_scale = loss_scale != 1.0
+        self.global_step_increase_tensor = Tensor(1, mstype.int32)
         self.param_length = len(self.parameters)
         self.map_ = C.Map()
         if context.get_auto_parallel_context("enable_parallel_optimizer"):
-            if _get_parallel_mode() == ParallelMode.DATA_PARALLEL:
+            if _get_parallel_mode() == ParallelMode.DATA_PARALLEL and context.get_context("device_target") == "Ascend":
                 self.use_parallel = True
+            elif _get_parallel_mode() == ParallelMode.DATA_PARALLEL \
+                    and context.get_context("device_target") != "Ascend":
+                raise RuntimeError("Parallel optimizer only supports Ascend in data parallel mode.")
             elif _get_parallel_mode() in (ParallelMode.STAND_ALONE, ParallelMode.HYBRID_PARALLEL):
                 raise RuntimeError("Parallel optimizer is not supported in {}.".format(_get_parallel_mode()))
             else:
@@ -160,10 +177,10 @@ class Optimizer(Cell):
             self.use_parallel = False
         if self.use_parallel:
             if self.cls_name not in ["Lamb", "AdamWeightDecay"]:
-                raise RuntimeError("Optimizer segmentation does not support optimizer {}".format(self.cls_name))
+                raise RuntimeError("Parallel optimizer does not support optimizer {}".format(self.cls_name))
             self.dev_num = _get_device_num()
             if self.dev_num > self.param_length:
-                raise RuntimeError("Optimizer segmentation can not be applied when the number of parameters {} is"
+                raise RuntimeError("Parallel optimizer can not be applied when the number of parameters {} is"
                                    " less than the number of devices {}".format(self.param_length, self.dev_num))
             self.param_rank = self._get_parameter_group_id()
             self.optim_filter = tuple(map(lambda x: x == _get_global_rank(), self.param_rank))
@@ -189,8 +206,7 @@ class Optimizer(Cell):
     @property
     def target(self):
         """The method is used to determine whether the parameter is updated on host or device. The input type is str
-           and can only be 'CPU' and 'Ascend'. In GPU environment, users can only configure value as 'CPU'.
-           The method is read-only."""
+           and can only be 'CPU', 'Ascend' or 'GPU'."""
         return self._target
 
     @target.setter
@@ -215,10 +231,10 @@ class Optimizer(Cell):
         if self.exec_weight_decay:
             params = self.parameters
             if self.is_group:
-                gradients = self.map_(F.partial(_apply_decay), self.weight_decay, self.decay_flags,
+                gradients = self.map_(F.partial(_apply_decay), self.weight_decay_tensor_tuple, self.decay_flags,
                                       params, gradients)
             else:
-                gradients = self.map_(F.partial(_apply_decay, self.weight_decay), self.decay_flags,
+                gradients = self.map_(F.partial(_apply_decay, self.weight_decay_tensor), self.decay_flags,
                                       params, gradients)
 
         return gradients
@@ -238,13 +254,13 @@ class Optimizer(Cell):
             tuple[Tensor], The gradients after loss scale.
 
         """
-        if self.reciprocal_scale != 1.0:
+        if self.need_scale:
             gradients = self.map_(F.partial(_grad_scale, self.reciprocal_scale), gradients)
 
         return gradients
 
     def _grad_sparse_indices_deduplicate(self, gradients):
-        """ In the case of using big operators, de duplicate the 'indexes' in gradients."""
+        """ In the case of using big operators, deduplicate the 'indexes' in gradients."""
         if self._target != 'CPU' and self._unique:
             gradients = self.map_(F.partial(_indices_deduplicate), gradients)
         return gradients
@@ -263,17 +279,17 @@ class Optimizer(Cell):
             learning_rate = float(learning_rate)
             validator.check_non_negative_float(learning_rate, "learning rate", self.cls_name)
             return learning_rate
-        if isinstance(learning_rate, Tensor) and learning_rate.dim() == 0:
+        if isinstance(learning_rate, Tensor) and learning_rate.ndim == 0:
             return learning_rate
 
         self.dynamic_lr = True
         if isinstance(learning_rate, Iterable):
             return Tensor(np.array(list(learning_rate)).astype(np.float32))
         if isinstance(learning_rate, Tensor):
-            if learning_rate.dim() > 1:
+            if learning_rate.ndim > 1:
                 raise ValueError("The dim of `Tensor` type Learning rate should be a 0 or 1,"
-                                 f"but got {learning_rate.dim()}.")
-            if learning_rate.dim() == 1 and learning_rate.size() < 2:
+                                 f"but got {learning_rate.ndim}.")
+            if learning_rate.ndim == 1 and learning_rate.size < 2:
                 logger.warning("If use `Tensor` type dynamic learning rate, please make sure that the number"
                                "of elements in the tensor passed is greater than 1.")
             return learning_rate
@@ -288,12 +304,12 @@ class Optimizer(Cell):
             if self.is_group_lr and self.dynamic_lr:
                 learning_rate = _ConvertToCell(learning_rate)
             return learning_rate
-        if isinstance(learning_rate, Tensor) and learning_rate.dim() == 0:
+        if isinstance(learning_rate, Tensor) and learning_rate.ndim == 0:
             learning_rate = Parameter(learning_rate, name)
             if self.is_group_lr and self.dynamic_lr:
                 learning_rate = _ConvertToCell(learning_rate)
             return learning_rate
-        if isinstance(learning_rate, Tensor) and learning_rate.dim() == 1:
+        if isinstance(learning_rate, Tensor) and learning_rate.ndim == 1:
             return _IteratorLearningRate(learning_rate, name)
         return learning_rate
 
@@ -323,8 +339,8 @@ class Optimizer(Cell):
     def _parse_group_params(self, parameters, learning_rate):
         """Parse group params."""
         self._check_group_params(parameters)
-        if isinstance(learning_rate, Tensor) and learning_rate.dim() == 1:
-            tensor_lr_length = learning_rate.size()
+        if isinstance(learning_rate, Tensor) and learning_rate.ndim == 1:
+            tensor_lr_length = learning_rate.size
         else:
             tensor_lr_length = 0
 
@@ -342,8 +358,8 @@ class Optimizer(Cell):
                 self.is_group_lr = True
                 group_lr = self._preprocess_single_lr(group_param['lr'])
 
-                if isinstance(group_lr, Tensor) and group_lr.dim() == 1:
-                    group_lr_length = group_lr.size()
+                if isinstance(group_lr, Tensor) and group_lr.ndim == 1:
+                    group_lr_length = group_lr.size
                     if tensor_lr_length == 0:
                         tensor_lr_length = group_lr_length
                     elif group_lr_length != tensor_lr_length:
@@ -431,7 +447,7 @@ class Optimizer(Cell):
             else:
                 lr = self.learning_rate(self.global_step)
 
-            F.control_depend(lr, self.assignadd(self.global_step, 1))
+            self.assignadd(self.global_step, self.global_step_increase_tensor)
         return lr
 
     def get_lr_parameter(self, param):
@@ -510,38 +526,35 @@ class Optimizer(Cell):
             new_param_group.append(next_params)
             for i in range(F.tuple_len(next_params)):
                 F.assign(key_group[root][i], next_params[i])
-        status = F.control_depend(optim_result, new_param_group[0][0])
-        for i in range(self.dev_num - 1):
-            status = F.depend(F.control_depend(new_param_group[i], new_param_group[i+1][0]), status)
-
-        return status
+        return new_param_group
 
     def construct(self, *hyper_params):
         raise NotImplementedError
 
 
 op_add = P.AddN()
-op_gather = P.GatherV2()
+op_gather = P.Gather()
+op_mul = P.Mul()
 
 _apply_decay = C.MultitypeFuncGraph("apply_decay")
 
 
-@_apply_decay.register("Number", "Bool", "Tensor", "RowTensor")
+@_apply_decay.register("Tensor", "Bool", "Tensor", "RowTensor")
 def _tensor_apply_decay_with_sparse(weight_decay, if_apply, weight, gradient):
     """Get grad with weight_decay."""
     if if_apply:
         indices = gradient.indices
-        values = op_add((op_gather(weight, indices, 0) * weight_decay, gradient.values))
+        values = op_add((op_gather(weight, indices, 0) * F.cast(weight_decay, F.dtype(weight)), gradient.values))
         shape = gradient.dense_shape
         return RowTensor(indices, values, shape)
     return gradient
 
 
-@_apply_decay.register("Number", "Bool", "Tensor", "Tensor")
+@_apply_decay.register("Tensor", "Bool", "Tensor", "Tensor")
 def _tensor_apply_decay(weight_decay, if_apply, weight, gradient):
     """Get grad with weight_decay."""
     if if_apply:
-        return op_add((weight * weight_decay, gradient))
+        return op_add((op_mul(weight, F.cast(weight_decay, F.dtype(weight))), gradient))
     return gradient
 
 
@@ -553,15 +566,17 @@ def tensor_grad_scale(scale, grad):
     """Get grad with scale."""
     if scale == 1.0:
         return grad
-    return grad * scale
+    return op_mul(grad, F.cast(scale, F.dtype(grad)))
 
+@_grad_scale.register("Tensor", "Tensor")
+def tensor_grad_scale_with_tensor(scale, grad):
+    """Get grad with scale."""
+    return op_mul(grad, F.cast(scale, F.dtype(grad)))
 
-@_grad_scale.register("Number", "RowTensor")
+@_grad_scale.register("Tensor", "RowTensor")
 def tensor_grad_scale_with_sparse(scale, grad):
     """Get grad with scale."""
-    if scale == 1.0:
-        return grad
-    return RowTensor(grad.indices, grad.values * scale, grad.dense_shape)
+    return RowTensor(grad.indices, grad.values * F.cast(scale, F.dtype(grad.values)), grad.dense_shape)
 
 
 @_indices_deduplicate.register("RowTensor")
@@ -599,14 +614,14 @@ class _IteratorLearningRate(LearningRateSchedule):
     def __init__(self, learning_rate, name):
         super(_IteratorLearningRate, self).__init__()
         if isinstance(learning_rate, Tensor):
-            if learning_rate.dim() != 1:
+            if learning_rate.ndim != 1:
                 raise ValueError("The dim of `Tensor` type dynamic learning rate should be a 1,"
-                                 f"but got {learning_rate.dim()}.")
+                                 f"but got {learning_rate.ndim}.")
         else:
             raise TypeError("Learning rate should be Tensor.")
 
         self.learning_rate = Parameter(learning_rate, name)
-        self.gather = P.GatherV2()
+        self.gather = P.Gather()
 
     def construct(self, global_step):
         return self.gather(self.learning_rate, global_step, 0)

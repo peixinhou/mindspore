@@ -1,5 +1,5 @@
 /**
- * Copyright 2020 Huawei Technologies Co., Ltd
+ * Copyright 2020-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,50 +19,42 @@
 
 namespace mindspore {
 namespace lite {
-STATUS CaffeInterpParser::Parse(const caffe::LayerParameter &proto, const caffe::LayerParameter &weight,
-                                schema::CNodeT *op, std::vector<schema::TensorT *> *weightVec) {
-  MS_LOG(DEBUG) << "parse CaffeInterpParser";
-  if (op == nullptr) {
-    MS_LOG(ERROR) << "op is null";
-    return RET_NULL_PTR;
-  }
-  op->primitive = std::make_unique<schema::PrimitiveT>();
-  if (op->primitive == nullptr) {
-    MS_LOG(ERROR) << "op->primitive is null";
-    return RET_NULL_PTR;
-  }
-
+PrimitiveC *CaffeInterpParser::ParseLitePrimitive(const caffe::LayerParameter &proto,
+                                                  const caffe::LayerParameter &weight) {
   std::unique_ptr<schema::ResizeT> attr = std::make_unique<schema::ResizeT>();
   if (attr == nullptr) {
     MS_LOG(ERROR) << "new op failed";
-    return RET_NULL_PTR;
+    return nullptr;
   }
 
-  const caffe::InterpParameter &interpParam = proto.interp_param();
-  if (interpParam.has_height()) {
-    int64_t height = interpParam.height();
+  const caffe::InterpParameter &interp_param = proto.interp_param();
+  if (interp_param.has_height()) {
+    int64_t height = interp_param.height();
     if (height < 0) {
       MS_LOG(ERROR) << "Interp height must be > 0";
-      return RET_ERROR;
+      return nullptr;
     }
     attr->newHeight = height;
   }
 
-  if (interpParam.has_width()) {
-    int64_t width = interpParam.width();
+  if (interp_param.has_width()) {
+    int64_t width = interp_param.width();
     if (width < 0) {
       MS_LOG(ERROR) << "Interp width must be > 0";
-      return RET_ERROR;
+      return nullptr;
     }
     attr->newWidth = width;
   }
-  attr->alignCorners = true;
   attr->method = schema::ResizeMethod_LINEAR;
-
-  op->name = proto.name();
-  op->primitive->value.type = schema::PrimitiveType_Resize;
-  op->primitive->value.value = attr.release();
-  return RET_OK;
+  attr->coordinateTransformMode = schema::CoordinateTransformMode_ALIGN_CORNERS;
+  auto primitive = std::make_unique<schema::PrimitiveT>();
+  primitive->value.type = schema::PrimitiveType_Resize;
+  primitive->value.value = attr.release();
+  auto primitive_c = PrimitiveC::Create(primitive.release());
+  if (interp_param.has_zoom_factor()) {
+    primitive_c->AddAttr("zoom_factor", MakeValue(interp_param.zoom_factor()));
+  }
+  return primitive_c;
 }
 
 CaffeNodeRegistrar g_caffeInterpParser("Interp", new CaffeInterpParser());

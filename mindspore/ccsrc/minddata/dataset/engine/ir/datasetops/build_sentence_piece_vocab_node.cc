@@ -1,5 +1,5 @@
 /**
- * Copyright 2020 Huawei Technologies Co., Ltd
+ * Copyright 2020-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "minddata/dataset/engine/datasetops/build_sentence_piece_vocab_op.h"
+#include "minddata/dataset/engine/opt/pass.h"
 #include "minddata/dataset/util/status.h"
 
 namespace mindspore {
@@ -29,7 +30,7 @@ namespace dataset {
 
 BuildSentenceVocabNode::BuildSentenceVocabNode(std::shared_ptr<DatasetNode> child,
                                                std::shared_ptr<SentencePieceVocab> vocab,
-                                               const std::vector<std::string> &col_names, uint32_t vocab_size,
+                                               const std::vector<std::string> &col_names, int32_t vocab_size,
                                                float character_coverage, SentencePieceModel model_type,
                                                const std::unordered_map<std::string, std::string> &params)
     : vocab_(vocab),
@@ -38,22 +39,32 @@ BuildSentenceVocabNode::BuildSentenceVocabNode(std::shared_ptr<DatasetNode> chil
       character_coverage_(character_coverage),
       model_type_(model_type),
       params_(params) {
-  this->children.push_back(child);
+  this->AddChild(child);
+}
+
+std::shared_ptr<DatasetNode> BuildSentenceVocabNode::Copy() {
+  auto node = std::make_shared<BuildSentenceVocabNode>(nullptr, vocab_, col_names_, vocab_size_, character_coverage_,
+                                                       model_type_, params_);
+  return node;
+}
+
+void BuildSentenceVocabNode::Print(std::ostream &out) const {
+  out << Name() + "<vocab>," + "columns:" + PrintColumns(col_names_) + ",vocab_size:" + std::to_string(vocab_size_) +
+           ",...)";
 }
 
 // Function to build BuildSentenceVocabNode
-std::vector<std::shared_ptr<DatasetOp>> BuildSentenceVocabNode::Build() {
-  // A vector containing shared pointer to the Dataset Ops that this object will create
-  std::vector<std::shared_ptr<DatasetOp>> node_ops;
-
-  std::shared_ptr<BuildSentencePieceVocabOp> build_sentence_piece_vocab_op;
-  build_sentence_piece_vocab_op = std::make_shared<BuildSentencePieceVocabOp>(
-    vocab_, col_names_, vocab_size_, character_coverage_, model_type_, params_, connector_que_size_);
-  node_ops.push_back(build_sentence_piece_vocab_op);
-  return node_ops;
+Status BuildSentenceVocabNode::Build(std::vector<std::shared_ptr<DatasetOp>> *const node_ops) {
+  auto op = std::make_shared<BuildSentencePieceVocabOp>(vocab_, col_names_, vocab_size_, character_coverage_,
+                                                        model_type_, params_, connector_que_size_);
+  op->set_total_repeats(GetTotalRepeats());
+  op->set_num_repeats_per_epoch(GetNumRepeatsPerEpoch());
+  node_ops->push_back(op);
+  return Status::OK();
 }
 
 Status BuildSentenceVocabNode::ValidateParams() {
+  RETURN_IF_NOT_OK(DatasetNode::ValidateParams());
   if (vocab_ == nullptr) {
     std::string err_msg = "BuildSentenceVocabNode: vocab is null.";
     MS_LOG(ERROR) << err_msg;
@@ -74,8 +85,23 @@ Status BuildSentenceVocabNode::ValidateParams() {
     RETURN_STATUS_SYNTAX_ERROR(err_msg);
   }
 
+  if (!col_names_.empty()) {
+    RETURN_IF_NOT_OK(ValidateDatasetColumnParam("BuildVocabNode", "columns", col_names_));
+  }
+
   return Status::OK();
 }
 
+// Visitor accepting method for IRNodePass
+Status BuildSentenceVocabNode::Accept(IRNodePass *const p, bool *const modified) {
+  // Downcast shared pointer then call visitor
+  return p->Visit(shared_from_base<BuildSentenceVocabNode>(), modified);
+}
+
+// Visitor accepting method for IRNodePass
+Status BuildSentenceVocabNode::AcceptAfter(IRNodePass *const p, bool *const modified) {
+  // Downcast shared pointer then call visitor
+  return p->VisitAfter(shared_from_base<BuildSentenceVocabNode>(), modified);
+}
 }  // namespace dataset
 }  // namespace mindspore

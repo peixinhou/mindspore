@@ -40,9 +40,8 @@ def set_config(args):
         "keep_checkpoint_max": 20,
         "save_checkpoint_path": "./",
         "platform": args.platform,
-        "activation": "Softmax",
-        "export_format": "MINDIR",
-        "export_file": "mobilenetv2.mindir"
+        "run_distribute": args.run_distribute,
+        "activation": "Softmax"
     })
     config_gpu = ed({
         "num_classes": 1000,
@@ -63,11 +62,8 @@ def set_config(args):
         "keep_checkpoint_max": 200,
         "save_checkpoint_path": "./",
         "platform": args.platform,
-        "ccl": "nccl",
         "run_distribute": args.run_distribute,
-        "activation": "Softmax",
-        "export_format": "MINDIR",
-        "export_file": "mobilenetv2.mindir"
+        "activation": "Softmax"
     })
     config_ascend = ed({
         "num_classes": 1000,
@@ -88,20 +84,17 @@ def set_config(args):
         "keep_checkpoint_max": 200,
         "save_checkpoint_path": "./",
         "platform": args.platform,
-        "ccl": "hccl",
         "device_id": int(os.getenv('DEVICE_ID', '0')),
         "rank_id": int(os.getenv('RANK_ID', '0')),
         "rank_size": int(os.getenv('RANK_SIZE', '1')),
         "run_distribute": int(os.getenv('RANK_SIZE', '1')) > 1.,
-        "activation": "Softmax",
-        "export_format": "MINDIR",
-        "export_file": "mobilenetv2.mindir"
+        "activation": "Softmax"
     })
     config = ed({"CPU": config_cpu,
                  "GPU": config_gpu,
                  "Ascend": config_ascend})
 
     if args.platform not in config.keys():
-        raise ValueError("Unsupport platform.")
+        raise ValueError("Unsupported platform.")
 
     return config[args.platform]

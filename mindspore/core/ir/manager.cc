@@ -197,11 +197,18 @@ void FuncGraphManager::AddFuncGraph(FuncGraphPtr func_graph, bool is_root) {
   if (func_graphs_.contains(func_graph)) {
     return;
   }
+
+  // New nodes to be acquired.
+  std::vector<AnfNodePtr> new_nodes = func_graph->parameters();
+  new_nodes.emplace_back(func_graph->get_return());
+  auto &isolate_nodes = func_graph->isolate_nodes();
+  new_nodes.insert(new_nodes.end(), isolate_nodes.begin(), isolate_nodes.end());
+
+  // Add func_graph as a managed graph.
   AddIntoManaged(func_graph);
-  std::vector<AnfNodePtr> para = func_graph->parameters();
-  AcquireNodes(para);
-  std::vector<AnfNodePtr> return_vec({func_graph->get_return()});
-  AcquireNodes(return_vec);
+
+  // Acquire all nodes from func_graph.
+  AcquireNodes(new_nodes);
 }
 
 // clear the all information in manager
@@ -210,6 +217,7 @@ void FuncGraphManager::Clear() {
   all_nodes_.clear();
   node_users_.clear();
   roots_.clear();
+  isolate_nodes_.clear();
 
   signals_->InvalidateComputer();
 }
@@ -269,11 +277,13 @@ void FuncGraphManager::AddIntoManaged(const FuncGraphPtr &fg) {
   MS_EXCEPTION_IF_NULL(fg);
   if (is_manage_) {
     if (fg->manager() != nullptr && (&(*fg->manager()) != this)) {
-      MS_LOG(WARNING) << "A func graph can only have one manager.";
+      MS_LOG(INFO) << "A func graph can only have one manager.";
     }
     FuncGraphManagerPtr this_manager = shared_from_this();
     fg->set_manager(this_manager);
   }
+  const auto &fg_isolate_nodes = fg->isolate_nodes();
+  isolate_nodes_.insert(fg_isolate_nodes.begin(), fg_isolate_nodes.end());
   func_graphs_.add(fg);
 }
 
@@ -433,10 +443,14 @@ void FuncGraphManager::AddParameter(const FuncGraphPtr &fg, const AnfNodePtr &pa
 }
 
 bool FuncGraphManager::Replace(const AnfNodePtr &old_node, const AnfNodePtr &new_node) {
+  auto func_graph = old_node->func_graph();
   auto tr = Transact();
   bool success = tr.Replace(old_node, new_node);
   if (success) {
     tr.Commit();
+    if (func_graph != nullptr) {
+      func_graph->ReplaceInOrder(old_node, new_node);
+    }
   }
   return success;
 }
@@ -444,6 +458,12 @@ bool FuncGraphManager::Replace(const AnfNodePtr &old_node, const AnfNodePtr &new
 void FuncGraphManager::SetEdge(const AnfNodePtr &node, int index, const AnfNodePtr &value) {
   auto tr = Transact();
   tr.SetEdge(node, index, value);
+  tr.Commit();
+}
+
+void FuncGraphManager::AddEdge(const AnfNodePtr &node, const AnfNodePtr &value) {
+  auto tr = Transact();
+  tr.AddEdge(node, value);
   tr.Commit();
 }
 
@@ -486,9 +506,9 @@ void FuncGraphManager::AddEdge(AnfNodePtr node, int index, AnfNodePtr input) {
       if (fg->AddFuncGraphUsed(used)) {
         signals_->InvalidateComputer();
       }
-      if (IsPrimitiveCNode(node, prim::kPrimJ)) {
-        fg->AddJFuncGraph(used);
-      }
+    }
+    if (IsPrimitiveCNode(node, prim::kPrimJ)) {
+      fg->AddJValueNode(input);
     }
   } else if (fg != nullptr && fg != input->func_graph()) {
     if (fg->AddFreeVariable(input)) {
@@ -507,9 +527,9 @@ void FuncGraphManager::DropEdge(AnfNodePtr node, int index, AnfNodePtr input) {
       if (fg->DropFuncGraphUsed(used)) {
         signals_->InvalidateComputer();
       }
-      if (IsPrimitiveCNode(node, prim::kPrimJ)) {
-        fg->DropJFuncGraph(used);
-      }
+    }
+    if (IsPrimitiveCNode(node, prim::kPrimJ)) {
+      fg->DropJValueNode(input);
     }
   } else if (fg != nullptr && fg != input->func_graph()) {
     if (fg->DropFreeVariable(input)) {
@@ -524,7 +544,7 @@ void FuncGraphManager::MoveAllNodes(FuncGraphPtr source, FuncGraphPtr target) {
   target->CopyFuncGraphCNodesIndex(source);
   target->CopyFreeVariables(source);
   target->CopyFuncGraphsUsed(source);
-  target->CopyJFuncGraphs(source);
+  target->CopyJValueNodes(source);
   signals_->InvalidateComputer();
   source->ClearAllManagerInfo();
 }
@@ -548,6 +568,13 @@ void FuncGraphManager::ParseChanges(const std::vector<Change> &changes, EdgeTupl
         (*rms)[old_node] += 1;
         (*adds)[edge.new_node] += 1;
         edge.root_node->set_input(edge.index, edge.new_node);
+      } break;
+      case Change::kTxAddEdge: {
+        auto edge = args.cast<ArgsOfAddEdge>();
+        auto index = edge.root_node->inputs().size();
+        (*add_edges)[std::make_pair(edge.root_node, std::make_pair(index, edge.new_node))] += 1;
+        (*adds)[edge.new_node] += 1;
+        edge.root_node->add_input(edge.new_node);
       } break;
       case Change::kTxSetParams: {
         auto param = args.cast<ArgsOfSetParams>();
@@ -614,6 +641,29 @@ void FuncGraphManager::CommitChanges(const std::vector<Change> &changes) {
   MaybeDropFuncGraphs(*drop_func_graphs);
 }
 
+void FuncGraphManager::ReplaceIsolateNode(const AnfNodePtr &old_node, const AnfNodePtr &new_node) {
+  MS_EXCEPTION_IF_NULL(old_node);
+  MS_EXCEPTION_IF_NULL(new_node);
+  if (isolate_nodes_.erase(old_node) == 0) {
+    return;
+  }
+  if (!new_node->isa<CNode>()) {
+    MS_LOG(EXCEPTION) << "Replace isolate node: " << old_node->DebugString()
+                      << " with non-cnode: " << new_node->DebugString();
+  }
+  isolate_nodes_.insert(new_node);
+}
+
+void FuncGraphManager::ClearIsolateNodes() {
+  // If FuncGraph A has IsolateNode which input is FuncGraph B, B had been add to FuncGraph A's valuenode
+  // by AddFuncGraph api, so if that isolate node is totoaly unused after AutoMonad, FuncGraph B should
+  // be removed from FuncGraph A's valuenode, otherwise it will confuse FVTotalComputer.
+  std::vector<AnfNodePtr> isolate_nodes_vec(isolate_nodes_.cbegin(), isolate_nodes_.cend());
+  auto drop_func_graphs = MaybeDropNodes(isolate_nodes_vec);
+  MaybeDropFuncGraphs(*drop_func_graphs);
+  isolate_nodes_.clear();
+}
+
 void FuncGraphTransaction::SetParameters(FuncGraphPtr fg, const std::vector<AnfNodePtr> &params) {
   changes_.emplace_back(Change::kTxSetParams, ArgsOfSetParams{fg, params});
 }
@@ -648,6 +698,15 @@ void FuncGraphTransaction::SetEdge(const AnfNodePtr &src_node, int k, const AnfN
     MS_LOG(EXCEPTION) << "src_node should be a cnode, but cast failed.";
   }
   changes_.emplace_back(Change::kTxSetEdge, ArgsOfSetEdge{cnode, v, IntToSize(k)});
+}
+
+void FuncGraphTransaction::AddEdge(const AnfNodePtr &src_node, const AnfNodePtr &v) {
+  MS_EXCEPTION_IF_NULL(src_node);
+  auto cnode = src_node->cast<CNodePtr>();
+  if (cnode == nullptr) {
+    MS_LOG(EXCEPTION) << "src_node should be a cnode, but cast failed.";
+  }
+  changes_.emplace_back(Change::kTxAddEdge, ArgsOfAddEdge{cnode, v});
 }
 
 void FuncGraphTransaction::Commit() {
@@ -880,32 +939,44 @@ void RecursiveComputer::CheckRecursiveGraphs(const FuncGraphPtr &fg, std::list<F
 }
 
 bool FuncGraphJTotalComputer::SeekJ(const FuncGraphPtr &fg, size_t seen_num) {
+  MS_EXCEPTION_IF_NULL(fg);
   if (fg->seen_ == seen_num) {
     MS_LOG(DEBUG) << fg->ToString() << " had been checked";
     return false;
   }
-  auto &j_fgs = fg->j_func_graphs();
-  if (!j_fgs.empty()) {
-    // check g1->J(fg)->g2->g cycle;
-    auto contains_j = std::find_if(j_fgs.begin(), j_fgs.end(), [seen_num](const std::pair<FuncGraphPtr, int> iter) {
-      return iter.first->seen_ != seen_num;
-    });
-    if (contains_j != j_fgs.end()) {
-      MS_LOG(DEBUG) << fg->ToString() << " contains J(" << contains_j->first->ToString() << ")";
+  const auto &j_values = fg->j_value_nodes();
+  if (!j_values.empty()) {
+    auto contains_j =
+      std::find_if(j_values.begin(), j_values.end(), [seen_num](const std::pair<AnfNodePtr, int> &iter) {
+        // check g1->J(fg)->g2->g cycle.
+        if (IsValueNode<FuncGraph>(iter.first)) {
+          auto func_graph = GetValueNode<FuncGraphPtr>(iter.first);
+          return func_graph->seen_ != seen_num;
+        }
+        if (IsValueNode<Primitive>(iter.first)) {
+          // exclude the primitive of J itself.
+          auto prim = GetValueNode<PrimitivePtr>(iter.first);
+          return prim->name() != prim::kPrimJ->name();
+        }
+        return false;
+      });
+    if (contains_j != j_values.end()) {
+      MS_LOG(DEBUG) << fg->ToString() << " contains J(" << contains_j->first->DebugString() << ")";
       return true;
     }
   }
   fg->seen_ = seen_num;
 
-  // check if func graphs used contains J(func_graph);
+  // check if func graphs used contains J(func_graph) or J(Primitive)
   for (auto &item : fg->func_graphs_used()) {
     auto used_g = item.first;
     if (SeekJ(used_g, seen_num)) {
-      MS_LOG(DEBUG) << fg->ToString() << " users func graph " << used_g->ToString() << " which contains J(func_graph)";
+      MS_LOG(DEBUG) << fg->ToString() << " users func graph " << used_g->ToString()
+                    << " which contains J(func_graph) or J(Primitive)";
       return true;
     }
   }
-  MS_LOG(DEBUG) << fg->ToString() << " doesn't contain J(func_graph)";
+  MS_LOG(DEBUG) << fg->ToString() << " doesn't contain J(func_graph) or J(Primitive)";
   return false;
 }
 

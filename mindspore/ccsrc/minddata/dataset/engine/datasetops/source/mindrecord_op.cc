@@ -1,5 +1,5 @@
 /**
- * Copyright 2019 Huawei Technologies Co., Ltd
+ * Copyright 2019-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,12 +29,7 @@
 #include "minddata/dataset/engine/datasetops/dataset_op.h"
 #include "minddata/dataset/engine/db_connector.h"
 #include "minddata/dataset/engine/execution_tree.h"
-#include "minddata/dataset/engine/opt/pass.h"
-#ifndef ENABLE_ANDROID
-#include "utils/log_adapter.h"
-#else
-#include "mindspore/lite/src/common/log_adapter.h"
-#endif
+#include "minddata/dataset/util/log_adapter.h"
 
 namespace mindspore {
 namespace dataset {
@@ -67,7 +62,7 @@ Status MindRecordOp::Builder::Build(std::shared_ptr<MindRecordOp> *ptr) {
   std::shared_ptr<MindRecordOp> new_mind_record_op;
 
   if (build_dataset_file_.empty()) {
-    return Status(StatusCode::kUnexpectedError, __LINE__, __FILE__,
+    return Status(StatusCode::kMDUnexpectedError, __LINE__, __FILE__,
                   "Invalid file, MindRecord path is invalid or not set.");
   }
   mindrecord::json sample_json;
@@ -288,6 +283,8 @@ Status MindRecordOp::GetBufferFromReader(std::unique_ptr<DataBuffer> *fetched_bu
     if (task_type == mindrecord::TaskType::kPaddedTask) {
       TensorRow tensor_row;
       RETURN_IF_NOT_OK(LoadTensorRow(&tensor_row, {}, mindrecord::json(), task_type));
+      std::vector<std::string> file_path(tensor_row.size(), dataset_file_[0]);
+      tensor_row.setPath(file_path);
       tensor_table->push_back(std::move(tensor_row));
     }
     if (tupled_buffer.empty()) break;
@@ -297,6 +294,8 @@ Status MindRecordOp::GetBufferFromReader(std::unique_ptr<DataBuffer> *fetched_bu
         mindrecord::json columns_json = std::get<1>(tupled_row);
         TensorRow tensor_row;
         RETURN_IF_NOT_OK(LoadTensorRow(&tensor_row, columns_blob, columns_json, task_type));
+        std::vector<std::string> file_path(tensor_row.size(), dataset_file_[0]);
+        tensor_row.setPath(file_path);
         tensor_table->push_back(std::move(tensor_row));
       }
     }
@@ -446,7 +445,7 @@ Status MindRecordOp::LaunchThreadAndInitOp() {
   }
   // Launch main workers that load DataBuffers by reading all images
   RETURN_IF_NOT_OK(
-    tree_->LaunchWorkers(num_workers_, std::bind(&MindRecordOp::WorkerEntry, this, std::placeholders::_1)));
+    tree_->LaunchWorkers(num_workers_, std::bind(&MindRecordOp::WorkerEntry, this, std::placeholders::_1), "", id()));
   TaskManager::FindMe()->Post();
   return Status::OK();
 }
@@ -461,12 +460,6 @@ Status MindRecordOp::CountTotalRows(const std::vector<std::string> dataset_path,
   return Status::OK();
 }
 
-// Visitor accept method for NodePass
-Status MindRecordOp::Accept(NodePass *p, bool *modified) {
-  // Downcast shared pointer then call visitor
-  return p->RunOnNode(shared_from_base<MindRecordOp>(), modified);
-}
-
 Status MindRecordOp::ComputeColMap() {
   if (column_name_id_map_.empty()) {
     for (int i = 0; i < static_cast<int>(columns_to_load_.size()); i++) {
@@ -475,23 +468,6 @@ Status MindRecordOp::ComputeColMap() {
   } else {
     MS_LOG(WARNING) << "Column name map is already set!";
   }
-  return Status::OK();
-}
-
-// Get Dataset size
-Status MindRecordOp::GetDatasetSize(int64_t *dataset_size) {
-  if (dataset_size_ > 0) {
-    *dataset_size = dataset_size_;
-    return Status::OK();
-  }
-  int64_t num_rows = num_rows_, sample_size;
-  if (num_rows_ <= 0) {
-    std::shared_ptr<ShardOperator> op;
-    RETURN_IF_NOT_OK(CountTotalRows(dataset_file_, load_dataset_, op, &num_rows, num_padded_));
-  }
-  sample_size = operators_[0]->GetNumSamples(num_rows, 0);
-  *dataset_size = sample_size > 0 ? std::min(num_rows, sample_size) : num_rows;
-  dataset_size_ = *dataset_size;
   return Status::OK();
 }
 

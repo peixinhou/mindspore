@@ -21,15 +21,16 @@
 #include "src/lite_kernel.h"
 #include "nnacl/op_base.h"
 #include "src/runtime/kernel/arm/base/convolution_base.h"
-#include "nnacl/fp32/conv.h"
 
 namespace mindspore::kernel {
 class ConvolutionCPUKernel : public ConvolutionBaseCPUKernel {
  public:
   ConvolutionCPUKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
                        const std::vector<lite::Tensor *> &outputs, const lite::InnerContext *ctx,
-                       const mindspore::lite::PrimitiveC *primitive)
-      : ConvolutionBaseCPUKernel(parameter, inputs, outputs, ctx, primitive) {}
+                       const mindspore::lite::PrimitiveC *primitive, float *origin_weight, float *origin_bias)
+      : ConvolutionBaseCPUKernel(parameter, inputs, outputs, ctx, primitive),
+        origin_weight_(origin_weight),
+        origin_bias_(origin_bias) {}
   ~ConvolutionCPUKernel() override {
     if (packed_weight_ != nullptr) {
       free(packed_weight_);
@@ -38,13 +39,16 @@ class ConvolutionCPUKernel : public ConvolutionBaseCPUKernel {
   }
 
   int Init() override;
+  virtual int InitWeightBias();
+  int InitTmpBuffer();
   int ReSize() override;
   int Run() override;
-  int RunImpl(int task_id);
-  int InitWeightBias();
-  int InitTmpBuffer();
+  virtual int RunImpl(int task_id);
 
- private:
+  int Eval() override;
+
+ protected:
+  void PackWeight();
   void FreeTmpBuffer() {
     if (packed_input_ != nullptr) {
       ctx_->allocator->Free(packed_input_);
@@ -55,8 +59,12 @@ class ConvolutionCPUKernel : public ConvolutionBaseCPUKernel {
       col_major_input_ = nullptr;
     }
   }
-  float *packed_input_ = nullptr;
+
+ protected:
+  float *origin_weight_;  // do not free
+  float *origin_bias_;    // do not free
   float *packed_weight_ = nullptr;
+  float *packed_input_ = nullptr;
   float *col_major_input_ = nullptr;
 };
 }  // namespace mindspore::kernel

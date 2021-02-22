@@ -1,6 +1,6 @@
 /**
- * Copyright 2019 Huawei Technologies Co., Ltd
-
+ * Copyright 2019-2021 Huawei Technologies Co., Ltd
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -116,12 +116,12 @@ class CelebAOp : public ParallelOp, RandomAccessOp {
       return *this;
     }
     // Check validity of input args
-    // @return - The error code return
+    // @return Status The status code returned
     Status SanityCheck();
 
     // The builder "build" method creates the final object.
     // @param std::shared_ptr<CelebAOp> *op - DatasetOp
-    // @return - The error code return
+    // @return Status The status code returned
     Status Build(std::shared_ptr<CelebAOp> *op);
 
    private:
@@ -151,12 +151,12 @@ class CelebAOp : public ParallelOp, RandomAccessOp {
   // Main Loop of CelebAOp
   // Master thread: Fill IOBlockQueue, then goes to sleep
   // Worker thread: pulls IOBlock from IOBlockQueue, work on it then put buffer to mOutConnector
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status operator()() override;
 
   // Worker thread pulls a number of IOBlock from IOBlock Queue, make a buffer and push it to Connector
   // @param int32_t worker_id - id of each worker
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status WorkerEntry(int32_t worker_id) override;
 
   // A print method typically used for debugging
@@ -166,23 +166,12 @@ class CelebAOp : public ParallelOp, RandomAccessOp {
 
   // Method in operator(), to fill IOBlockQueue
   // @param std::unique_ptr<DataBuffer> sampler_buffer - to fill IOBlockQueue
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status AddIOBlock(std::unique_ptr<DataBuffer> *data_buffer);
-
-  /// \brief Base-class override for NodePass visitor acceptor
-  /// \param[in] p Pointer to the NodePass to be accepted
-  /// \param[out] modified Indicator if the node was changed at all
-  /// \return Status of the node visit
-  Status Accept(NodePass *p, bool *modified) override;
 
   // Op name getter
   // @return Name of the current Op
   std::string Name() const override { return "CelebAOp"; }
-
-  /// \brief Base-class override for GetDatasetSize
-  /// \param[out] dataset_size the size of the dataset
-  /// \return Status of the function
-  Status GetDatasetSize(int64_t *dataset_size) override;
 
  private:
   // Called first when function is called
@@ -204,14 +193,14 @@ class CelebAOp : public ParallelOp, RandomAccessOp {
 
   // @param const std::vector<int64_t> &keys - keys in ioblock
   // @param std::unique_ptr<DataBuffer> db
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status LoadBuffer(const std::vector<int64_t> &keys, std::unique_ptr<DataBuffer> *db);
 
   // Load a tensor row according to a pair
   // @param row_id_type row_id - id for this tensor row
   // @param std::pair - <image_file,<label>>
   // @param TensorRow row - image & label read into this tensor row
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status LoadTensorRow(row_id_type row_id, const std::pair<std::string, std::vector<int32_t>> &image_label,
                        TensorRow *row);
 
@@ -220,7 +209,7 @@ class CelebAOp : public ParallelOp, RandomAccessOp {
   bool CheckDatasetTypeValid();
 
   // reset Op
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status Reset() override;
 
   // Private function for computing the assignment of the column name map.
@@ -237,6 +226,7 @@ class CelebAOp : public ParallelOp, RandomAccessOp {
   std::vector<std::pair<std::string, std::vector<int32_t>>> image_labels_vec_;
   std::string usage_;
   std::ifstream partition_file_;
+  std::string attr_file_;
 };
 }  // namespace dataset
 }  // namespace mindspore

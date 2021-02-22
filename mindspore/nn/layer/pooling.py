@@ -62,7 +62,7 @@ def _shape_check(in_shape):
 
 class MaxPool2d(_PoolNd):
     r"""
-    Max pooling operation for temporal data.
+    2D max pooling operation for temporal data.
 
     Applies a 2D max pooling over an input Tensor which can be regarded as a composition of 2D planes.
 
@@ -104,49 +104,32 @@ class MaxPool2d(_PoolNd):
     Outputs:
         Tensor of shape :math:`(N, C_{out}, H_{out}, W_{out})`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> pool = nn.MaxPool2d(kernel_size=3, stride=1)
         >>> x = Tensor(np.random.randint(0, 10, [1, 2, 4, 4]), mindspore.float32)
-        [[[[1. 5. 5. 1.]
-           [0. 3. 4. 8.]
-           [4. 2. 7. 6.]
-           [4. 9. 0. 1.]]
-          [[3. 6. 2. 6.]
-           [4. 4. 7. 8.]
-           [0. 0. 4. 0.]
-           [1. 8. 7. 0.]]]]
         >>> output = pool(x)
-        >>> output.shape
+        >>> print(output.shape)
         (1, 2, 2, 2)
-        >>> output
-        [[[[7. 8.]
-           [9. 9.]]
-          [[7. 8.]
-           [8. 8.]]]]
     """
 
     def __init__(self, kernel_size=1, stride=1, pad_mode="valid", data_format="NCHW"):
         super(MaxPool2d, self).__init__(kernel_size, stride, pad_mode, data_format)
-        self.max_pool = P.MaxPool(ksize=self.kernel_size,
+        self.max_pool = P.MaxPool(kernel_size=self.kernel_size,
                                   strides=self.stride,
-                                  padding=self.pad_mode,
+                                  pad_mode=self.pad_mode,
                                   data_format=self.format)
-        self.max_pool_with_arg_max = P.MaxPoolWithArgmax(ksize=self.kernel_size,
-                                                         strides=self.stride,
-                                                         padding=self.pad_mode)
-        self.is_tbe = context.get_context("device_target") == "Ascend"
 
     def construct(self, x):
-        if self.is_tbe and self.training:
-            out = self.max_pool_with_arg_max(x)[0]
-        else:
-            out = self.max_pool(x)
+        out = self.max_pool(x)
         return out
 
 
 class MaxPool1d(_PoolNd):
     r"""
-    Max pooling operation for temporal data.
+    1D max pooling operation for temporal data.
 
     Applies a 1D max pooling over an input Tensor which can be regarded as a composition of 1D planes.
 
@@ -168,9 +151,8 @@ class MaxPool1d(_PoolNd):
         pad_mode (str): The optional value for pad mode, is "same" or "valid", not case sensitive.
             Default: "valid".
 
-            - same: Adopts the way of completion. The height and width of the output will be the same as
-              the input. The total number of padding will be calculated in horizontal and vertical
-              directions and evenly distributed to top and bottom, left and right if possible.
+            - same: Adopts the way of completion. The total number of padding will be calculated in horizontal
+              and vertical directions and evenly distributed to top and bottom, left and right if possible.
               Otherwise, the last extra padding will be done from the bottom and the right side.
 
             - valid: Adopts the way of discarding. The possible largest height and width of output
@@ -182,11 +164,15 @@ class MaxPool1d(_PoolNd):
     Outputs:
         Tensor of shape :math:`(N, C, L_{out}))`.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
-        >>> max_pool = nn.MaxPool1d(kernel_size=3, strides=1)
+        >>> max_pool = nn.MaxPool1d(kernel_size=3, stride=1)
         >>> x = Tensor(np.random.randint(0, 10, [1, 2, 4]), mindspore.float32)
         >>> output = max_pool(x)
-        >>> output.shape
+        >>> result = output.shape
+        >>> print(result)
         (1, 2, 2)
     """
 
@@ -199,32 +185,25 @@ class MaxPool1d(_PoolNd):
         validator.check_int(stride, 1, Rel.GE, "stride", self.cls_name)
         self.kernel_size = (1, kernel_size)
         self.stride = (1, stride)
-        self.max_pool = P.MaxPool(ksize=self.kernel_size,
+        self.max_pool = P.MaxPool(kernel_size=self.kernel_size,
                                   strides=self.stride,
-                                  padding=self.pad_mode)
-        self.max_pool_with_arg_max = P.MaxPoolWithArgmax(ksize=self.kernel_size,
-                                                         strides=self.stride,
-                                                         padding=self.pad_mode)
+                                  pad_mode=self.pad_mode)
         self.shape = F.shape
         self.reduce_mean = P.ReduceMean(keep_dims=True)
         self.expand = P.ExpandDims()
         self.squeeze = P.Squeeze(2)
-        self.is_tbe = context.get_context("device_target") == "Ascend"
 
     def construct(self, x):
         _shape_check(self.shape(x))
         x = self.expand(x, 2)
-        if self.is_tbe and self.training:
-            output = self.max_pool_with_arg_max(x)[0]
-        else:
-            output = self.max_pool(x)
+        output = self.max_pool(x)
         output = self.squeeze(output)
         return output
 
 
 class AvgPool2d(_PoolNd):
     r"""
-    Average pooling for temporal data.
+    2D average pooling for temporal data.
 
     Applies a 2D average pooling over an input Tensor which can be regarded as a composition of 2D input planes.
 
@@ -267,25 +246,15 @@ class AvgPool2d(_PoolNd):
     Outputs:
         Tensor of shape :math:`(N, C_{out}, H_{out}, W_{out})`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> pool = nn.AvgPool2d(kernel_size=3, stride=1)
         >>> x = Tensor(np.random.randint(0, 10, [1, 2, 4, 4]), mindspore.float32)
-        [[[[5. 5. 9. 9.]
-            [8. 4. 3. 0.]
-            [2. 7. 1. 2.]
-            [1. 8. 3. 3.]]
-           [[6. 8. 2. 4.]
-            [3. 0. 2. 1.]
-            [0. 8. 9. 7.]
-            [2. 1. 4. 9.]]]]
         >>> output = pool(x)
-        >>> output.shape
+        >>> print(output.shape)
         (1, 2, 2, 2)
-        >>> output
-        [[[[4.888889  4.4444447]
-           [4.111111  3.4444444]]
-          [[4.2222223 4.5555553]
-           [3.2222223 4.5555553]]]]
     """
 
     def __init__(self,
@@ -294,9 +263,9 @@ class AvgPool2d(_PoolNd):
                  pad_mode="valid",
                  data_format="NCHW"):
         super(AvgPool2d, self).__init__(kernel_size, stride, pad_mode, data_format)
-        self.avg_pool = P.AvgPool(ksize=self.kernel_size,
+        self.avg_pool = P.AvgPool(kernel_size=self.kernel_size,
                                   strides=self.stride,
-                                  padding=self.pad_mode,
+                                  pad_mode=self.pad_mode,
                                   data_format=self.format)
 
     def construct(self, x):
@@ -305,7 +274,7 @@ class AvgPool2d(_PoolNd):
 
 class AvgPool1d(_PoolNd):
     r"""
-    Average pooling for temporal data.
+    1D average pooling for temporal data.
 
     Applies a 1D average pooling over an input Tensor which can be regarded as a composition of 1D input planes.
 
@@ -342,11 +311,15 @@ class AvgPool1d(_PoolNd):
     Outputs:
         Tensor of shape :math:`(N, C_{out}, L_{out})`.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> pool = nn.AvgPool1d(kernel_size=6, stride=1)
         >>> x = Tensor(np.random.randint(0, 10, [1, 3, 6]), mindspore.float32)
         >>> output = pool(x)
-        >>> output.shape
+        >>> result = output.shape
+        >>> print(result)
         (1, 3, 1)
     """
 
@@ -362,9 +335,9 @@ class AvgPool1d(_PoolNd):
         super(AvgPool1d, self).__init__(kernel_size, stride, pad_mode)
         self.kernel_size = (1, kernel_size)
         self.stride = (1, stride)
-        self.avg_pool = P.AvgPool(ksize=self.kernel_size,
+        self.avg_pool = P.AvgPool(kernel_size=self.kernel_size,
                                   strides=self.stride,
-                                  padding=self.pad_mode)
+                                  pad_mode=self.pad_mode)
         self.shape = F.shape
         self.reduce_mean = P.ReduceMean(keep_dims=True)
         self.slice = P.Slice()
@@ -372,7 +345,7 @@ class AvgPool1d(_PoolNd):
         self.squeeze = P.Squeeze(2)
 
     def construct(self, x):
-        _shape_check(self.shape(x))
+        x = F.depend(x, _shape_check(self.shape(x)))
         batch, channel, width = self.shape(x)
         if width == self.kernel_size[1]:
             x = self.reduce_mean(x, 2)

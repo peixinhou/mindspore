@@ -67,7 +67,7 @@ std::string RealPath(const char *path) {
   }
   auto resolved_path = std::make_unique<char[]>(PATH_MAX);
   if (resolved_path == nullptr) {
-    MS_LOG(ERROR) << "new resolvedPath failed";
+    MS_LOG(ERROR) << "new resolved_path failed";
     return "";
   }
 #ifdef _WIN32

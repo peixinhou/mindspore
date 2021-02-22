@@ -18,6 +18,11 @@ include "ops.fbs";
 
 namespace mindspore.schema;
 
+// This corresponds to the version.
+file_identifier "MSL1";
+// File extension of any written files.
+file_extension "ms";
+
 enum NodeType: int {
     ValueNode,  // const
     Parameter,  // var
@@ -35,6 +40,8 @@ table QuantParam {
     varCorr: float = 1;
     meanCorr: float = 0;
     dstDtype: int = 32;
+    roundType: int = 1;
+    multiplier: int = 1; // calculate fixed point multiplier method
 }
 
 table Tensor {
@@ -49,6 +56,8 @@ table Tensor {
     data: [ubyte];
     quantParams: [QuantParam];
     quantClusters: [float];
+    name: string;
+    enableHuffmanCode: bool = false;
 }
 
 union PrimitiveType {
@@ -66,7 +75,7 @@ union PrimitiveType {
     Resize,
     DetectionPostProcess,
     FullConnection,
-    Mean,
+    Mean,  // DEPRECATED
     DeConv2D,
     Scale,
     Reshape,
@@ -96,11 +105,11 @@ union PrimitiveType {
     Tile,
     Cast,
     Shape,
-    Nchw2Nhwc,
-    Nhwc2Nchw,
+    Nchw2Nhwc,  // DEPRECATED
+    Nhwc2Nchw,  // DEPRECATED
     QuantDTypeCast,
     Split,
-    Permute,
+    Permute,  // DEPRECATED
     FakeQuantWithMinMaxVars,
     Equal,
     Less,
@@ -234,6 +243,41 @@ union PrimitiveType {
     BinaryCrossEntropyGrad,
     BinaryCrossEntropy,
     LpNormalization,
+    DropoutGrad,
+    MaximumGrad,
+    MinimumGrad,
+    Switch,
+    Partial,
+    TensorListFromTensor,
+    TensorListStack,
+    TensorListGetItem,
+    TensorListSetItem,
+    TensorListReserve,
+    All,
+    Assert,
+    Adder,
+    SparseSoftmaxCrossEntropy,
+    SmoothL1Loss,
+    SmoothL1LossGrad,
+    SigmoidCrossEntropyWithLogits,
+    SigmoidCrossEntropyWithLogitsGrad,
+    Reciprocal,
+    Merge,
+    Mod,
+    If,
+    GeLU,
+    Gru,
+    NonZero,
+    InvertPermutation,
+    Size,
+    RandomStandardNormal,
+    CropAndResize,
+    Erf,
+    StridedSliceGrad,
+    IsFinite,
+    LinSpace,
+    UniformReal,
+    AbsGrad
 }
 
 enum QuantType: int {

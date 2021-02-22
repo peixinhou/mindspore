@@ -1,4 +1,4 @@
-# Copyright 2020 Huawei Technologies Co., Ltd
+# Copyright 2020-2021 Huawei Technologies Co., Ltd
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -31,6 +31,7 @@ __all__ = ['Softmax',
            'ReLU6',
            'Tanh',
            'GELU',
+           'FastGelu',
            'Sigmoid',
            'PReLU',
            'get_activation',
@@ -62,16 +63,26 @@ class Softmax(Cell):
         axis (Union[int, tuple[int]]): The axis to apply Softmax operation, -1 means the last dimension. Default: -1.
 
     Inputs:
-        - **x** (Tensor) - The input of Softmax.
+        - **x** (Tensor) - The input of Softmax with data type of float16 or float32.
 
     Outputs:
         Tensor, which has the same type and shape as `x` with values in the range[0,1].
 
+    Raises:
+        TypeError: If `axis` is neither an int not a tuple.
+        TypeError: If dtype of `x` is neither float16 nor float32.
+        ValueError: If `axis` is a tuple whose length is less than 1.
+        ValueError: If `axis` is a tuple whose elements are not all in range [-len(x), len(x)).
+
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> input_x = Tensor(np.array([-1, -2, 0, 2, 1]), mindspore.float16)
         >>> softmax = nn.Softmax()
-        >>> softmax(input_x)
-        [0.03168  0.01166  0.0861  0.636  0.2341]
+        >>> output = softmax(input_x)
+        >>> print(output)
+        [0.03168 0.01166 0.0861  0.636   0.2341 ]
     """
 
     def __init__(self, axis=-1):
@@ -91,22 +102,35 @@ class LogSoftmax(Cell):
     The input is transformed by the Softmax function and then by the log function to lie in range[-inf,0).
 
     Logsoftmax is defined as:
-    :math:`\text{logsoftmax}(x_i) = \log \left(\frac{\exp(x_i)}{\sum_{j=0}^{n-1} \exp(x_j)}\right)`,
+
+    .. math::
+
+        \text{logsoftmax}(x_i) = \log \left(\frac{\exp(x_i)}{\sum_{j=0}^{n-1} \exp(x_j)}\right),
+
     where :math:`x_{i}` is the :math:`i`-th slice in the given dimension of the input Tensor.
 
     Args:
         axis (int): The axis to apply LogSoftmax operation, -1 means the last dimension. Default: -1.
 
     Inputs:
-        - **x** (Tensor) - The input of LogSoftmax.
+        - **x** (Tensor) - The input of LogSoftmax, with float16 or float32 data type.
 
     Outputs:
         Tensor, which has the same type and shape as the input as `x` with values in the range[-inf,0).
 
+    Raises:
+        TypeError: If `axis` is not an int.
+        TypeError: If dtype of `x` is neither float16 nor float32.
+        ValueError: If `axis` is not in range [-len(x), len(x)).
+
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> input_x = Tensor(np.array([[-1.0, 4.0, -8.0], [2.0, -5.0, 9.0]]), mindspore.float32)
         >>> log_softmax = nn.LogSoftmax()
-        >>> log_softmax(input_x)
+        >>> output = log_softmax(input_x)
+        >>> print(output)
         [[-5.00672150e+00 -6.72150636e-03 -1.20067215e+01]
          [-7.00091219e+00 -1.40009127e+01 -9.12250078e-04]]
     """
@@ -133,20 +157,32 @@ class ELU(Cell):
         \text{alpha} * (\exp(x_i) - 1), &\text{otherwise.}
         \end{cases}
 
+    The picture about ELU looks like this `ELU <https://en.wikipedia.org/wiki/
+    Activation_function#/media/File:Activation_elu.svg>`_.
+
     Args:
         alpha (float): The coefficient of negative factor whose type is float. Default: 1.0.
 
     Inputs:
-        - **input_data** (Tensor) - The input of ELU.
+        - **input_data** (Tensor) - The input of ELU with data type of float16 or float32.
 
     Outputs:
         Tensor, with the same type and shape as the `input_data`.
 
+    Raises:
+        TypeError: If `alpha` is not a float.
+        TypeError: If dtype of `input_data` is neither float16 nor float32.
+        ValueError: If `alpha` is not equal to 1.0.
+
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> input_x = Tensor(np.array([-1, -2, 0, 2, 1]), mindspore.float32)
         >>> elu = nn.ELU()
-        >>> elu(input_x)
-
+        >>> result = elu(input_x)
+        >>> print(result)
+        [-0.63212055  -0.86466473  0.  2.  1.]
     """
 
     def __init__(self, alpha=1.0):
@@ -161,9 +197,17 @@ class ReLU(Cell):
     r"""
     Rectified Linear Unit activation function.
 
-    Applies the rectified linear unit function element-wise. It returns
-    element-wise :math:`\max(0, x)`, specially, the neurons with the negative output
+    Applies the rectified linear unit function element-wise.
+
+    .. math::
+
+        \text{ReLU}(x) = (x)^+ = \max(0, x),
+
+    It returns element-wise :math:`\max(0, x)`, specially, the neurons with the negative output
     will be suppressed and the active neurons will stay the same.
+
+    The picture about ReLU looks like this `ReLU <https://en.wikipedia.org/wiki/
+    Activation_function#/media/File:Activation_rectified_linear.svg>`_.
 
     Inputs:
         - **input_data** (Tensor) - The input of ReLU.
@@ -171,11 +215,18 @@ class ReLU(Cell):
     Outputs:
         Tensor, with the same type and shape as the `input_data`.
 
+    Raises:
+        TypeError: If dtype of `input_data` is not a number.
+
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> input_x = Tensor(np.array([-1, 2, -3, 2, -1]), mindspore.float16)
         >>> relu = nn.ReLU()
-        >>> relu(input_x)
-        [0.  2.  0.  2.  0.]
+        >>> output = relu(input_x)
+        >>> print(output)
+        [0. 2. 0. 2. 0.]
     """
 
     def __init__(self):
@@ -192,19 +243,32 @@ class ReLU6(Cell):
 
     ReLU6 is similar to ReLU with a upper limit of 6, which if the inputs are greater than 6, the outputs
     will be suppressed to 6.
-    It computes element-wise as :math:`\min(\max(0, x), 6)`. The input is a Tensor of any valid shape.
+    It computes element-wise as
+
+    .. math::
+
+        \min(\max(0, x), 6).
+
+    The input is a Tensor of any valid shape.
 
     Inputs:
-        - **input_data** (Tensor) - The input of ReLU6.
+        - **input_data** (Tensor) - The input of ReLU6 with data type of float16 or float32.
 
     Outputs:
         Tensor, which has the same type as `input_data`.
 
+    Raises:
+        TypeError: If dtype of `input_data` is neither float16 nor float32.
+
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> input_x = Tensor(np.array([-1, -2, 0, 2, 1]), mindspore.float16)
         >>> relu6 = nn.ReLU6()
-        >>> relu6(input_x)
-        [0.  0.  0.  2.  1.]
+        >>> output = relu6(input_x)
+        >>> print(output)
+        [0. 0. 0. 2. 1.]
     """
 
     def __init__(self):
@@ -237,12 +301,19 @@ class LeakyReLU(Cell):
     Outputs:
         Tensor, has the same type and shape as the `input_x`.
 
+    Raises:
+        TypeError: If `alpha` is not a float or an int.
+
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> input_x = Tensor(np.array([[-1.0, 4.0, -8.0], [2.0, -5.0, 9.0]]), mindspore.float32)
         >>> leaky_relu = nn.LeakyReLU()
-        >>> leaky_relu(input_x)
+        >>> output = leaky_relu(input_x)
+        >>> print(output)
         [[-0.2  4.  -1.6]
-         [ 2   -1.   9.]]
+         [ 2.  -1.   9. ]]
     """
 
     def __init__(self, alpha=0.2):
@@ -276,16 +347,23 @@ class Tanh(Cell):
     where :math:`x_i` is an element of the input Tensor.
 
     Inputs:
-        - **input_data** (Tensor) - The input of Tanh.
+        - **input_data** (Tensor) - The input of Tanh with data type of float16 or float32.
 
     Outputs:
         Tensor, with the same type and shape as the `input_data`.
 
+    Raises:
+        TypeError: If dtype of `input_data` is neither float16 nor float32.
+
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> input_x = Tensor(np.array([1, 2, 3, 2, 1]), mindspore.float16)
         >>> tanh = nn.Tanh()
-        >>> tanh(input_x)
-        [0.7617  0.964  0.995  0.964 0.7617]
+        >>> output = tanh(input_x)
+        >>> print(output)
+        [0.7617 0.964  0.995  0.964  0.7617]
     """
 
     def __init__(self):
@@ -303,19 +381,34 @@ class GELU(Cell):
     Applies GELU function to each element of the input. The input is a Tensor with any valid shape.
 
     GELU is defined as:
-    :math:`GELU(x_i) = x_i*P(X < x_i)`, where :math:`P` is the cumulative distribution function
+
+    .. math::
+
+        GELU(x_i) = x_i*P(X < x_i),
+
+    where :math:`P` is the cumulative distribution function
     of standard Gaussian distribution and :math:`x_i` is the element of the input.
 
+    The picture about GELU looks like this `GELU <https://en.wikipedia.org/wiki/
+    Activation_function#/media/File:Activation_gelu.png>`_.
+
     Inputs:
-        - **input_data** (Tensor) - The input of GELU.
+        - **input_data** (Tensor) - The input of GELU with data type of float16 or float32.
 
     Outputs:
         Tensor, with the same type and shape as the `input_data`.
 
+    Raises:
+        TypeError: If dtype of `input_data` is neither float16 nor float32.
+
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> input_x = Tensor(np.array([[-1.0, 4.0, -8.0], [2.0, -5.0, 9.0]]), mindspore.float32)
         >>> gelu = nn.GELU()
-        >>> gelu(input_x)
+        >>> output = gelu(input_x)
+        >>> print(output)
         [[-1.5880802e-01  3.9999299e+00 -3.1077917e-21]
          [ 1.9545976e+00 -2.2918017e-07  9.0000000e+00]]
     """
@@ -328,6 +421,49 @@ class GELU(Cell):
         return self.gelu(x)
 
 
+class FastGelu(Cell):
+    r"""
+    Fast Gaussian error linear unit activation function.
+
+    Applies FastGelu function to each element of the input. The input is a Tensor with any valid shape.
+
+    FastGelu is defined as:
+
+    .. math::
+        FastGelu(x_i) = \frac {x_i} {1 + \exp(-1.702 * \left| x_i \right|)} *
+                           \exp(0.851 * (x_i - \left| x_i \right|))
+
+    where :math:`x_i` is the element of the input.
+
+    Inputs:
+        - **input_data** (Tensor) - The input of FastGelu with data type of float16 or float32.
+
+    Outputs:
+        Tensor, with the same type and shape as the `input_data`.
+
+    Raises:
+        TypeError: If dtype of `input_data` is neither float16 nor float32.
+
+    Supported Platforms:
+        ``Ascend``
+
+    Examples:
+        >>> input_x = Tensor(np.array([[-1.0, 4.0, -8.0], [2.0, -5.0, 9.0]]), mindspore.float32)
+        >>> fast_gelu = nn.FastGelu()
+        >>> output = fast_gelu(input_x)
+        >>> print(output)
+        [[-1.5420423e-01  3.9955850e+00 -9.7664279e-06]
+         [ 1.9356586e+00 -1.0070159e-03  8.9999981e+00]]
+    """
+
+    def __init__(self):
+        super(FastGelu, self).__init__()
+        self.fast_gelu = _selected_ops.FastGelu()
+
+    def construct(self, x):
+        return self.fast_gelu(x)
+
+
 class Sigmoid(Cell):
     r"""
     Sigmoid activation function.
@@ -335,19 +471,34 @@ class Sigmoid(Cell):
     Applies sigmoid-type activation element-wise.
 
     Sigmoid function is defined as:
-    :math:`\text{sigmoid}(x_i) = \frac{1}{1 + \exp(-x_i)}`, where :math:`x_i` is the element of the input.
+
+    .. math::
+
+        \text{sigmoid}(x_i) = \frac{1}{1 + \exp(-x_i)},
+
+    where :math:`x_i` is the element of the input.
+
+    The picture about Sigmoid looks like this `Sigmoid <https://en.wikipedia.org/wiki/
+    Sigmoid_function#/media/File:Logistic-curve.svg>`_.
 
     Inputs:
-        - **input_data** (Tensor) - The input of Tanh.
+        - **input_data** (Tensor) - The input of Sigmoid with data type of float16 or float32.
 
     Outputs:
         Tensor, with the same type and shape as the `input_data`.
 
+    Raises:
+        TypeError: If dtype of `input_data` is neither float16 nor float32.
+
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> input_x = Tensor(np.array([-1, -2, 0, 2, 1]), mindspore.float16)
         >>> sigmoid = nn.Sigmoid()
-        >>> sigmoid(input_x)
-        [0.2688  0.11914  0.5  0.881  0.7305]
+        >>> output = sigmoid(input_x)
+        >>> print(output)
+        [0.2688  0.11914 0.5     0.881   0.7305 ]
     """
 
     def __init__(self):
@@ -364,27 +515,46 @@ class PReLU(Cell):
 
     Applies the PReLU function element-wise.
 
-    PReLU is defined as: :math:`prelu(x_i)= \max(0, x_i) + w * \min(0, x_i)`, where :math:`x_i`
-    is an element of an channel of the input.
+    PReLU is defined as:
+
+    .. math::
+
+        prelu(x_i)= \max(0, x_i) + w * \min(0, x_i),
+
+    where :math:`x_i` is an element of an channel of the input.
 
     Here :math:`w` is a learnable parameter with a default initial value 0.25.
     Parameter :math:`w` has dimensionality of the argument channel. If called without argument
     channel, a single parameter :math:`w` will be shared across all channels.
 
+    The picture about PReLU looks like this `PReLU <https://en.wikipedia.org/wiki/
+    Activation_function#/media/File:Activation_prelu.svg>`_.
+
     Args:
         channel (int): The dimension of input. Default: 1.
-        w (float): The initial value of w. Default: 0.25.
+        w (Union[float, list, Tensor]): The initial value of w. Default: 0.25.
 
     Inputs:
-        - **input_data** (Tensor) - The input of PReLU.
+        - **input_data** (Tensor) - The input of PReLU with data type of float16 or float32.
 
     Outputs:
         Tensor, with the same type and shape as the `input_data`.
 
+    Raises:
+        TypeError: If `channel` is not an int.
+        TypeError: If `w` is not one of float, list, Tensor.
+        TypeError: If dtype of `input_data` is neither float16 nor float32.
+        ValueError: If `channel` is less than 1.
+        ValueError: If length of shape of `input_data` is equal to 1.
+
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> input_x = Tensor(np.array([[[[0.1, 0.6], [0.9, 0.9]]]]), mindspore.float32)
         >>> prelu = nn.PReLU()
-        >>> prelu(input_x)
+        >>> output = prelu(input_x)
+        >>> print(output)
         [[[[0.1 0.6]
            [0.9 0.9]]]]
 
@@ -392,6 +562,7 @@ class PReLU(Cell):
     @cell_attr_register(attrs="")
     def __init__(self, channel=1, w=0.25):
         super(PReLU, self).__init__()
+        validator.check_positive_int(channel, 'channel', self.cls_name)
         if isinstance(w, (np.float32, float)):
             tmp = np.empty((channel,), dtype=np.float32)
             tmp.fill(w)
@@ -400,7 +571,7 @@ class PReLU(Cell):
             w = Tensor(w)
 
         if not isinstance(w, Tensor):
-            raise TypeError("w only support np.float32, float or Tensor type.")
+            raise TypeError("w only support np.float32, float, list or Tensor type.")
 
         self.w = Parameter(initializer(w, [channel]), name='a')
         self.prelu = P.PReLU()
@@ -429,16 +600,23 @@ class HSwish(Cell):
     where :math:`x_{i}` is the :math:`i`-th slice in the given dimension of the input Tensor.
 
     Inputs:
-        - **input_data** (Tensor) - The input of HSwish.
+        - **input_data** (Tensor) - The input of HSwish, data type must be float16 or float32.
 
     Outputs:
         Tensor, with the same type and shape as the `input_data`.
 
+    Raises:
+        TypeError: If dtype of `input_data` is neither float16 nor float32.
+
+    Supported Platforms:
+        ``GPU``
+
     Examples:
         >>> input_x = Tensor(np.array([-1, -2, 0, 2, 1]), mindspore.float16)
         >>> hswish = nn.HSwish()
-        >>> hswish(input_x)
-
+        >>> result = hswish(input_x)
+        >>> print(result)
+        [-0.3333  -0.3333  0  1.666  0.6665]
     """
 
     def __init__(self):
@@ -463,16 +641,23 @@ class HSigmoid(Cell):
     where :math:`x_{i}` is the :math:`i`-th slice in the given dimension of the input Tensor.
 
     Inputs:
-        - **input_data** (Tensor) - The input of HSigmoid.
+        - **input_data** (Tensor) - The input of HSigmoid, data type must be float16 or float32.
 
     Outputs:
         Tensor, with the same type and shape as the `input_data`.
 
+    Raises:
+        TypeError: If dtype of `input_data` is neither float16 nor float32.
+
+    Supported Platforms:
+        ``GPU``
+
     Examples:
         >>> input_x = Tensor(np.array([-1, -2, 0, 2, 1]), mindspore.float16)
         >>> hsigmoid = nn.HSigmoid()
-        >>> hsigmoid(input_x)
-
+        >>> result = hsigmoid(input_x)
+        >>> print(result)
+        [0.3333  0.1666  0.5  0.833  0.6665]
     """
 
     def __init__(self):
@@ -497,24 +682,30 @@ class LogSigmoid(Cell):
     where :math:`x_{i}` is the element of the input.
 
     Inputs:
-        - **input_data** (Tensor) - The input of LogSigmoid.
+        - **input_data** (Tensor) - The input of LogSigmoid with data type of float16 or float32.
 
     Outputs:
         Tensor, with the same type and shape as the `input_data`.
 
+    Raises:
+        TypeError: If dtype of `input_data` is neither float16 nor float32.
+
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> net = nn.LogSigmoid()
         >>> input_x = Tensor(np.array([1.0, 2.0, 3.0]), mindspore.float32)
-        >>> logsigmoid = net(input_x)
-        [-3.1326166e-01, -1.2692806e-01, -4.8587345e-02]
-
+        >>> output = net(input_x)
+        >>> print(output)
+        [-0.31326166 -0.12692806 -0.04858734]
     """
 
     def __init__(self):
         super(LogSigmoid, self).__init__()
         self.mul = P.Mul()
         self.exp = P.Exp()
-        self.add = P.TensorAdd()
+        self.add = P.Add()
         self.rec = P.Reciprocal()
         self.log = P.Log()
 
@@ -534,6 +725,7 @@ _activation = {
     'relu6': ReLU6,
     'tanh': Tanh,
     'gelu': GELU,
+    'fast_gelu': FastGelu,
     'elu': ELU,
     'sigmoid': Sigmoid,
     'prelu': PReLU,

@@ -39,14 +39,14 @@ TEST_F(MindDataTestPipeline, TestAlbumBasic) {
   EXPECT_NE(iter, nullptr);
 
   // Iterate the dataset and get each row
-  std::unordered_map<std::string, std::shared_ptr<Tensor>> row;
+  std::unordered_map<std::string, mindspore::MSTensor> row;
   iter->GetNextRow(&row);
 
   uint64_t i = 0;
   while (row.size() != 0) {
     i++;
-    auto image = row["image"];
-    MS_LOG(INFO) << "Tensor image shape: " << image->shape();
+    // auto image = row["image"];
+    // MS_LOG(INFO) << "Tensor image shape: " << image->shape();
     iter->GetNextRow(&row);
   }
 
@@ -56,8 +56,63 @@ TEST_F(MindDataTestPipeline, TestAlbumBasic) {
   iter->Stop();
 }
 
-TEST_F(MindDataTestPipeline, TestAlbumgetters) {
-  MS_LOG(INFO) << "Doing MindDataTestPipeline-TestAlbumgetters.";
+TEST_F(MindDataTestPipeline, TestAlbumBasicWithPipeline) {
+  MS_LOG(INFO) << "Doing MindDataTestPipeline-TestAlbumBasicWithPipeline.";
+
+  std::string folder_path = datasets_root_path_ + "/testAlbum/images";
+  std::string schema_file = datasets_root_path_ + "/testAlbum/datasetSchema.json";
+  std::vector<std::string> column_names = {"image", "label", "id"};
+
+  // Create two Album Dataset
+  std::shared_ptr<Dataset> ds1 = Album(folder_path, schema_file, column_names);
+  std::shared_ptr<Dataset> ds2 = Album(folder_path, schema_file, column_names);
+  EXPECT_NE(ds1, nullptr);
+  EXPECT_NE(ds2, nullptr);
+
+  // Create two Repeat operation on ds
+  int32_t repeat_num = 2;
+  ds1 = ds1->Repeat(repeat_num);
+  EXPECT_NE(ds1, nullptr);
+  repeat_num = 3;
+  ds2 = ds2->Repeat(repeat_num);
+  EXPECT_NE(ds2, nullptr);
+
+  // Create two Project operation on ds
+  std::vector<std::string> column_project = {"image"};
+  ds1 = ds1->Project(column_project);
+  EXPECT_NE(ds1, nullptr);
+  ds2 = ds2->Project(column_project);
+  EXPECT_NE(ds2, nullptr);
+
+  // Create a Concat operation on the ds
+  ds1 = ds1->Concat({ds2});
+  EXPECT_NE(ds1, nullptr);
+
+  // Create an iterator over the result of the above dataset
+  // This will trigger the creation of the Execution Tree and launch it.
+  std::shared_ptr<Iterator> iter = ds1->CreateIterator();
+  EXPECT_NE(iter, nullptr);
+
+  // Iterate the dataset and get each row
+  std::unordered_map<std::string, mindspore::MSTensor> row;
+  iter->GetNextRow(&row);
+
+  uint64_t i = 0;
+  while (row.size() != 0) {
+    i++;
+    // auto image = row["image"];
+    // MS_LOG(INFO) << "Tensor image shape: " << image->shape();
+    iter->GetNextRow(&row);
+  }
+
+  EXPECT_EQ(i, 35);
+
+  // Manually terminate the pipeline
+  iter->Stop();
+}
+
+TEST_F(MindDataTestPipeline, TestAlbumGetters) {
+  MS_LOG(INFO) << "Doing MindDataTestPipeline-TestAlbumGetters.";
 
   std::string folder_path = datasets_root_path_ + "/testAlbum/images";
   std::string schema_file = datasets_root_path_ + "/testAlbum/datasetSchema.json";
@@ -72,6 +127,7 @@ TEST_F(MindDataTestPipeline, TestAlbumgetters) {
   EXPECT_EQ(batch_size, 1);
   int64_t repeat_count = ds->GetRepeatCount();
   EXPECT_EQ(repeat_count, 1);
+  EXPECT_EQ(ds->GetColumnNames(), column_names);
 }
 
 TEST_F(MindDataTestPipeline, TestAlbumDecode) {
@@ -89,17 +145,19 @@ TEST_F(MindDataTestPipeline, TestAlbumDecode) {
   EXPECT_NE(iter, nullptr);
 
   // Iterate the dataset and get each row
-  std::unordered_map<std::string, std::shared_ptr<Tensor>> row;
+  std::unordered_map<std::string, mindspore::MSTensor> row;
   iter->GetNextRow(&row);
 
   uint64_t i = 0;
   while (row.size() != 0) {
     i++;
+    /*
     auto image = row["image"];
     auto shape = image->shape();
     MS_LOG(INFO) << "Tensor image shape size: " << shape.Size();
     MS_LOG(INFO) << "Tensor image shape: " << image->shape();
     EXPECT_GT(shape.Size(), 1);  // Verify decode=true took effect
+    */
     iter->GetNextRow(&row);
   }
 
@@ -125,14 +183,14 @@ TEST_F(MindDataTestPipeline, TestAlbumNumSamplers) {
   EXPECT_NE(iter, nullptr);
 
   // Iterate the dataset and get each row
-  std::unordered_map<std::string, std::shared_ptr<Tensor>> row;
+  std::unordered_map<std::string, mindspore::MSTensor> row;
   iter->GetNextRow(&row);
 
   uint64_t i = 0;
   while (row.size() != 0) {
     i++;
-    auto image = row["image"];
-    MS_LOG(INFO) << "Tensor image shape: " << image->shape();
+    // auto image = row["image"];
+    // MS_LOG(INFO) << "Tensor image shape: " << image->shape();
     iter->GetNextRow(&row);
   }
 

@@ -27,43 +27,50 @@ using mindspore::lite::RET_OK;
 using mindspore::schema::PrimitiveType_Range;
 
 namespace mindspore::kernel {
-int RangeCPUKernel::Init() { return RET_OK; }
+int RangeCPUKernel::Init() {
+  if (!InferShapeDone()) {
+    return RET_OK;
+  }
+  return ReSize();
+}
 
-int RangeCPUKernel::ReSize() { return RET_OK; }
-
-int RangeCPUKernel::Run() {
-  size_t start = (reinterpret_cast<RangeParameter *>(op_parameter_))->start_;
-  size_t limit = (reinterpret_cast<RangeParameter *>(op_parameter_))->limit_;
-  size_t delta = (reinterpret_cast<RangeParameter *>(op_parameter_))->delta_;
-  auto output_ptr = reinterpret_cast<float *>(out_tensors_.at(0)->MutableData());
-  MS_ASSERT(output_ptr);
-  Range(output_ptr, start, limit, delta);
+int RangeCPUKernel::ReSize() {
+  if (in_tensors_[0]->data_type() == kNumberTypeFloat32 || in_tensors_[0]->data_type() == kNumberTypeFloat16 ||
+      in_tensors_[0]->data_type() == kNumberTypeFloat) {
+    data_type_ = kDataTypeFloat;
+  } else {
+    data_type_ = kDataTypeInt;
+  }
   return RET_OK;
 }
 
-kernel::LiteKernel *CpuRangeFp32KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                              const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter,
-                                              const lite::InnerContext *ctx, const kernel::KernelKey &desc,
-                                              const mindspore::lite::PrimitiveC *primitive) {
-  MS_ASSERT(opParameter != nullptr);
-  MS_ASSERT(desc.type == schema::PrimitiveType_Range);
-
-  auto *kernel = new (std::nothrow) RangeCPUKernel(opParameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "new RangeCPUKernel fail!";
-    free(opParameter);
-    return nullptr;
+int RangeCPUKernel::Run() {
+  if (in_tensors_.size() == 3) {
+    if (data_type_ == kDataTypeInt) {
+      RangeInt(reinterpret_cast<int *>(out_tensors_.at(0)->data_c()),
+               *reinterpret_cast<int *>(in_tensors_.at(0)->data_c()),
+               *reinterpret_cast<int *>(in_tensors_.at(2)->data_c()), out_tensors_.at(0)->shape()[0]);
+    } else {
+      Range(reinterpret_cast<float *>(out_tensors_.at(0)->data_c()),
+            *reinterpret_cast<float *>(in_tensors_.at(0)->data_c()),
+            *reinterpret_cast<float *>(in_tensors_.at(2)->data_c()), out_tensors_.at(0)->shape()[0]);
+    }
+  } else {
+    if (data_type_ == kDataTypeInt) {
+      RangeInt(reinterpret_cast<int *>(out_tensors_.at(0)->data_c()),
+               (reinterpret_cast<RangeParameter *>(op_parameter_))->start_,
+               (reinterpret_cast<RangeParameter *>(op_parameter_))->delta_, out_tensors_.at(0)->shape()[0]);
+    } else {
+      MS_LOG(ERROR) << "Unsupported parameter type : " << in_tensors_.at(0)->data_type() << ".";
+      return RET_ERROR;
+    }
   }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
+  return RET_OK;
 }
 
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Range, CpuRangeFp32KernelCreator)
-
+// fp16 may not be necessary because it involves small amount of data (input 3 number, output depends on input)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Range, LiteKernelCreator<RangeCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeFloat, PrimitiveType_Range, LiteKernelCreator<RangeCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt32, PrimitiveType_Range, LiteKernelCreator<RangeCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt, PrimitiveType_Range, LiteKernelCreator<RangeCPUKernel>)
 }  // namespace mindspore::kernel

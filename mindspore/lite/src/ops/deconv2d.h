@@ -46,7 +46,6 @@ class DeConv2D : public PrimitiveC {
   void SetPadRight(int pad_right);
   void SetDilateW(int dilate_w);
   void SetDilateH(int dilate_h);
-  void SetHasBias(bool has_bias);
   void SetActivationType(int activation_type);
   void PopulaterDeConv2DSingleGroup(const Primitive &prim, schema::PrimitiveT *primitive, const int &group);
   void PopulaterConv2DMultiGroup(const Primitive &prim, schema::PrimitiveT *primitive, const int &group,
@@ -71,9 +70,9 @@ class DeConv2D : public PrimitiveC {
   int GetPadRight() const;
   int GetDilateW() const;
   int GetDilateH() const;
-  bool GetHasBias() const;
   int GetActivationType() const;
-
+  int GetOutputPaddingW() const;
+  int GetOutputPaddingH() const;
   int PadUp() const { return this->pad_u_; }
   int PadDown() const { return this->pad_d_; }
   int PadLeft() const { return this->pad_l_; }

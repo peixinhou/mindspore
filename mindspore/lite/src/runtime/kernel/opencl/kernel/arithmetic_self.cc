@@ -25,92 +25,23 @@ using mindspore::kernel::KERNEL_ARCH::kGPU;
 using mindspore::lite::KernelRegistrar;
 using mindspore::lite::RET_ERROR;
 using mindspore::lite::RET_OK;
-using mindspore::schema::PrimitiveType_Abs;
-using mindspore::schema::PrimitiveType_Ceil;
-using mindspore::schema::PrimitiveType_Cos;
-using mindspore::schema::PrimitiveType_Exp;
-using mindspore::schema::PrimitiveType_Floor;
-using mindspore::schema::PrimitiveType_Log;
-using mindspore::schema::PrimitiveType_LogicalNot;
-using mindspore::schema::PrimitiveType_Neg;
-using mindspore::schema::PrimitiveType_Round;
-using mindspore::schema::PrimitiveType_Rsqrt;
-using mindspore::schema::PrimitiveType_Sin;
-using mindspore::schema::PrimitiveType_Sqrt;
-using mindspore::schema::PrimitiveType_Square;
 
 namespace mindspore::kernel {
 
-void ArithmeticSelfOpenCLKernel::GetKernelName(std::string *kernel_name, ArithmeticSelfParameter *param) {
-  MS_ASSERT(kernel_name);
-  MS_ASSERT(param);
-  switch (param->op_parameter_.type_) {
-    case PrimitiveType_Abs:
-      kernel_name[0] += "_ElementAbs";
-      break;
-    case PrimitiveType_Cos:
-      kernel_name[0] += "_ElementCos";
-      break;
-    case PrimitiveType_Exp:
-      kernel_name[0] += "_ElementExp";
-      break;
-    case PrimitiveType_Log:
-      kernel_name[0] += "_ElementLog";
-      break;
-    case PrimitiveType_Square:
-      kernel_name[0] += "_ElementSquare";
-      break;
-    case PrimitiveType_Sqrt:
-      kernel_name[0] += "_ElementSqrt";
-      break;
-    case PrimitiveType_Rsqrt:
-      kernel_name[0] += "_ElementRsqrt";
-      break;
-    case PrimitiveType_Sin:
-      kernel_name[0] += "_ElementSin";
-      break;
-    case PrimitiveType_LogicalNot:
-      kernel_name[0] += "_ElementLogicalNot";
-      break;
-    case PrimitiveType_Floor:
-      kernel_name[0] += "_ElementFloor";
-      break;
-    case PrimitiveType_Ceil:
-      kernel_name[0] += "_ElementCeil";
-      break;
-    case PrimitiveType_Round:
-      kernel_name[0] += "_ElementRound";
-      break;
-    case PrimitiveType_Neg:
-      kernel_name[0] += "_ElementNeg";
-      break;
-    default:
-      break;
-  }
-}
-
-int ArithmeticSelfOpenCLKernel::Init() {
+int ArithmeticSelfOpenCLKernel::CheckSpecs() {
   if (in_tensors_.size() != 1 || out_tensors_.size() != 1) {
-    MS_LOG(ERROR) << "Invalid input size: " << in_tensors_.size() << ", output size: " << out_tensors_.size();
+    MS_LOG(ERROR) << "in size: " << in_tensors_.size() << ", out size: " << out_tensors_.size();
+    return RET_ERROR;
+  }
+  if (!IsArithmeticSelf(Type())) {
+    MS_LOG(ERROR) << "UnSupported Operator: " << schema::EnumNamePrimitiveType(Type());
     return RET_ERROR;
   }
   if (in_tensors_[0]->shape().size() != 4 && in_tensors_[0]->shape().size() != 2) {
     MS_LOG(ERROR) << " only support dim = 4 or 2 but your dim = " << in_tensors_[0]->shape().size();
     return RET_ERROR;
   }
-  auto param = reinterpret_cast<ArithmeticSelfParameter *>(this->op_parameter_);
-
-  std::string kernel_name = "ArithmeticSelf";
-  GetKernelName(&kernel_name, param);
-  kernel_name += "_NHWC4";
-  MS_LOG(DEBUG) << "execute kernel name : " << kernel_name;
-  std::set<std::string> build_options;
-  std::string source = arithmeticself_source;
-  std::string program_name = "ArithmeticSelf";
-  ocl_runtime_->LoadSource(program_name, source);
-  ocl_runtime_->BuildKernel(kernel_, program_name, kernel_name, build_options);
-
-  return mindspore::lite::RET_OK;
+  return RET_OK;
 }
 
 void ArithmeticSelfGetWorkGroup(const std::vector<size_t> &global, std::vector<size_t> *local, int max_size) {
@@ -127,11 +58,8 @@ void ArithmeticSelfGetWorkGroup(const std::vector<size_t> &global, std::vector<s
   local->push_back(z);
 }
 
-int ArithmeticSelfOpenCLKernel::Run() {
-  MS_LOG(DEBUG) << this->name() << " Running! ";
-
+void ArithmeticSelfOpenCLKernel::SetGlobalLocal() {
   auto output_shape = out_tensors_[0]->shape();
-  cl_int4 output_shape_ = {};
   uint32_t OH = 1, OW = 1, OC = 1;
   if (output_shape.size() == 4) {
     output_shape_ = {output_shape[0], output_shape[1], output_shape[2], UP_DIV(output_shape[3], C4NUM)};
@@ -145,52 +73,56 @@ int ArithmeticSelfOpenCLKernel::Run() {
     OC = UP_DIV(output_shape[1], C4NUM);
   }
   const std::vector<size_t> &max_global = ocl_runtime_->GetWorkItemSize();
-  std::vector<size_t> local = {1, 1, 1};  // init local
-  std::vector<size_t> global = {OH, OW, OC};
-  ArithmeticSelfGetWorkGroup(global, &local, max_global[0]);
-
-  int arg_cn = 0;
-  ocl_runtime_->SetKernelArg(kernel_, arg_cn++, in_tensors_[0]->data_c());
-  ocl_runtime_->SetKernelArg(kernel_, arg_cn++, out_tensors_[0]->data_c());
-  ocl_runtime_->SetKernelArg(kernel_, arg_cn++, output_shape_);
-
-  ocl_runtime_->RunKernel(kernel_, global, local, nullptr);
-
-  return mindspore::lite::RET_OK;
+  local_size_ = {1, 1, 1};  // init local
+  global_size_ = {OH, OW, OC};
+  ArithmeticSelfGetWorkGroup(global_size_, &local_size_, max_global[0]);
+  OpenCLKernel::AlignGlobalLocal(global_size_, local_size_);
 }
 
-kernel::LiteKernel *OpenCLArithmeticSelfKernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                                      const std::vector<lite::Tensor *> &outputs,
-                                                      OpParameter *opParameter, const lite::InnerContext *ctx,
-                                                      const kernel::KernelKey &desc,
-                                                      const mindspore::lite::PrimitiveC *primitive) {
-  auto *kernel = new (std::nothrow) ArithmeticSelfOpenCLKernel(opParameter, inputs, outputs);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << " new ArithmeticSelfOpenCLKernel failed ";
-    free(opParameter);
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != mindspore::lite::RET_OK) {
-    MS_LOG(ERROR) << " Init kernel failed, name: ArithmeticSelf ";
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
+int ArithmeticSelfOpenCLKernel::Prepare() {
+  std::string kernel_name = "ArithmeticSelf_Element" + std::string(schema::EnumNamePrimitiveType(Type())) + "_NHWC4";
+  MS_LOG(DEBUG) << "execute kernel name : " << kernel_name;
+  std::string program_name = "ArithmeticSelf";
+  ocl_runtime_->LoadSource(program_name, arithmeticself_source);
+  ocl_runtime_->BuildKernel(kernel_, program_name, kernel_name);
+  SetGlobalLocal();
+  SetConstArgs();
+  return RET_OK;
 }
 
-REG_KERNEL(kGPU, kNumberTypeFloat32, PrimitiveType_Abs, OpenCLArithmeticSelfKernelCreator)
-REG_KERNEL(kGPU, kNumberTypeFloat32, PrimitiveType_Ceil, OpenCLArithmeticSelfKernelCreator)
-REG_KERNEL(kGPU, kNumberTypeFloat32, PrimitiveType_Cos, OpenCLArithmeticSelfKernelCreator)
-REG_KERNEL(kGPU, kNumberTypeFloat32, PrimitiveType_Exp, OpenCLArithmeticSelfKernelCreator)
-REG_KERNEL(kGPU, kNumberTypeFloat32, PrimitiveType_Floor, OpenCLArithmeticSelfKernelCreator)
-REG_KERNEL(kGPU, kNumberTypeFloat32, PrimitiveType_Log, OpenCLArithmeticSelfKernelCreator)
-REG_KERNEL(kGPU, kNumberTypeFloat32, PrimitiveType_LogicalNot, OpenCLArithmeticSelfKernelCreator)
-REG_KERNEL(kGPU, kNumberTypeFloat32, PrimitiveType_Round, OpenCLArithmeticSelfKernelCreator)
-REG_KERNEL(kGPU, kNumberTypeFloat32, PrimitiveType_Rsqrt, OpenCLArithmeticSelfKernelCreator)
-REG_KERNEL(kGPU, kNumberTypeFloat32, PrimitiveType_Sin, OpenCLArithmeticSelfKernelCreator)
-REG_KERNEL(kGPU, kNumberTypeFloat32, PrimitiveType_Neg, OpenCLArithmeticSelfKernelCreator)
-REG_KERNEL(kGPU, kNumberTypeFloat32, PrimitiveType_Sqrt, OpenCLArithmeticSelfKernelCreator)
-REG_KERNEL(kGPU, kNumberTypeFloat32, PrimitiveType_Square, OpenCLArithmeticSelfKernelCreator)
+int ArithmeticSelfOpenCLKernel::Run() {
+  MS_LOG(DEBUG) << this->name() << " Running! ";
+  ocl_runtime_->SetKernelArg(kernel_, 0, in_tensors_.front()->data_c());
+  ocl_runtime_->SetKernelArg(kernel_, 1, out_tensors_.front()->data_c());
+  ocl_runtime_->RunKernel(kernel_, global_range_, local_range_, nullptr, &event_);
+  return RET_OK;
+}
+
+REG_KERNEL(kGPU, kNumberTypeFloat32, PrimitiveType_Abs, OpenCLKernelCreator<ArithmeticSelfOpenCLKernel>)
+REG_KERNEL(kGPU, kNumberTypeFloat32, PrimitiveType_Ceil, OpenCLKernelCreator<ArithmeticSelfOpenCLKernel>)
+REG_KERNEL(kGPU, kNumberTypeFloat32, PrimitiveType_Cos, OpenCLKernelCreator<ArithmeticSelfOpenCLKernel>)
+REG_KERNEL(kGPU, kNumberTypeFloat32, PrimitiveType_Exp, OpenCLKernelCreator<ArithmeticSelfOpenCLKernel>)
+REG_KERNEL(kGPU, kNumberTypeFloat32, PrimitiveType_Floor, OpenCLKernelCreator<ArithmeticSelfOpenCLKernel>)
+REG_KERNEL(kGPU, kNumberTypeFloat32, PrimitiveType_Log, OpenCLKernelCreator<ArithmeticSelfOpenCLKernel>)
+REG_KERNEL(kGPU, kNumberTypeFloat32, PrimitiveType_LogicalNot, OpenCLKernelCreator<ArithmeticSelfOpenCLKernel>)
+REG_KERNEL(kGPU, kNumberTypeFloat32, PrimitiveType_Round, OpenCLKernelCreator<ArithmeticSelfOpenCLKernel>)
+REG_KERNEL(kGPU, kNumberTypeFloat32, PrimitiveType_Rsqrt, OpenCLKernelCreator<ArithmeticSelfOpenCLKernel>)
+REG_KERNEL(kGPU, kNumberTypeFloat32, PrimitiveType_Sin, OpenCLKernelCreator<ArithmeticSelfOpenCLKernel>)
+REG_KERNEL(kGPU, kNumberTypeFloat32, PrimitiveType_Neg, OpenCLKernelCreator<ArithmeticSelfOpenCLKernel>)
+REG_KERNEL(kGPU, kNumberTypeFloat32, PrimitiveType_Sqrt, OpenCLKernelCreator<ArithmeticSelfOpenCLKernel>)
+REG_KERNEL(kGPU, kNumberTypeFloat32, PrimitiveType_Square, OpenCLKernelCreator<ArithmeticSelfOpenCLKernel>)
+REG_KERNEL(kGPU, kNumberTypeFloat16, PrimitiveType_Abs, OpenCLKernelCreator<ArithmeticSelfOpenCLKernel>)
+REG_KERNEL(kGPU, kNumberTypeFloat16, PrimitiveType_Ceil, OpenCLKernelCreator<ArithmeticSelfOpenCLKernel>)
+REG_KERNEL(kGPU, kNumberTypeFloat16, PrimitiveType_Cos, OpenCLKernelCreator<ArithmeticSelfOpenCLKernel>)
+REG_KERNEL(kGPU, kNumberTypeFloat16, PrimitiveType_Exp, OpenCLKernelCreator<ArithmeticSelfOpenCLKernel>)
+REG_KERNEL(kGPU, kNumberTypeFloat16, PrimitiveType_Floor, OpenCLKernelCreator<ArithmeticSelfOpenCLKernel>)
+REG_KERNEL(kGPU, kNumberTypeFloat16, PrimitiveType_Log, OpenCLKernelCreator<ArithmeticSelfOpenCLKernel>)
+REG_KERNEL(kGPU, kNumberTypeFloat16, PrimitiveType_LogicalNot, OpenCLKernelCreator<ArithmeticSelfOpenCLKernel>)
+REG_KERNEL(kGPU, kNumberTypeFloat16, PrimitiveType_Round, OpenCLKernelCreator<ArithmeticSelfOpenCLKernel>)
+REG_KERNEL(kGPU, kNumberTypeFloat16, PrimitiveType_Rsqrt, OpenCLKernelCreator<ArithmeticSelfOpenCLKernel>)
+REG_KERNEL(kGPU, kNumberTypeFloat16, PrimitiveType_Sin, OpenCLKernelCreator<ArithmeticSelfOpenCLKernel>)
+REG_KERNEL(kGPU, kNumberTypeFloat16, PrimitiveType_Neg, OpenCLKernelCreator<ArithmeticSelfOpenCLKernel>)
+REG_KERNEL(kGPU, kNumberTypeFloat16, PrimitiveType_Sqrt, OpenCLKernelCreator<ArithmeticSelfOpenCLKernel>)
+REG_KERNEL(kGPU, kNumberTypeFloat16, PrimitiveType_Square, OpenCLKernelCreator<ArithmeticSelfOpenCLKernel>)
 
 }  // namespace mindspore::kernel

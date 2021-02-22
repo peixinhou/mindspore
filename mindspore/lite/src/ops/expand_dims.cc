@@ -53,7 +53,7 @@ int ExpandDims::UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> 
     // use axis instead of dim
     if (inputs.at(1)->isa<ValueNode>()) {
       auto axis_tensor = inputs.at(1)->cast<ValueNodePtr>();
-      int axis = GetValue<int>(axis_tensor->value());
+      int axis = CastToInt(axis_tensor->value()).front();
       attr->dim = axis;
     } else {
       MS_LOG(ERROR) << "input axis is not value node.";
@@ -103,7 +103,7 @@ int ExpandDims::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> 
   output->set_data_type(input->data_type());
   output->set_format(input->format());
   if (!infer_flag()) {
-    return RET_OK;
+    return RET_INFER_INVALID;
   }
   int dim = GetDim();
   if (dim < 0) {

@@ -27,7 +27,7 @@ namespace kernel {
 template <typename T>
 class ScatterUpdateKernel : public GpuKernel {
  public:
-  ScatterUpdateKernel() : input_size_(0), inner_size_(0), indices_size_(0), updates_size_(0) {}
+  ScatterUpdateKernel() { ResetResource(); }
   ~ScatterUpdateKernel() override = default;
 
   const std::vector<size_t> &GetInputSizeList() const override { return input_size_list_; }
@@ -40,14 +40,16 @@ class ScatterUpdateKernel : public GpuKernel {
     int *indices = GetDeviceAddress<int>(inputs, 1);
     T *updates = GetDeviceAddress<T>(inputs, 2);
     T *output = GetDeviceAddress<T>(outputs, 0);
-    CHECK_CUDA_RET_WITH_EXCEPT(cudaMemcpyAsync(&output[0], &input[0], input_size_ * sizeof(T), cudaMemcpyDeviceToDevice,
+    CalScatterUpdate(inner_size_, indices_size_, indices, updates, input, reinterpret_cast<cudaStream_t>(stream_ptr));
+    CHECK_CUDA_RET_WITH_EXCEPT(kernel_node_,
+                               cudaMemcpyAsync(&output[0], &input[0], input_size_ * sizeof(T), cudaMemcpyDeviceToDevice,
                                                reinterpret_cast<cudaStream_t>(stream_ptr)),
                                "cudaMemcpyAsync output failed");
-    CalScatterUpdate(inner_size_, indices_size_, indices, updates, output, reinterpret_cast<cudaStream_t>(stream_ptr));
     return true;
   }
 
   bool Init(const CNodePtr &kernel_node) override {
+    kernel_node_ = kernel_node;
     size_t input_num = AnfAlgo::GetInputTensorNum(kernel_node);
     if (input_num != 3) {
       MS_LOG(ERROR) << "Input number is " << input_num << ", but ScatterUpdate needs 3 inputs.";
@@ -75,6 +77,16 @@ class ScatterUpdateKernel : public GpuKernel {
     return true;
   }
 
+  void ResetResource() noexcept override {
+    input_size_ = 0;
+    inner_size_ = 0;
+    indices_size_ = 0;
+    updates_size_ = 0;
+    input_size_list_.clear();
+    output_size_list_.clear();
+    workspace_size_list_.clear();
+  }
+
  protected:
   void InitSizeLists() override {
     input_size_list_.push_back(input_size_ * sizeof(T));
@@ -84,10 +96,10 @@ class ScatterUpdateKernel : public GpuKernel {
   }
 
  private:
-  int input_size_;
-  int inner_size_;
-  int indices_size_;
-  int updates_size_;
+  size_t input_size_;
+  size_t inner_size_;
+  size_t indices_size_;
+  size_t updates_size_;
   std::vector<size_t> input_size_list_;
   std::vector<size_t> output_size_list_;
   std::vector<size_t> workspace_size_list_;

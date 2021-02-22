@@ -75,13 +75,6 @@ class CacheService : public Service {
   Status PreBatchFetch(connection_id_type connection_id, const std::vector<row_id_type> &v,
                        const std::shared_ptr<flatbuffers::FlatBufferBuilder> &);
 
-  /// \brief Main function to fetch rows in batch. The output is a contiguous memory which will be decoded
-  /// by the CacheClient. Cache miss is not an error, and will be coded in the output to mark an empty row.
-  /// \param[in] v A vector of row id.
-  /// \param[out] out A contiguous memory buffer that holds the requested rows.
-  /// \return Status object
-  Status BatchFetch(const std::shared_ptr<flatbuffers::FlatBufferBuilder> &, WritableSlice *out) const;
-
   /// \brief Getter function
   /// \return Spilling path
   Path GetSpillPath() const;
@@ -98,6 +91,8 @@ class CacheService : public Service {
   /// \param[in/out] A pointer to a pre-allocated ServiceStat structure
   /// \return Status Object
   Status GetStat(ServiceStat *);
+  /// \brief Return the current state
+  CacheServiceState GetState() const { return st_.load(); }
   /// \brief Cache schema
   /// \param buf A Google Flatbuffer that contains the schema
   /// \param len size of the buffer
@@ -138,7 +133,7 @@ class CacheService : public Service {
   bool generate_id_;
   std::string cookie_;
   std::atomic<int32_t> num_clients_;
-  CacheServiceState st_;
+  std::atomic<CacheServiceState> st_;
   std::string schema_;
   std::shared_ptr<NumaMemoryPool> numa_pool_;
   // We also cache the result from calling FindKeysMiss because it is expensive. Besides user make

@@ -32,7 +32,9 @@ void ArithmeticCPUKernel::AssignAdd(T *input1, const T *input2, T *out, size_t s
 template <typename T>
 void ArithmeticCPUKernel::Add(const T *input1, const T *input2, T *out, size_t start, size_t end) {
   for (size_t i = start; i < end; i++) {
-    out[i] = input1[i] + input2[i];
+    std::vector<size_t> idx;
+    GenIndex(i, &idx);
+    out[i] = input1[idx[0]] + input2[idx[1]];
   }
 }
 
@@ -48,7 +50,9 @@ void ArithmeticCPUKernel::Sub(const T *input1, const T *input2, T *out, size_t s
 template <typename T>
 void ArithmeticCPUKernel::Mul(const T *input1, const T *input2, T *out, size_t start, size_t end) {
   for (size_t i = start; i < end; i++) {
-    out[i] = input1[i] * input2[i];
+    std::vector<size_t> idx;
+    GenIndex(i, &idx);
+    out[i] = input1[idx[0]] * input2[idx[1]];
   }
 }
 
@@ -57,11 +61,84 @@ void ArithmeticCPUKernel::RealDiv(const T *input1, const T *input2, T *out, size
   for (size_t i = start; i < end; i++) {
     std::vector<size_t> idx;
     GenIndex(i, &idx);
-    auto div_number = input2[idx[1]];
-    if (div_number == 0) {
-      MS_LOG(EXCEPTION) << "Cannot divided by 0!";
+    auto dividend = input1[idx[0]];
+    auto divisor = input2[idx[1]];
+    if (divisor == 0) {
+      if (dividend == 0) {
+        out[i] = std::numeric_limits<T>::quiet_NaN();
+        continue;
+      }
+      if (std::numeric_limits<T>::has_infinity) {
+        out[i] = dividend > 0 ? std::numeric_limits<T>::infinity() : -std::numeric_limits<T>::infinity();
+      } else {
+        out[i] = dividend > 0 ? std::numeric_limits<T>::max() : std::numeric_limits<T>::min();
+      }
+      continue;
     }
-    out[i] = input1[idx[0]] / div_number;
+    out[i] = dividend / divisor;
+  }
+}
+
+template <typename T>
+void ArithmeticCPUKernel::Div(const T *input1, const T *input2, T *out, size_t start, size_t end) {
+  for (size_t i = start; i < end; i++) {
+    std::vector<size_t> idx;
+    GenIndex(i, &idx);
+    auto dividend = input1[idx[0]];
+    auto divisor = input2[idx[1]];
+    if (divisor == 0) {
+      if (dividend == 0) {
+        out[i] = std::numeric_limits<T>::quiet_NaN();
+        continue;
+      }
+      if (std::numeric_limits<T>::has_infinity) {
+        out[i] = dividend > 0 ? std::numeric_limits<T>::infinity() : -std::numeric_limits<T>::infinity();
+      } else {
+        out[i] = dividend > 0 ? std::numeric_limits<T>::max() : std::numeric_limits<T>::min();
+      }
+      continue;
+    }
+    out[i] = dividend / divisor;
+  }
+}
+
+template <typename T>
+void ArithmeticCPUKernel::FloorDiv(const T *input1, const T *input2, T *out, size_t start, size_t end) {
+  for (size_t i = start; i < end; i++) {
+    std::vector<size_t> idx;
+    GenIndex(i, &idx);
+    auto dividend = input1[idx[0]];
+    auto divisor = input2[idx[1]];
+    if (divisor == 0) {
+      if (dividend == 0) {
+        out[i] = std::numeric_limits<T>::quiet_NaN();
+        continue;
+      }
+      if (std::numeric_limits<T>::has_infinity) {
+        out[i] = dividend > 0 ? std::numeric_limits<T>::infinity() : -std::numeric_limits<T>::infinity();
+      } else {
+        out[i] = dividend > 0 ? std::numeric_limits<T>::max() : std::numeric_limits<T>::min();
+      }
+      continue;
+    }
+    out[i] = floor(dividend / divisor);
+  }
+}
+
+template <typename T>
+void ArithmeticCPUKernel::Mod(const T *input1, const T *input2, T *out, size_t start, size_t end) {
+  for (size_t i = start; i < end; i++) {
+    std::vector<size_t> idx;
+    GenIndex(i, &idx);
+    auto x = static_cast<double>(input1[idx[0]]);
+    auto y = static_cast<double>(input2[idx[1]]);
+    auto data_div = x / y;
+    auto data_div_min = data_div < 0.0 ? data_div : 0.0;
+    auto data_div_max = data_div > 0.0 ? data_div : 0.0;
+    auto data_div_max_floor = floor(data_div_max);
+    auto data_div_min_ceil = ceil(data_div_min);
+    auto data_div_res = data_div_max_floor + data_div_min_ceil;
+    out[i] = static_cast<T>(x - data_div_res * y);
   }
 }
 
@@ -85,10 +162,83 @@ void ArithmeticCPUKernel::Less(const T *input1, const T *input2, bool *out, size
   }
 }
 
+template <typename T>
+void ArithmeticCPUKernel::Equal(const T *input1, const T *input2, bool *out, size_t start, size_t end) {
+  for (size_t i = start; i < end; i++) {
+    std::vector<size_t> idx;
+    GenIndex(i, &idx);
+    out[i] = input1[idx[0]] == input2[idx[1]];
+  }
+}
+
+template <typename T>
+void ArithmeticCPUKernel::NotEqual(const T *input1, const T *input2, bool *out, size_t start, size_t end) {
+  for (size_t i = start; i < end; i++) {
+    std::vector<size_t> idx;
+    GenIndex(i, &idx);
+    out[i] = input1[idx[0]] != input2[idx[1]];
+  }
+}
+
+template <typename T>
+void ArithmeticCPUKernel::LogicalAnd(const T *input1, const T *input2, bool *out, size_t start, size_t end) {
+  for (size_t i = start; i < end; i++) {
+    std::vector<size_t> idx;
+    GenIndex(i, &idx);
+    out[i] = input1[idx[0]] && input2[idx[1]];
+  }
+}
+
+template <typename T>
+void ArithmeticCPUKernel::LogicalOr(const T *input1, const T *input2, bool *out, size_t start, size_t end) {
+  for (size_t i = start; i < end; i++) {
+    std::vector<size_t> idx;
+    GenIndex(i, &idx);
+    out[i] = input1[idx[0]] || input2[idx[1]];
+  }
+}
+
+template <typename T>
+void ArithmeticCPUKernel::SquaredDifference(const T *input1, const T *input2, T *out, size_t start, size_t end) {
+  for (size_t i = start; i < end; i++) {
+    std::vector<size_t> idx;
+    GenIndex(i, &idx);
+    T diff = input1[idx[0]] - input2[idx[1]];
+    out[i] = diff * diff;
+  }
+}
+
+template <typename T>
+void ArithmeticCPUKernel::Greater(const T *input1, const T *input2, bool *out, size_t start, size_t end) {
+  for (size_t i = start; i < end; i++) {
+    std::vector<size_t> idx;
+    GenIndex(i, &idx);
+    out[i] = input1[idx[0]] > input2[idx[1]];
+  }
+}
+
+template <typename T>
+void ArithmeticCPUKernel::GreaterEqual(const T *input1, const T *input2, bool *out, size_t start, size_t end) {
+  for (size_t i = start; i < end; i++) {
+    std::vector<size_t> idx;
+    GenIndex(i, &idx);
+    out[i] = input1[idx[0]] >= input2[idx[1]];
+  }
+}
+
+template <typename T>
+void ArithmeticCPUKernel::LessEqual(const T *input1, const T *input2, bool *out, size_t start, size_t end) {
+  for (size_t i = start; i < end; i++) {
+    std::vector<size_t> idx;
+    GenIndex(i, &idx);
+    out[i] = input1[idx[0]] <= input2[idx[1]];
+  }
+}
+
 void ArithmeticCPUKernel::InitKernel(const CNodePtr &kernel_node) {
   MS_EXCEPTION_IF_NULL(kernel_node);
   std::string kernel_name = AnfAlgo::GetCNodeName(kernel_node);
-  if (kernel_name == prim::kPrimTensorAdd->name()) {
+  if (kernel_name == prim::kPrimAdd->name()) {
     operate_type_ = ADD;
   } else if (kernel_name == prim::kPrimSub->name()) {
     operate_type_ = SUB;
@@ -96,12 +246,34 @@ void ArithmeticCPUKernel::InitKernel(const CNodePtr &kernel_node) {
     operate_type_ = MUL;
   } else if (kernel_name == prim::kPrimRealDiv->name()) {
     operate_type_ = REALDIV;
+  } else if (kernel_name == prim::kPrimDiv->name()) {
+    operate_type_ = DIV;
+  } else if (kernel_name == prim::kPrimFloorDiv->name()) {
+    operate_type_ = FLOORDIV;
+  } else if (kernel_name == prim::kPrimMod->name()) {
+    operate_type_ = MOD;
   } else if (kernel_name == prim::kPrimPow->name()) {
     operate_type_ = POW;
   } else if (kernel_name == prim::kPrimLess->name()) {
     operate_type_ = LESS;
+  } else if (kernel_name == prim::kPrimEqual->name()) {
+    operate_type_ = EQUAL;
+  } else if (kernel_name == prim::kPrimNotEqual->name()) {
+    operate_type_ = NOTEQUAL;
+  } else if (kernel_name == prim::kPrimGreater->name()) {
+    operate_type_ = GREATER;
+  } else if (kernel_name == prim::kPrimGreaterEqual->name()) {
+    operate_type_ = GREATEREQUAL;
+  } else if (kernel_name == prim::kPrimLessEqual->name()) {
+    operate_type_ = LESSEQUAL;
+  } else if (kernel_name == prim::kPrimLogicalAnd->name()) {
+    operate_type_ = LOGICALAND;
+  } else if (kernel_name == prim::kPrimLogicalOr->name()) {
+    operate_type_ = LOGICALOR;
   } else if (kernel_name == prim::kPrimAssignAdd->name()) {
     operate_type_ = ASSIGNADD;
+  } else if (kernel_name == prim::kPrimSquaredDifference->name()) {
+    operate_type_ = SQUAREDDIFFERENCE;
   } else {
     MS_LOG(EXCEPTION) << "Not support " << kernel_name;
   }
@@ -127,19 +299,22 @@ void ArithmeticCPUKernel::InitKernel(const CNodePtr &kernel_node) {
   if (dtype_ != AnfAlgo::GetPrevNodeOutputInferDataType(kernel_node, 1)) {
     MS_LOG(EXCEPTION) << "Input0 and input1 must has the same data type";
   }
+  target_dtype_ = AnfAlgo::GetOutputInferDataType(kernel_node, 0);
 }
 
 bool ArithmeticCPUKernel::Launch(const std::vector<kernel::AddressPtr> &inputs,
                                  const std::vector<kernel::AddressPtr> & /*workspace*/,
                                  const std::vector<kernel::AddressPtr> &outputs) {
-  if (dtype_ == kNumberTypeInt32) {
+  if (dtype_ == kNumberTypeInt32 || dtype_ == kNumberTypeInt16 || dtype_ == kNumberTypeInt8) {
     LaunchKernel<int>(inputs, outputs);
-  } else if (dtype_ == kNumberTypeFloat32) {
+  } else if (dtype_ == kNumberTypeFloat32 || dtype_ == kNumberTypeFloat16 || dtype_ == kNumberTypeFloat64) {
     LaunchKernel<float>(inputs, outputs);
   } else if (dtype_ == kNumberTypeInt64) {
     LaunchKernel<int64_t>(inputs, outputs);
+  } else if (dtype_ == kNumberTypeBool) {
+    LaunchKernelLogic<bool>(inputs, outputs);
   } else {
-    MS_LOG(EXCEPTION) << "Only support int32, float32, but actual data type is " << TypeIdLabel(dtype_);
+    MS_LOG(EXCEPTION) << "Data type " << TypeIdLabel(dtype_) << "is not support.";
   }
   return true;
 }
@@ -176,22 +351,50 @@ void ArithmeticCPUKernel::GenIndex(size_t num, std::vector<size_t> *idx) {
 }
 
 template <typename T>
-void ArithmeticCPUKernel::LaunchLess(const std::vector<AddressPtr> &inputs, const std::vector<AddressPtr> &outputs) {
+void ArithmeticCPUKernel::LaunchKernelLogic(const std::vector<AddressPtr> &inputs,
+                                            const std::vector<AddressPtr> &outputs) {
   T *input1 = reinterpret_cast<T *>(inputs[0]->addr);
   T *input2 = reinterpret_cast<T *>(inputs[1]->addr);
   bool *output = reinterpret_cast<bool *>(outputs[0]->addr);
 
-  size_t lens = outputs[0]->size > 0 ? static_cast<size_t>(outputs[0]->size / sizeof(T)) : 1;
+  size_t lens = outputs[0]->size > 0 ? static_cast<size_t>(outputs[0]->size / sizeof(bool)) : 1;
   auto max_thread_num = std::thread::hardware_concurrency();
   size_t thread_num = lens < 128 * max_thread_num ? std::ceil(lens / 128.0) : max_thread_num;
   MS_LOG(INFO) << "Lens=" << lens << "; use thread_num=" << thread_num << "; max_thread_num: " << max_thread_num;
   std::vector<std::thread> threads;
+  if (thread_num < 1) {
+    MS_LOG(ERROR) << "Invalid value: thread_num " << thread_num;
+    return;
+  }
   threads.reserve(thread_num);
   size_t start = 0;
   size_t once_compute_size = (lens + thread_num - 1) / thread_num;
+  if (once_compute_size < 1) {
+    MS_LOG(ERROR) << "Invalid value: once_compute_size " << once_compute_size;
+    return;
+  }
   while (start < lens) {
     size_t end = (start + once_compute_size) > lens ? lens : (start + once_compute_size);
-    threads.emplace_back(std::thread(&ArithmeticCPUKernel::Less<T>, this, input1, input2, output, start, end));
+    if (operate_type_ == LESS) {
+      threads.emplace_back(std::thread(&ArithmeticCPUKernel::Less<T>, this, input1, input2, output, start, end));
+    } else if (operate_type_ == EQUAL) {
+      threads.emplace_back(std::thread(&ArithmeticCPUKernel::Equal<T>, this, input1, input2, output, start, end));
+    } else if (operate_type_ == NOTEQUAL) {
+      threads.emplace_back(std::thread(&ArithmeticCPUKernel::NotEqual<T>, this, input1, input2, output, start, end));
+    } else if (operate_type_ == GREATER) {
+      threads.emplace_back(std::thread(&ArithmeticCPUKernel::Greater<T>, this, input1, input2, output, start, end));
+    } else if (operate_type_ == GREATEREQUAL) {
+      threads.emplace_back(
+        std::thread(&ArithmeticCPUKernel::GreaterEqual<T>, this, input1, input2, output, start, end));
+    } else if (operate_type_ == LESSEQUAL) {
+      threads.emplace_back(std::thread(&ArithmeticCPUKernel::LessEqual<T>, this, input1, input2, output, start, end));
+    } else if (operate_type_ == LOGICALAND) {
+      threads.emplace_back(std::thread(&ArithmeticCPUKernel::LogicalAnd<T>, this, input1, input2, output, start, end));
+    } else if (operate_type_ == LOGICALOR) {
+      threads.emplace_back(std::thread(&ArithmeticCPUKernel::LogicalOr<T>, this, input1, input2, output, start, end));
+    } else {
+      MS_LOG(EXCEPTION) << "Not support " << operate_type_;
+    }
     start += once_compute_size;
   }
   for (size_t i = 0; i < threads.size(); ++i) {
@@ -201,8 +404,8 @@ void ArithmeticCPUKernel::LaunchLess(const std::vector<AddressPtr> &inputs, cons
 
 template <typename T>
 void ArithmeticCPUKernel::LaunchKernel(const std::vector<AddressPtr> &inputs, const std::vector<AddressPtr> &outputs) {
-  if (operate_type_ == LESS) {
-    LaunchLess<T>(inputs, outputs);
+  if (target_dtype_ == kNumberTypeBool) {
+    LaunchKernelLogic<T>(inputs, outputs);
     return;
   }
   T *input1 = reinterpret_cast<T *>(inputs[0]->addr);
@@ -214,9 +417,17 @@ void ArithmeticCPUKernel::LaunchKernel(const std::vector<AddressPtr> &inputs, co
   size_t thread_num = lens < 128 * max_thread_num ? std::ceil(lens / 128.0) : max_thread_num;
   MS_LOG(INFO) << "Lens=" << lens << "; use thread_num=" << thread_num << "; max_thread_num: " << max_thread_num;
   std::vector<std::thread> threads;
+  if (thread_num < 1) {
+    MS_LOG(ERROR) << "Invalid value: thread_num " << thread_num;
+    return;
+  }
   threads.reserve(thread_num);
   size_t start = 0;
   size_t once_compute_size = (lens + thread_num - 1) / thread_num;
+  if (once_compute_size < 1) {
+    MS_LOG(ERROR) << "Invalid value: once_compute_size " << once_compute_size;
+    return;
+  }
   while (start < lens) {
     size_t end = (start + once_compute_size) > lens ? lens : (start + once_compute_size);
     if (operate_type_ == ADD) {
@@ -227,10 +438,19 @@ void ArithmeticCPUKernel::LaunchKernel(const std::vector<AddressPtr> &inputs, co
       threads.emplace_back(std::thread(&ArithmeticCPUKernel::Mul<T>, this, input1, input2, output, start, end));
     } else if (operate_type_ == REALDIV) {
       threads.emplace_back(std::thread(&ArithmeticCPUKernel::RealDiv<T>, this, input1, input2, output, start, end));
+    } else if (operate_type_ == DIV) {
+      threads.emplace_back(std::thread(&ArithmeticCPUKernel::Div<T>, this, input1, input2, output, start, end));
+    } else if (operate_type_ == FLOORDIV) {
+      threads.emplace_back(std::thread(&ArithmeticCPUKernel::FloorDiv<T>, this, input1, input2, output, start, end));
+    } else if (operate_type_ == MOD) {
+      threads.emplace_back(std::thread(&ArithmeticCPUKernel::Mod<T>, this, input1, input2, output, start, end));
     } else if (operate_type_ == POW) {
       threads.emplace_back(std::thread(&ArithmeticCPUKernel::Pow<T>, this, input1, input2, output, start, end));
     } else if (operate_type_ == ASSIGNADD) {
       threads.emplace_back(std::thread(&ArithmeticCPUKernel::AssignAdd<T>, this, input1, input2, output, start, end));
+    } else if (operate_type_ == SQUAREDDIFFERENCE) {
+      threads.emplace_back(
+        std::thread(&ArithmeticCPUKernel::SquaredDifference<T>, this, input1, input2, output, start, end));
     } else {
       MS_LOG(EXCEPTION) << "Not support " << operate_type_;
     }

@@ -24,28 +24,19 @@
 #include "minddata/dataset/engine/perf/device_queue_tracing.h"
 #include "minddata/dataset/engine/perf/connector_size.h"
 #include "minddata/dataset/engine/perf/connector_throughput.h"
+#include "minddata/dataset/engine/perf/cpu_sampling.h"
 #include "minddata/dataset/engine/perf/dataset_iterator_tracing.h"
-#ifndef ENABLE_ANDROID
-#include "utils/log_adapter.h"
-#else
-#include "mindspore/lite/src/common/log_adapter.h"
-#endif
+#include "minddata/dataset/util/log_adapter.h"
 
 namespace mindspore {
 namespace dataset {
 
 // Constructor
-ProfilingManager::ProfilingManager(ExecutionTree *tree) : tree_(tree) {
+ProfilingManager::ProfilingManager(ExecutionTree *tree) : tree_(tree), enabled_(true) {
   perf_monitor_ = std::make_unique<Monitor>(tree_);
 }
 
-bool ProfilingManager::IsProfilingEnable() const {
-  auto profiling = common::GetEnv("PROFILING_MODE");
-  if (profiling.empty() || profiling != "true") {
-    return false;
-  }
-  return true;
-}
+bool ProfilingManager::IsProfilingEnable() const { return common::GetEnv("PROFILING_MODE") == "true" && enabled_; }
 
 Status ProfilingManager::Initialize() {
   // Register nodes based on config
@@ -68,7 +59,7 @@ Status ProfilingManager::Initialize() {
 #endif
   dir_path_ = real_path;
 
-  // If DEVICE_ID is not set,defult value is 0
+  // If DEVICE_ID is not set, default value is 0
   device_id_ = common::GetEnv("DEVICE_ID");
   if (device_id_.empty()) {
     device_id_ = "0";
@@ -89,6 +80,10 @@ Status ProfilingManager::Initialize() {
   std::shared_ptr<Sampling> connector_thr_sampling = std::make_shared<ConnectorThroughput>(tree_);
   RETURN_IF_NOT_OK(RegisterSamplingNode(connector_thr_sampling));
 
+#ifndef ENABLE_ANDROID
+  std::shared_ptr<Sampling> cpu_sampling = std::make_shared<CpuSampling>(tree_);
+  RETURN_IF_NOT_OK(RegisterSamplingNode(cpu_sampling));
+#endif
   return Status::OK();
 }
 
@@ -103,7 +98,7 @@ Status ProfilingManager::RegisterTracingNode(std::shared_ptr<Tracing> node) {
   // Check if node with the same name has already been registered.
   auto exist = tracing_nodes_.find(node->Name());
   if (exist != tracing_nodes_.end()) {
-    return Status(StatusCode::kProfilingError, "Profiling node already exist: " + node->Name());
+    return Status(StatusCode::kMDProfilingError, "Profiling node already exist: " + node->Name());
   }
   // Register the node with its name as key.
   RETURN_IF_NOT_OK(node->Init(dir_path_, device_id_));
@@ -116,7 +111,7 @@ Status ProfilingManager::GetTracingNode(const std::string &name, std::shared_ptr
   // Check if node with the same name has already been registered.
   auto exist = tracing_nodes_.find(name);
   if (exist == tracing_nodes_.end()) {
-    return Status(StatusCode::kProfilingError, "Profiling node does not exist: " + name);
+    return Status(StatusCode::kMDProfilingError, "Profiling node does not exist: " + name);
   }
   // Fetch node.
   *node = tracing_nodes_[name];
@@ -128,7 +123,7 @@ Status ProfilingManager::RegisterSamplingNode(std::shared_ptr<Sampling> node) {
   // Check if node with the same name has already been registered.
   auto exist = sampling_nodes_.find(node->Name());
   if (exist != sampling_nodes_.end()) {
-    return Status(StatusCode::kProfilingError, "Profiling node already exist: " + node->Name());
+    return Status(StatusCode::kMDProfilingError, "Profiling node already exist: " + node->Name());
   }
   // Register the node with its name as key.
   RETURN_IF_NOT_OK(node->Init(dir_path_, device_id_));
@@ -141,7 +136,7 @@ Status ProfilingManager::GetSamplingNode(const std::string &name, std::shared_pt
   // Check if node with the same name has already been registered.
   auto exist = sampling_nodes_.find(name);
   if (exist == sampling_nodes_.end()) {
-    return Status(StatusCode::kProfilingError, "Profiling node does not exist: " + name);
+    return Status(StatusCode::kMDProfilingError, "Profiling node does not exist: " + name);
   }
   // Fetch node.
   *node = sampling_nodes_[name];
@@ -178,7 +173,7 @@ Status ProfilingManager::ChangeFileMode() {
   return Status::OK();
 }
 
-int64_t ProfilingTime::GetCurMilliSecond() {
+uint64_t ProfilingTime::GetCurMilliSecond() {
   // because cpplint does not allow using namespace
   using std::chrono::duration_cast;
   using std::chrono::milliseconds;

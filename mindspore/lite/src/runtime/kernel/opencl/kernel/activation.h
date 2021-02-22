@@ -18,30 +18,34 @@
 #define MINDSPORE_LITE_SRC_RUNTIME_KERNEL_OPENCL_KERNEL_ACTIVATION_H_
 
 #include <vector>
+#include <string>
 
 #include "src/runtime/kernel/opencl/opencl_kernel.h"
-#include "nnacl/fp32/activation.h"
+#include "nnacl/fp32/activation_fp32.h"
 
 namespace mindspore::kernel {
 
-class ActivationOpenClKernel : public OpenCLKernel {
+class ActivationOpenCLKernel : public OpenCLKernel {
  public:
-  ActivationOpenClKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
-                         const std::vector<lite::Tensor *> &outputs)
-      : OpenCLKernel(parameter, inputs, outputs),
+  ActivationOpenCLKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
+                         const std::vector<lite::Tensor *> &outputs, const lite::InnerContext *ctx,
+                         const mindspore::lite::PrimitiveC *primitive)
+      : OpenCLKernel(parameter, inputs, outputs, ctx, primitive),
         type_(reinterpret_cast<ActivationParameter *>(parameter)->type_),
         alpha_(reinterpret_cast<ActivationParameter *>(parameter)->alpha_) {}
-  ~ActivationOpenClKernel() override = default;
+  ~ActivationOpenCLKernel() override = default;
 
-  int Init() override;
   int Run() override;
+  int Prepare() override;
+  int CheckSpecs() override;
+  void SetConstArgs() override;
+  void SetGlobalLocal() override;
 
  private:
-  int SetArgs();
-  cl::Kernel kernel_;
+  static std::string GetActTypeString(int act_type);
   int type_;
   float alpha_;
-  Image2DInfo outShape = Image2DInfo(nullptr);
+  GpuTensorInfo outShape;
 };
 
 }  // namespace mindspore::kernel

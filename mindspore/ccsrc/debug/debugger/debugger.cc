@@ -34,6 +34,7 @@
 #include "debug/data_dump/e2e_dump_util.h"
 #include "utils/config_manager.h"
 
+using debugger::Chunk;
 using debugger::EventReply;
 using debugger::GraphProto;
 using debugger::ModelProto;
@@ -68,8 +69,10 @@ Debugger::Debugger()
       is_dataset_graph_(false),
       partial_memory_(false),
       last_overflow_bin_(0),
-      overflow_bin_path_(""),
-      initial_suspend_(true) {
+      initial_suspend_(true),
+      not_dataset_graph_sum_(0),
+      version_("") {
+  CheckDebuggerEnabledParam();
   if (CheckDebuggerEnabled()) {
     // configure partial memory reuse
     partial_memory_ = CheckDebuggerPartialMemoryEnabled();
@@ -84,8 +87,9 @@ Debugger::Debugger()
         << "Partial Memory Reuse is enabled. Note: 1. Please only set watchpoints before running the first "
            "step. 2. Tensor values are only available for nodes that are watched by any watchpoint.";
     } else {
-      MS_LOG(INFO) << "Memory Reuse is disabled. Set environment variable MS_DEBUGGER_PARTIAL_MEM=1 to reduce memory "
-                      "usage for large models.";
+      MS_LOG(WARNING)
+        << "Memory Reuse is disabled. Set environment variable MS_DEBUGGER_PARTIAL_MEM=1 to reduce memory "
+           "usage for large models.";
     }
   }
 }
@@ -98,6 +102,7 @@ void Debugger::Init(const uint32_t device_id, const std::string device_target) {
   device_id_ = device_id;
   MS_LOG(INFO) << "Debugger got device_target: " << device_target;
   device_target_ = device_target;
+  version_ = "1.2.0";
 }
 
 void Debugger::EnableDebugger() {
@@ -121,56 +126,62 @@ void Debugger::EnableDebugger() {
     return;
   }
 
-  // configure grpc host
-  const char *env_host_str = std::getenv("MS_DEBUGGER_HOST");
-  std::string host;
-  if (env_host_str != nullptr) {
-    std::regex reg_ip(
-      "(25[0-4]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[1-9])"
-      "[.](25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])"
-      "[.](25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])"
-      "[.](25[0-4]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[1-9])");
-    std::smatch smat;
-    std::string host_str = std::string(env_host_str);
-    if (std::regex_match(host_str, smat, reg_ip)) {
-      MS_LOG(INFO) << "Getenv MS_DEBUGGER_HOST: " << env_host_str;
-      host = std::string(env_host_str);
+  if (debugger_enabled_) {
+    // configure grpc host
+    const char *env_host_str = std::getenv("MS_DEBUGGER_HOST");
+    std::string host;
+    if (env_host_str != nullptr) {
+      if (CheckIp(env_host_str)) {
+        MS_LOG(INFO) << "Getenv MS_DEBUGGER_HOST: " << env_host_str;
+        host = std::string(env_host_str);
+      } else {
+        debugger_enabled_ = false;
+        MS_EXCEPTION(ValueError) << "Environment variable MS_DEBUGGER_HOST isn't a valid IP address. "
+                                    "Please set environment variable MS_DEBUGGER_HOST=x.x.x.x to a valid IP";
+      }
     } else {
-      MS_LOG(ERROR) << "Environment variable MS_DEBUGGER_HOST isn't a valid IP address. "
-                       "Please set environment variable MS_DEBUGGER_HOST=x.x.x.x to a valid IP";
-      debugger_enabled_ = false;
+      MS_LOG(INFO) << "Environment variable MS_DEBUGGER_HOST doesn't exist. Using default debugger host: localhost";
+      host = "localhost";
     }
-  } else {
-    MS_LOG(INFO) << "Environment variable MS_DEBUGGER_HOST doesn't exist. Using default debugger host: localhost";
-    host = "localhost";
-  }
-  // configure grpc port
-  const char *env_port_str = std::getenv("MS_DEBUGGER_PORT");
-  std::string port;
-  if (env_port_str != nullptr) {
-    if (CheckPort(env_port_str)) {
-      MS_LOG(INFO) << "Getenv MS_DEBUGGER_PORT: " << env_port_str;
-      port = std::string(env_port_str);
+    // configure grpc port
+    const char *env_port_str = std::getenv("MS_DEBUGGER_PORT");
+    std::string port;
+    if (env_port_str != nullptr) {
+      if (CheckPort(env_port_str)) {
+        MS_LOG(INFO) << "Getenv MS_DEBUGGER_PORT: " << env_port_str;
+        port = std::string(env_port_str);
+      } else {
+        debugger_enabled_ = false;
+        MS_EXCEPTION(ValueError) << "Environment variable MS_DEBUGGER_PORT is not valid. Custom port ranging from 1 to "
+                                    "65535";
+      }
     } else {
-      MS_LOG(ERROR) << "Environment variable MS_DEBUGGER_PORT is not valid. Custom port ranging from 1 to 65535";
-      debugger_enabled_ = false;
+      port = "50051";
+      if (!CheckPort(port.c_str())) {
+        MS_EXCEPTION(ValueError) << "Default MS_DEBUGGER_PORT is not valid. Custom port ranging from 1 to 65535";
+      }
+      MS_LOG(INFO) << "Environment variable MS_DEBUGGER_PORT doesn't exist. Using default debugger port: 50051";
     }
-  } else {
-    MS_LOG(INFO) << "Environment variable MS_DEBUGGER_PORT doesn't exist. Using default debugger port: 50051";
-    port = "50051";
+    // initialize grpc client
+    grpc_client_ = std::make_unique<GrpcClient>(host, port);
   }
+  debug_services_ = std::make_unique<DebugServices>();
+}
+
+void Debugger::SetOpOverflowBinPath(uint32_t graph_id) {
 #ifdef ENABLE_D
   // set operation overflow info
-  overflow_bin_path_ = DumpJsonParser::GetInstance().GetOpOverflowBinPath(graph_ptr_->graph_id(), device_id_);
+  overflow_bin_path_.insert(std::pair<uint32_t, std::string>(
+    graph_id, DumpJsonParser::GetInstance().GetOpOverflowBinPath(graph_id, device_id_)));
   // new overflow dump files will have a timestamp greater than last_overflow_bin_
-  last_overflow_bin_ = 0;
+  auto overflow_bin_path = overflow_bin_path_.find(graph_id)->second;
   DIR *d;
-  d = opendir(overflow_bin_path_.c_str());
+  d = opendir(overflow_bin_path.c_str());
   if (d != nullptr) {
     struct dirent *dir;
     while ((dir = readdir(d)) != NULL) {
       if (dir->d_type == DT_REG) {
-        std::string file_path = overflow_bin_path_;
+        std::string file_path = overflow_bin_path;
         file_path.append(dir->d_name);
         std::size_t found = file_path.find_last_of(".");
         if (found == std::string::npos) {
@@ -188,13 +199,6 @@ void Debugger::EnableDebugger() {
     closedir(d);
   }
 #endif
-
-  // initialize grpc client
-  if (debugger_enabled_) {
-    grpc_client_ = std::make_unique<GrpcClient>(host, port);
-  }
-
-  debug_services_ = std::make_unique<DebugServices>();
 }
 
 void Debugger::CheckDatasetSinkMode() {
@@ -219,13 +223,28 @@ bool Debugger::CheckDebuggerDumpEnabled() {
 
 bool Debugger::CheckDebuggerEnabled() {
   // get env variables to configure debugger
-  const char *env_enable_str = std::getenv("ENABLE_MS_DEBUGGER");
-  if (env_enable_str != nullptr) {
-    if (std::strcmp(env_enable_str, "1") == 0) {
+  const char *env_enable_char = std::getenv("ENABLE_MS_DEBUGGER");
+  if (env_enable_char != nullptr) {
+    std::string env_enable_str = env_enable_char;
+    (void)std::transform(env_enable_str.begin(), env_enable_str.end(), env_enable_str.begin(), ::tolower);
+    if (env_enable_str == "1" || env_enable_str == "true") {
       return true;
     }
   }
   return false;
+}
+
+void Debugger::CheckDebuggerEnabledParam() {
+  // check the value of env variable ENABLE_MS_DEBUGGER
+  const char *env_enable_char = std::getenv("ENABLE_MS_DEBUGGER");
+  if (env_enable_char != nullptr) {
+    std::string env_enable_str = env_enable_char;
+    (void)std::transform(env_enable_str.begin(), env_enable_str.end(), env_enable_str.begin(), ::tolower);
+    if (env_enable_str != "0" && env_enable_str != "1" && env_enable_str != "false" && env_enable_str != "true") {
+      MS_LOG(WARNING) << "Env variable ENABLE_MS_DEBUGGER should be True/False/1/0 (case insensitive), but get: "
+                      << env_enable_str;
+    }
+  }
 }
 
 bool Debugger::CheckDebuggerPartialMemoryEnabled() {
@@ -255,16 +274,57 @@ void Debugger::Reset() {
   grpc_client_ = nullptr;
   debug_services_ = nullptr;
   last_overflow_bin_ = 0;
-  overflow_bin_path_ = "";
+  overflow_bin_path_.clear();
   stream_task_to_opname_.clear();
 }
 
-void Debugger::PreExecute(const KernelGraphPtr &graph_ptr) {
+void Debugger::PreExecute(const KernelGraphPtr &graph_ptr, uint32_t graph_sum) {
   // access lock for public method
   std::lock_guard<std::mutex> a_lock(access_lock_);
   CheckDatasetSinkMode();
-  if (debugger_->DebuggerBackendEnabled()) {
-    // check and save graph_ptr, suspend if graph is new
+  auto graph_id = graph_ptr->graph_id();
+  // collect rungrap_ids to update step number in multigraph case
+  if (!rungraph_id_list_.size()) {
+    rungraph_id_list_.push_back(graph_id);
+
+  } else {
+    if (std::find(rungraph_id_list_.begin(), rungraph_id_list_.end(), graph_id) == rungraph_id_list_.end()) {
+      rungraph_id_list_.push_back(graph_id);
+    }
+  }
+  // check and save graph_ptr, suspend if graph is new
+  MS_LOG(INFO) << "total number graph: " << graph_sum;
+  // multiple graphs
+  if (graph_sum > 1) {
+    // there are more than one graphs are not dataset_graph
+    if (not_dataset_graph_sum_ > 0) {
+      // only try to enable debugger if they are not all dataset graphs
+      if (!debugger_enabled_) {
+        EnableDebugger();
+      }
+
+      if (debugger_enabled_) {
+        if (graph_proto_list_.size()) {
+          // only send compiled graphs once.
+          auto dbg_graph_ptr = graph_ptr_;
+          // use current graph ptr to load parameters
+          graph_ptr_ = graph_ptr;
+          LoadParametersAndConst();
+          // revert graph ptr to original value
+          graph_ptr_ = dbg_graph_ptr;
+          SendMultiGraphsAndSuspend(graph_proto_list_, graph_sum);
+          graph_proto_list_.clear();
+        } else if (graph_id == rungraph_id_list_.front() && device_target_ == kGPUDevice) {
+          // stop only when receive the first sub run graph for each step
+          CommandLoop();
+        }
+      }
+    }
+  } else if (graph_proto_list_.size() == 1) {
+    // In single graph case, reset graph_ptr_ to be nullptr for the initial step
+    if (num_step_ == 0) {
+      graph_ptr_ = nullptr;
+    }
     CheckGraphPtr(graph_ptr);
   }
 }
@@ -277,20 +337,16 @@ void Debugger::PostExecute() {
   }
   if (debugger_->DebuggerBackendEnabled()) {
     // analyze tensor data and send the watchpoints been hit
-    if (run_level_ == "node") {
-      MS_LOG(INFO) << "Debugger is in node level mode ";
-      return;
-    }
     if (debugger_enabled_ && !is_dataset_graph_) {
       if (device_target_ != kGPUDevice) {
         num_step_++;
-        MS_LOG(INFO) << "Debugger suspend at end of step; number of steps executed: " << num_step_;
-        SendWatchpoints(CheckWatchpoints());
-        CommandLoop();
-      } else {
-        CommandLoop();
       }
+      MS_LOG(INFO) << "Debugger suspend at end of step; number of steps executed: " << num_step_;
+      SendWatchpoints(CheckWatchpoints());
+      CommandLoop();
     }
+    // Only keep parameters in the current map
+    debug_services_->ResetLoadedTensors();
   }
 }
 
@@ -305,7 +361,7 @@ bool Debugger::ReadNodeDataRequired(const CNodePtr &kernel) {
   return false;
 }
 
-void Debugger::PostExecuteNode(const CNodePtr &kernel) {
+void Debugger::PostExecuteNode(const CNodePtr &kernel, bool last_kernel) {
   // access lock for public method
   std::lock_guard<std::mutex> a_lock(access_lock_);
   if (pipeline::ExecutorPy::GetDebugTerminate()) {
@@ -324,8 +380,9 @@ void Debugger::PostExecuteNode(const CNodePtr &kernel) {
         hit_empty_flag = false;
       }
     }
-    if (hit_empty_flag && run_level_ == "node" && (node_name_ == "" || node_name_ == cur_name_)) {
+    if (hit_empty_flag && run_level_ == "node" && (node_name_ == "" || node_name_ == cur_name_) && !last_kernel) {
       // if kernel is not watchpoint and is next_to or continue_to node, suspend
+      // No need to suspend if this is the last node in graph since PostExecute suspends at the end of graph
       CommandLoop();
     }
     return;
@@ -346,20 +403,42 @@ void Debugger::SetStreamTaskToOpnameMap(const std::map<std::pair<uint32_t, uint3
   stream_task_to_opname_ = mapping;
 }
 
-void Debugger::CheckGraphPtr(const KernelGraphPtr &graph_ptr) {
+void Debugger::LoadGraphs(const KernelGraphPtr &graph_ptr) {
   if (graph_ptr_ != graph_ptr) {
-    MS_LOG(INFO) << "Debugger got new graph: " << graph_ptr->graph_id();
+    MS_LOG(INFO) << "LoadGraphs Debugger got new graph: " << graph_ptr->graph_id();
     // save new graph_ptr
     graph_ptr_ = graph_ptr;
-    // check if it is dataset graph
     CheckDatasetGraph();
+    if (!is_dataset_graph_) {
+      // get proto for new graph_ptr
+      auto graph_proto = GetGraphProto(graph_ptr);
+      // add new graph proto to graph_proto_list_
+      graph_proto_list_.push_back(graph_proto);
+      graph_ptr_list_.push_back(graph_ptr);
+#ifdef ENABLE_D
+      SetOpOverflowBinPath(graph_ptr->graph_id());
+#endif
+      not_dataset_graph_sum_++;
+    }
+    // reset is_dataset_graph to be false
+    is_dataset_graph_ = false;
+  }
+}
+
+// In single graph cases, check single graph ptr
+void Debugger::CheckGraphPtr(const KernelGraphPtr &graph_ptr) {
+  if (graph_ptr_ != graph_ptr) {
+    MS_LOG(INFO) << "CheckGraphPtr Debugger got new graph: " << graph_ptr->graph_id();
+    // save new graph_ptr
+    graph_ptr_ = graph_ptr;
     if (!is_dataset_graph_) {
       // only try to enable debugger if it is not a dataset graph
       EnableDebugger();
       if (debugger_enabled_) {
         LoadParametersAndConst();
-        // get graph proto and send to mindinsight
-        SendGraphAndSuspend(GetGraphProto());
+        // get graph proto and send to Mindinsight
+        auto graph_proto = graph_proto_list_.front();
+        SendGraphAndSuspend(graph_proto);
       }
     }
   }
@@ -386,24 +465,25 @@ void Debugger::CheckDatasetGraph() {
   is_dataset_graph_ = false;
 }
 
-GraphProto Debugger::GetGraphProto() const {
+GraphProto Debugger::GetGraphProto(const KernelGraphPtr &graph_ptr) const {
   // convert kernel graph to debugger modelproto
   ModelProto model = GetDebuggerFuncGraphProto(graph_ptr_);
   return model.graph();
 }
 
 void Debugger::SendGraphAndSuspend(const GraphProto &graph_proto) {
-  SendMetadata();
-  // send graph to mindinght server
-  EventReply reply = grpc_client_->SendGraph(graph_proto);
-  if (reply.status() != reply.OK) {
-    MS_LOG(ERROR) << "Error: SendGraph failed";
+  if (SendMetadata(true)) {
+    // send graph to Mindinsight server
+    EventReply reply = grpc_client_->SendGraph(graph_proto);
+    if (reply.status() != reply.OK) {
+      MS_LOG(ERROR) << "Error: SendGraph failed";
+    }
+    // enter command loop, wait and process commands
+    CommandLoop();
   }
-  // enter command loop, wait and process commands
-  CommandLoop();
 }
 
-void Debugger::SendMetadata() {
+bool Debugger::SendMetadata(bool version_check) {
   // prepare metadata
   std::string device_name = std::to_string(device_id_) + ":" + std::to_string(graph_ptr_->graph_id());
   Metadata metadata;
@@ -412,11 +492,74 @@ void Debugger::SendMetadata() {
   metadata.set_backend(device_target_);
   metadata.set_cur_node(cur_name_);
   metadata.set_training_done(training_done_);
+  metadata.set_ms_version(version_);
   MS_LOG(INFO) << "Is training done?" << training_done_;
+  // set graph munber to not_dataset_graph_sum_
+  metadata.set_graph_num(not_dataset_graph_sum_);
   EventReply reply_metadata = grpc_client_->SendMetadata(metadata);
-  if (reply_metadata.status() != reply_metadata.OK) {
+  bool ret = false;
+  if (reply_metadata.status() == reply_metadata.OK) {
+    if (version_check) {
+      // get type of the command in meta data reply, it should be version matched
+      DebuggerCommand cmd = GetCommand(reply_metadata);
+      if (cmd != DebuggerCommand::kVersionMatchedCMD) {
+        MS_LOG(ERROR) << "MindInsight version is too old, Mindspore version is " << version_;
+        Exit();
+      } else {
+        if (GetMiVersionMatched(reply_metadata)) {
+          MS_LOG(INFO) << "MindSpore version is " << version_ << " matches MindInsight version.";
+          ret = true;
+        } else {
+          MS_LOG(ERROR) << "MindSpore version " << version_ << ", did not match MindInsight version.";
+          CommandLoop();
+        }
+      }
+    } else {
+      // version check is done before so we can just return true here
+      ret = true;
+    }
+  } else {
     MS_LOG(ERROR) << "Error: SendMetadata failed";
   }
+
+  return ret;
+}
+
+void Debugger::SendMultiGraphsAndSuspend(const std::list<GraphProto> &graph_proto_list, uint32_t graph_sum) {
+  if (!SendMetadata(true)) {
+    return;
+  }
+  // send multiple graphs to mindinght server
+  // split graph into chunks if one graph is larger than chunk size
+  std::list<Chunk> chunked_graph_proto_list;
+  Chunk chunk;
+  for (auto graph : graph_proto_list) {
+    std::string str = graph.SerializeAsString();
+    auto graph_size = graph.ByteSize();
+    if (graph_size > CHUNK_SIZE) {
+      auto sub_graph_str = grpc_client_->ChunkString(str, graph_size);
+      for (unsigned int i = 0; i < sub_graph_str.size(); i++) {
+        chunk.set_buffer(sub_graph_str[i]);
+        chunked_graph_proto_list.push_back(chunk);
+        if (i < sub_graph_str.size() - 1) {
+          chunk.set_finished(false);
+        } else {
+          chunk.set_finished(true);
+          chunked_graph_proto_list.push_back(chunk);
+        }
+      }
+    } else {
+      chunk.set_buffer(str);
+      chunk.set_finished(true);
+      chunked_graph_proto_list.push_back(chunk);
+    }
+  }
+  EventReply reply = grpc_client_->SendMultiGraphs(chunked_graph_proto_list);
+  if (reply.status() != reply.OK) {
+    MS_LOG(ERROR) << "Error: SendGraph failed";
+  }
+  // enter command loop, wait and process commands
+  CommandLoop();
 }
 
 void Debugger::CommandLoop() {
@@ -474,88 +617,100 @@ void Debugger::CommandLoop() {
         run = true;
         break;
       case DebuggerCommand::kRunCMD:
-        MS_LOG(INFO) << "RunCMD";
-        if (GetRunLevel(reply) == "recheck") {
-          MS_LOG(INFO) << "rechecking all watchpoints";
-          SendWatchpoints(CheckWatchpoints());
-        } else {
-          // no longer the initial suspension.
-          initial_suspend_ = false;
-          // print run cmd content
-          // get run_level and node_name
-          run_level_ = GetRunLevel(reply);
-          node_name_ = GetNodeName(reply);
-
-          MS_LOG(INFO) << "run_level: " << run_level_;
-          MS_LOG(INFO) << "node_name_: " << node_name_;
-
-          // exit loop
-          run = true;
-        }
+        ProcessRunCMD(reply);
+        // exit loop
+        run = true;
         break;
       case DebuggerCommand::kSetCMD:
-        MS_LOG(INFO) << "SetCMD";
-        {
-          // print set cmd content
-          ProtoVector<WatchNode> recieved_nodes = GetWatchnodes(reply);
-          for (const auto &node : recieved_nodes) {
-            MS_LOG(INFO) << "node name: " << node.node_name();
-            MS_LOG(INFO) << "node type: " << node.node_type();
-          }
-
-          ProtoVector<WatchCondition_Parameter> parameters = GetParameters(reply);
-          for (const auto &parameter : parameters) {
-            MS_LOG(INFO) << "parameter name: " << parameter.name();
-            MS_LOG(INFO) << "parameter is disabled: " << parameter.disabled();
-            MS_LOG(INFO) << "parameter value: " << parameter.value();
-          }
-          MS_LOG(INFO) << "condition: " << GetWatchcondition(reply).condition();
-          MS_LOG(INFO) << "id: " << GetWatchpointID(reply);
-          MS_LOG(INFO) << "delete: " << GetWatchpointDelete(reply);
-        }
-        MS_LOG(INFO) << "Setting watchpoint";
-        if (GetWatchpointDelete(reply)) {
-          RemoveWatchpoint(GetWatchpointID(reply));
-        } else {
-          SetWatchpoint(GetWatchnodes(reply), GetWatchcondition(reply), GetWatchpointID(reply), GetParameters(reply));
-        }
+        ProcessKSetCMD(reply);
         break;
       case DebuggerCommand::kViewCMD:
-        MS_LOG(INFO) << "ViewCMD";
-        {
-          // print view cmd content
-          ProtoVector<TensorProto> received_tensors = GetTensors(reply);
-          for (auto tensor : received_tensors) {
-            MS_LOG(INFO) << "tensor node name: " << tensor.node_name();
-            MS_LOG(INFO) << "tensor slot: " << tensor.slot();
-            MS_LOG(INFO) << "tensor finished: " << std::boolalpha << tensor.finished() << std::noboolalpha;
-            MS_LOG(INFO) << "tensor iter: " << tensor.iter();
-            MS_LOG(INFO) << "tensor truncate: " << std::boolalpha << tensor.truncate() << std::noboolalpha;
-          }
-        }
-        MS_LOG(INFO) << "Sending tensors";
-        std::list<TensorProto> tensors = LoadTensors(GetTensors(reply));
-        {
-          // print view cmd reply
-          for (auto tensor : tensors) {
-            MS_LOG(INFO) << "tensor node name: " << tensor.node_name();
-            MS_LOG(INFO) << "tensor slot: " << tensor.slot();
-            MS_LOG(INFO) << "tensor finished: " << std::boolalpha << tensor.finished() << std::noboolalpha;
-            MS_LOG(INFO) << "tensor iter: " << tensor.iter();
-            MS_LOG(INFO) << "tensor truncate: " << std::boolalpha << tensor.truncate() << std::noboolalpha;
-            MS_LOG(INFO) << "tensor dims: ";
-            for (auto dim : tensor.dims()) {
-              MS_LOG(INFO) << dim << ",";
-            }
-            MS_LOG(INFO) << "tensor dtype: " << tensor.data_type();
-          }
-        }
-        EventReply send_tensors_reply = grpc_client_->SendTensors(tensors);
-        if (send_tensors_reply.status() != send_tensors_reply.OK) {
-          MS_LOG(ERROR) << "Error: SendTensors failed";
-        }
+        ProcessKViewCMD(reply);
+        break;
+      case DebuggerCommand::kVersionMatchedCMD:
+        MS_LOG(ERROR) << "Received unexpected Version Matched CMD from Mindinsight.";
+        Exit();
+        break;
+      default:
+        MS_LOG(ERROR) << "Received unknown CMD from Mindinsight";
+        Exit();
         break;
     }
+  }
+}
+
+void Debugger::ProcessRunCMD(const EventReply &reply) {
+  MS_LOG(INFO) << "RunCMD";
+  if (GetRunLevel(reply) == "recheck") {
+    MS_LOG(INFO) << "rechecking all watchpoints";
+    SendWatchpoints(CheckWatchpoints("", nullptr, true));
+  } else {
+    // no longer the initial suspension.
+    initial_suspend_ = false;
+    // print run cmd content
+    // get run_level and node_name
+    run_level_ = GetRunLevel(reply);
+    node_name_ = GetNodeName(reply);
+
+    MS_LOG(INFO) << "run_level: " << run_level_;
+    MS_LOG(INFO) << "node_name_: " << node_name_;
+  }
+}
+
+void Debugger::ProcessKSetCMD(const EventReply &reply) {
+  MS_LOG(INFO) << "SetCMD";
+  MS_LOG(INFO) << "id: " << GetWatchpointID(reply);
+  MS_LOG(INFO) << "delete: " << GetWatchpointDelete(reply);
+  if (GetWatchpointDelete(reply)) {
+    MS_LOG(INFO) << "Deleting watchpoint";
+    RemoveWatchpoint(GetWatchpointID(reply));
+  } else {
+    MS_LOG(INFO) << "Setting watchpoint";
+    MS_LOG(INFO) << "condition: " << GetWatchcondition(reply).condition();
+    ProtoVector<WatchNode> recieved_nodes = GetWatchnodes(reply);
+    for (const auto &node : recieved_nodes) {
+      MS_LOG(INFO) << "node name: " << node.node_name();
+      MS_LOG(INFO) << "node type: " << node.node_type();
+    }
+    ProtoVector<WatchCondition_Parameter> parameters = GetParameters(reply);
+    for (const auto &parameter : parameters) {
+      MS_LOG(INFO) << "parameter name: " << parameter.name();
+      MS_LOG(INFO) << "parameter is disabled: " << parameter.disabled();
+      MS_LOG(INFO) << "parameter value: " << parameter.value();
+    }
+    SetWatchpoint(GetWatchnodes(reply), GetWatchcondition(reply), GetWatchpointID(reply), GetParameters(reply));
+  }
+}
+
+void Debugger::ProcessKViewCMD(const EventReply &reply) {
+  MS_LOG(INFO) << "ViewCMD";
+  // print view cmd content
+  ProtoVector<TensorProto> received_tensors = GetTensors(reply);
+  for (auto received_tensor : received_tensors) {
+    MS_LOG(INFO) << "tensor node name: " << received_tensor.node_name();
+    MS_LOG(INFO) << "tensor slot: " << received_tensor.slot();
+    MS_LOG(INFO) << "tensor finished: " << std::boolalpha << received_tensor.finished() << std::noboolalpha;
+    MS_LOG(INFO) << "tensor iter: " << received_tensor.iter();
+    MS_LOG(INFO) << "tensor truncate: " << std::boolalpha << received_tensor.truncate() << std::noboolalpha;
+  }
+  MS_LOG(INFO) << "Sending tensors";
+  std::list<TensorProto> tensors = LoadTensors(GetTensors(reply));
+  // print view cmd reply
+  for (auto tensor : tensors) {
+    MS_LOG(INFO) << "tensor node name: " << tensor.node_name();
+    MS_LOG(INFO) << "tensor slot: " << tensor.slot();
+    MS_LOG(INFO) << "tensor finished: " << std::boolalpha << tensor.finished() << std::noboolalpha;
+    MS_LOG(INFO) << "tensor iter: " << tensor.iter();
+    MS_LOG(INFO) << "tensor truncate: " << std::boolalpha << tensor.truncate() << std::noboolalpha;
+    MS_LOG(INFO) << "tensor dims: ";
+    for (auto dim : tensor.dims()) {
+      MS_LOG(INFO) << dim << ",";
+    }
+    MS_LOG(INFO) << "tensor dtype: " << tensor.data_type();
+  }
+  EventReply send_tensors_reply = grpc_client_->SendTensors(tensors);
+  if (send_tensors_reply.status() != send_tensors_reply.OK) {
+    MS_LOG(ERROR) << "Error: SendTensors failed";
   }
 }
 
@@ -585,9 +740,6 @@ void Debugger::SetWatchpoint(const ProtoVector<WatchNode> &nodes, const WatchCon
       return DebugServices::parameter_t{parameter.name(), parameter.disabled(), parameter.value(), parameter.hit()};
     });
   debug_services_->AddWatchpoint(id, condition.condition(), condition.value(), check_node_list, parameter_list);
-  if (initial_suspend_ &&
-      static_cast<DebugServices::CONDITION_TYPE>(condition.condition()) == DebugServices::CONDITION_TYPE::INIT)
-    SendWatchpoints(CheckWatchpoints());
 }
 
 void Debugger::RemoveWatchpoint(const int32_t id) { debug_services_->RemoveWatchpoint(id); }
@@ -596,9 +748,9 @@ std::list<TensorProto> Debugger::LoadTensors(const ProtoVector<TensorProto> &ten
   std::vector<std::string> name;
   std::vector<std::string> ret_name;
   std::vector<char *> data_ptr;
-  std::vector<unsigned int> data_size;
+  std::vector<ssize_t> data_size;
   std::vector<TypePtr> dtype;
-  std::vector<std::vector<int>> shape;
+  std::vector<std::vector<int64_t>> shape;
 
   std::transform(tensors.begin(), tensors.end(), std::back_inserter(name), GetTensorFullName);
 
@@ -609,7 +761,7 @@ std::list<TensorProto> Debugger::LoadTensors(const ProtoVector<TensorProto> &ten
   unsigned int result_index = 0;
 
   for (auto tensor : tensors) {
-    int size_iter = 0;
+    ssize_t size_iter = 0;
     if (result_index >= ret_name.size() || ret_name[result_index] != GetTensorFullName(tensor)) {
       TensorProto tensor_item;
       tensor_item.set_finished(true);
@@ -617,9 +769,9 @@ std::list<TensorProto> Debugger::LoadTensors(const ProtoVector<TensorProto> &ten
       tensor_list.push_back(tensor_item);
       continue;
     }
-    int tensor_size = data_size[result_index];
+    ssize_t tensor_size = data_size[result_index];
     while (size_iter < tensor_size) {
-      int chunk_size = CHUNK_SIZE;
+      ssize_t chunk_size = CHUNK_SIZE;
       TensorProto tensor_item;
       tensor_item.set_finished(false);
       if (tensor_size - size_iter <= CHUNK_SIZE) {
@@ -646,46 +798,36 @@ std::list<TensorProto> Debugger::LoadTensors(const ProtoVector<TensorProto> &ten
 
 void Debugger::Exit() {
   // clear resource before exit
-  // For node level, debugger has to exit itself because main thread can only exit in step bundary;
-  // For step level, debugger will notify main thread to exit;
-  if (run_level_ == "node") {
-    pipeline::ClearResAtexit();
-    exit(1);
-  } else if (run_level_ == "step" || device_target_ == kAscendDevice) {
-    // Notify main thread to terminate
-    pipeline::ExecutorPy::DebugTerminate(true);
-  } else {
-    pipeline::ClearResAtexit();
-    exit(1);
-  }
+  // debugger will notify main thread to exit because main thread can only exit at step boundary
+  pipeline::ExecutorPy::DebugTerminate(true);
 }
 
-std::list<WatchpointHit> Debugger::CheckWatchpoints(const std::string &watchnode, const CNodePtr &kernel) {
+std::list<WatchpointHit> Debugger::CheckWatchpoints(const std::string &watchnode, const CNodePtr &kernel,
+                                                    bool recheck) {
   std::vector<std::string> name;
   std::vector<std::string> slot;
   std::vector<int> condition;
   std::vector<unsigned int> watchpoint_id;
   std::vector<std::string> overflow_ops;
   std::vector<std::vector<DebugServices::parameter_t>> parameters;
+  std::vector<int32_t> error_codes;
 #ifdef ENABLE_D
   overflow_ops = CheckOpOverflow();
 #endif
-  auto tensor_loader = debug_services_->tensor_loader();
   std::vector<std::shared_ptr<TensorData>> tensor_list;
   if (watchnode.empty()) {
-    tensor_list = tensor_loader->GetTensor();
+    tensor_list = debug_services_->GetTensor();
   } else {
-    tensor_list = tensor_loader->GetNodeTensorMap(watchnode);
-    debug_services_->AddWeightsBiasInputs(&tensor_list, kernel);
+    tensor_list = debug_services_->GetNodeTensor(kernel);
   }
-  debug_services_->CheckWatchpoints(&name, &slot, &condition, &watchpoint_id, &parameters, overflow_ops, tensor_list,
-                                    initial_suspend_);
+  debug_services_->CheckWatchpoints(&name, &slot, &condition, &watchpoint_id, &parameters, &error_codes, overflow_ops,
+                                    tensor_list, initial_suspend_, watchnode.empty(), recheck);
   std::list<WatchpointHit> hits;
   for (unsigned int i = 0; i < name.size(); i++) {
     WatchpointHit hit;
     std::vector<DebugServices::parameter_t> &parameter = parameters[i];
     hit.set_id(watchpoint_id[i]);
-
+    hit.set_error_code(error_codes[i]);
     // here TensorProto act as a tensor indicator, not sending tensor content
     TensorProto *tensor_item = hit.mutable_tensor();
     tensor_item->set_node_name(name[i]);
@@ -700,6 +842,7 @@ std::list<WatchpointHit> Debugger::CheckWatchpoints(const std::string &watchnode
       x->set_disabled(p.disabled);
       x->set_value(p.value);
       x->set_hit(p.hit);
+      x->set_actual_value(p.actual_value);
     }
     hits.push_back(hit);
   }
@@ -716,7 +859,28 @@ void Debugger::SendWatchpoints(const std::list<WatchpointHit> &points) {
   }
 }
 
-DebugServices *Debugger::debug_services() const { return debug_services_.get(); }
+bool Debugger::DumpTensorToFile(const std::string &tensor_name, bool trans_flag, const std::string &filepath,
+                                const std::string &host_fmt, const std::vector<int64_t> &host_shape, TypeId host_type,
+                                TypeId addr_type_id, const std::string &addr_format, size_t slot) const {
+  return debug_services_.get()->DumpTensorToFile(tensor_name, trans_flag, filepath, host_fmt, host_shape, host_type,
+                                                 addr_type_id, addr_format, slot);
+}
+
+bool Debugger::DebugServicesIsWatchPoint(const std::string &kernel_name, const CNodePtr &kernel) const {
+  return debug_services_.get()->IsWatchPoint(kernel_name, kernel);
+}
+
+void Debugger::EmptyTensor() { debug_services_.get()->EmptyTensor(); }
+
+void Debugger::SetTensorLoaderIterNum(uint32_t iter_num) { debug_services_.get()->SetTensorLoaderIterNum(iter_num); }
+
+void Debugger::EmptyPrevTensor() { debug_services_.get()->EmptyPrevTensor(); }
+
+uint32_t Debugger::GetTensorLoaderIterNum() const { return debug_services_.get()->GetTensorLoaderIterNum(); }
+
+bool Debugger::LoadNewTensor(const std::shared_ptr<TensorData> &tensor, bool keep_prev) {
+  return debug_services_.get()->LoadNewTensor(tensor, keep_prev);
+}
 
 bool Debugger::debugger_enabled() const { return debugger_enabled_; }
 
@@ -734,6 +898,9 @@ DebuggerCommand GetCommand(const EventReply &reply) {
       break;
     case debugger::EventReply::CmdCase::kViewCmd:
       cmd = DebuggerCommand::kViewCMD;
+      break;
+    case debugger::EventReply::CmdCase::kVersionMatched:
+      cmd = DebuggerCommand::kVersionMatchedCMD;
       break;
     default:
       MS_LOG(DEBUG) << "Debug: UnknownCMD";
@@ -811,13 +978,15 @@ ProtoVector<TensorProto> GetTensors(const EventReply &reply) {
 std::string GetTensorFullName(const TensorProto &tensor) {
   string node_name = tensor.node_name();
   if (tensor.truncate()) {
-    // scopes in node name are seperated by '/'
+    // scopes in node name are separated by '/'
     // use the name without scope if truncate is true
     std::size_t found = node_name.find_last_of("/");
     node_name = node_name.substr(found + 1);
   }
   return node_name + ":" + tensor.slot() + (tensor.iter() == "" ? "" : ":" + tensor.iter());
 }
+
+bool GetMiVersionMatched(const EventReply &reply) { return reply.version_matched(); }
 
 bool Debugger::partial_memory() { return partial_memory_; }
 
@@ -851,54 +1020,57 @@ uint64_t BytestoInt64(const std::vector<char> &buffer) {
 std::vector<std::string> Debugger::CheckOpOverflow() {
   std::vector<double> bin_list;
   std::vector<std::string> op_names;
-  DIR *d;
-  struct dirent *dir = nullptr;
-  d = opendir(overflow_bin_path_.c_str());
-  if (d != nullptr) {
-    while ((dir = readdir(d)) != NULL) {
-      if (dir->d_type == DT_REG) {
-        std::string file_path = overflow_bin_path_;
-        file_path.append(dir->d_name);
-        std::string file_name = dir->d_name;
-        std::size_t found = file_name.find_last_of(".");
-        if (found == std::string::npos) {
-          continue;
+  for (const auto &[graph_id, overflow_bin_path] : overflow_bin_path_) {
+    DIR *d;
+    d = opendir(overflow_bin_path.c_str());
+    MS_LOG(INFO) << "processing bin file path " << overflow_bin_path << ", graph id " << graph_id;
+    if (d != nullptr) {
+      struct dirent *dir = nullptr;
+      while ((dir = readdir(d)) != NULL) {
+        if (dir->d_type == DT_REG) {
+          std::string file_path = overflow_bin_path;
+          file_path.append(dir->d_name);
+          std::string file_name = dir->d_name;
+          std::size_t found = file_name.find_last_of(".");
+          if (found == std::string::npos) {
+            continue;
+          }
+          std::string overflow_time = file_name.substr(found + 1);
+          if (stod(overflow_time) <= last_overflow_bin_) {
+            MS_LOG(INFO) << "File already processed " << file_name;
+            continue;
+          }
+          bin_list.push_back(stod(overflow_time));
+          std::fstream infile;
+          infile.open(file_path.c_str(), std::ios::binary | std::ios::in);
+          if (!infile.is_open()) {
+            MS_LOG(ERROR) << "Failed to open overflow bin file " << file_name;
+            continue;
+          }
+          infile.seekg(313, std::ios::beg);
+          std::vector<char> buffer;
+          buffer.resize(BUF_SIZ);
+          infile.read(buffer.data(), BUF_SIZ);
+          uint64_t stream_id = BytestoInt64(std::vector<char>(buffer.begin() + 8, buffer.end()));
+          uint64_t task_id = BytestoInt64(std::vector<char>(buffer.begin() + 16, buffer.end()));
+          MS_LOG(INFO) << "Overflow stream_id " << stream_id << ", task_id " << task_id << ".";
+          auto op = debugger_->stream_task_to_opname_.find(std::make_pair(stream_id, task_id));
+          if (op != debugger_->stream_task_to_opname_.end()) {
+            MS_LOG(ERROR) << "Overflow detected on node " << op->second << std::endl;
+            op_names.push_back(op->second);
+          } else {
+            MS_LOG(INFO) << "No overflow is detected " << std::endl;
+          }
+          infile.close();
         }
-        std::string overflow_time = file_name.substr(found + 1);
-        if (stod(overflow_time) <= last_overflow_bin_) {
-          MS_LOG(INFO) << "File already processed " << file_name;
-          continue;
-        }
-        bin_list.push_back(stod(overflow_time));
-        std::fstream infile;
-        infile.open(file_path.c_str(), std::ios::binary | std::ios::in);
-        if (!infile.is_open()) {
-          MS_LOG(ERROR) << "Failed to open overflow bin file " << file_name;
-          continue;
-        }
-        infile.seekg(313, std::ios::beg);
-        std::vector<char> buffer;
-        buffer.resize(BUF_SIZ);
-        infile.read(buffer.data(), BUF_SIZ);
-        uint64_t stream_id = BytestoInt64(std::vector<char>(buffer.begin() + 8, buffer.end()));
-        uint64_t task_id = BytestoInt64(std::vector<char>(buffer.begin() + 16, buffer.end()));
-        MS_LOG(INFO) << "Overflow stream_id " << stream_id << ", task_id " << task_id << ".";
-        auto op = debugger_->stream_task_to_opname_.find(std::make_pair(stream_id, task_id));
-        if (op != debugger_->stream_task_to_opname_.end()) {
-          MS_LOG(ERROR) << "Overflow detected on node " << op->second << std::endl;
-          op_names.push_back(op->second);
-        } else {
-          MS_LOG(INFO) << "No overflow is detected " << std::endl;
-        }
-        infile.close();
       }
+    } else {
+      MS_LOG(INFO) << "OverFlow bin directory does not exist!";
     }
-  } else {
-    MS_LOG(INFO) << "OverFlow bin directory does not exist!";
+    closedir(d);
   }
-  closedir(d);
 
-  if (op_names.size()) {
+  if (!op_names.empty()) {
     MS_LOG(ERROR) << "These operation overflows are detected " << op_names;
   }
 
@@ -908,7 +1080,15 @@ std::vector<std::string> Debugger::CheckOpOverflow() {
     }
   }
 
-  return op_names;
+  auto iter_op_names = overflow_ops_.find(num_step_);
+  if (iter_op_names == overflow_ops_.end()) {
+    overflow_ops_.insert(std::pair<uint32_t, std::vector<std::string>>(num_step_, op_names));
+
+    return op_names;
+  }
+  iter_op_names->second.insert(std::end(iter_op_names->second), std::begin(op_names), std::end(op_names));
+
+  return iter_op_names->second;
 }
 
 void Debugger::SetTrainingDone(bool training_done) { training_done_ = training_done; }
@@ -926,16 +1106,23 @@ bool Debugger::CheckPort(const char *port) {
   return true;
 }
 
+bool Debugger::CheckIp(const char *host) {
+  std::regex reg_ip(
+    "(25[0-4]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[1-9])"
+    "[.](25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])"
+    "[.](25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])"
+    "[.](25[0-4]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[1-9])");
+  std::smatch smat;
+  std::string host_str = std::string(host);
+  return std::regex_match(host_str, smat, reg_ip);
+}
+
+uint32_t Debugger::GetFirstRunGraphId() { return rungraph_id_list_.front(); }
+
 void Debugger::LoadSingleAnfnode(const AnfNodePtr &anf_node, const size_t output_index) {
   MS_EXCEPTION_IF_NULL(anf_node);
   if (!anf_node->isa<Parameter>() && !anf_node->isa<ValueNode>()) {
     return;
-  }
-  bool keep_prev;
-  if (anf_node->isa<Parameter>()) {
-    keep_prev = true;
-  } else {
-    keep_prev = false;
   }
   // for parameters and value nodes, set its execution order to be 0;
   int exec_order = 0;
@@ -954,6 +1141,13 @@ void Debugger::LoadSingleAnfnode(const AnfNodePtr &anf_node, const size_t output
   auto shape = AnfAlgo::GetOutputDeviceShape(anf_node, output_index);
   (void)std::transform(shape.begin(), shape.end(), std::back_inserter(int_shapes),
                        [](size_t inner_item) { return SizeToInt(inner_item); });
+  bool keep_prev;
+  if (anf_node->isa<Parameter>()) {
+    keep_prev = true;
+    debug_services_->MoveTensorCurrentToPrev(tensor_name);
+  } else {
+    keep_prev = false;
+  }
   bool ret = addr->LoadMemToHost(tensor_name, exec_order, format, int_shapes, type, 0, keep_prev);
   if (!ret) {
     MS_LOG(ERROR) << "LoadMemToHost:"
@@ -963,9 +1157,6 @@ void Debugger::LoadSingleAnfnode(const AnfNodePtr &anf_node, const size_t output
 
 void Debugger::LoadParametersAndConst() {
   if (!(debugger_enabled_ || CheckDebuggerDumpEnabled())) return;
-  if (!(num_step_ == 0 || device_target_ == kAscendDevice ||
-        (device_target_ == kGPUDevice && device::KernelRuntime::DumpDataEnabledIteration())))
-    return;
   MS_EXCEPTION_IF_NULL(graph_ptr_);
   // load parameters
   MS_LOG(INFO) << "Start to load Parameters!";
@@ -999,6 +1190,10 @@ void Debugger::LoadGraphOutputs() {
       }
     }
     for (size_t j = 0; j < output_size; ++j) {
+      if (!AnfAlgo::OutputAddrExist(node, j)) {
+        MS_LOG(INFO) << "Cannot find output addr for slot " << j << " for " << node->fullname_with_scope();
+        continue;
+      }
       auto addr = AnfAlgo::GetOutputAddr(node, j);
       MS_EXCEPTION_IF_NULL(addr);
       auto type = AnfAlgo::GetOutputInferDataType(node, j);
@@ -1018,14 +1213,22 @@ void Debugger::LoadGraphOutputs() {
   }
 }
 
-void Debugger::UpdateStepNum() {
-  if (device_target_ == kGPUDevice && (debugger_enabled_ || device::KernelRuntime::DumpDataEnabledIteration()))
+void Debugger::UpdateStepNum(const session::KernelGraph *graph) {
+  // update step number if we are processing the first graph (to support multigraph)
+  if (device_target_ == kGPUDevice && (debugger_enabled_ || device::KernelRuntime::DumpDataEnabledIteration()) &&
+      (graph->graph_id() == debugger_->GetFirstRunGraphId())) {
+    // access lock for public method
+    std::lock_guard<std::mutex> a_lock(access_lock_);
     ++num_step_;
+  }
 }
 
 void Debugger::ClearCurrentData() {
   if (device_target_ == kGPUDevice && (debugger_enabled_ || device::KernelRuntime::DumpDataEnabledIteration()))
-    debug_services_->tensor_loader()->EmptyCurrentTensor();
+    debug_services_->EmptyCurrentTensor();
+}
+bool Debugger::TensorExistsInCurrent(std::string tensor_name) {
+  return debug_services_->TensorExistsInCurrent(tensor_name);
 }
 
 }  // namespace mindspore

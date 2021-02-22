@@ -15,7 +15,7 @@
  */
 
 #include "src/ops/pad.h"
-
+#include <string>
 #ifndef PRIMITIVE_WRITEABLE
 #include "src/ops/ops_register.h"
 #endif
@@ -32,6 +32,69 @@ void Pad::SetPaddingMode(int padding_mode) {
   this->primitive_->value.AsPad()->paddingMode = (schema::PaddingMode)padding_mode;
 }
 void Pad::SetConstantValue(float constant_value) { this->primitive_->value.AsPad()->constantValue = constant_value; }
+int Pad::UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &inputs) {
+  if (this->primitive_ == nullptr) {
+    this->primitive_ = new (std::nothrow) schema::PrimitiveT;
+    if (this->primitive_ == nullptr) {
+      MS_LOG(ERROR) << "new primitiveT failed";
+      return RET_ERROR;
+    }
+    this->primitive_->value.type = schema::PrimitiveType_Pad;
+  }
+  if (this->primitive_->value.type != schema::PrimitiveType_Pad) {
+    MS_LOG(ERROR) << "Primitive type is error :" << this->primitive_->value.type;
+    return RET_ERROR;
+  }
+  if (this->primitive_->value.value == nullptr) {
+    auto attr = new (std::nothrow) schema::PadT();
+    if (attr == nullptr) {
+      MS_LOG(ERROR) << "new primitiveT value failed";
+      return RET_ERROR;
+    }
+    string paddingmode = "REFLECT";
+    if (prim.GetAttr("mode") == nullptr) {
+      if (prim.name() == "Pad") {
+        paddingmode = "CONSTANT";
+      } else {
+        MS_LOG(ERROR) << "get mode failed!";
+        delete this->primitive_;
+        delete attr;
+        this->primitive_ = nullptr;
+        attr = nullptr;
+        return RET_ERROR;
+      }
+    } else {
+      paddingmode = GetValue<string>(prim.GetAttr("mode"));
+    }
+    if (paddingmode == "REFLECT") {
+      attr->paddingMode = schema::PaddingMode_REFLECT;
+    } else if (paddingmode == "SYMMETRIC") {
+      attr->paddingMode = schema::PaddingMode_SYMMETRIC;
+    } else if (paddingmode == "CONSTANT") {
+      attr->paddingMode = schema::PaddingMode_CONSTANT;
+      if (prim.GetAttr("paddings") != nullptr) {
+        auto paddings = prim.GetAttr("paddings");
+        auto str = (*paddings).ToString();
+        std::replace(str.begin(), str.end(), ',', ' ');
+        std::replace(str.begin(), str.end(), ')', ' ');
+        std::replace(str.begin(), str.end(), '(', ' ');
+        std::stringstream ss(str);
+        for (int i; ss >> i;) {
+          attr->paddings.push_back(i);
+        }
+      }
+    } else {
+      MS_LOG(ERROR) << "model type not supported!";
+      delete this->primitive_;
+      delete attr;
+      this->primitive_ = nullptr;
+      attr = nullptr;
+      return RET_ERROR;
+    }
+    this->primitive_->value.value = attr;
+  }
+  return RET_OK;
+}
 
 #else
 
@@ -66,6 +129,30 @@ PrimitiveC *PadCreator(const schema::Primitive *primitive) { return PrimitiveC::
 Registry PadRegistry(schema::PrimitiveType_Pad, PadCreator);
 #endif
 
+int GetPaddingFromInput(const std::vector<Tensor *> &inputs, std::vector<int> *paddings) {
+  auto paddings_tensor = inputs.at(1);
+  int rank = static_cast<int>(inputs.front()->shape().size());
+  MS_ASSERT(paddings_tensor->ElementsNum() == 2 * rank);
+  if (paddings_tensor->data_c() == nullptr) {
+    return RET_INFER_ERR;
+  }
+  paddings->clear();
+  if (paddings_tensor->data_type() == mindspore::kNumberTypeInt64) {
+    auto paddings_data = reinterpret_cast<int64_t *>(paddings_tensor->data_c());
+    for (auto i = 0; i < rank; ++i) {
+      paddings->emplace_back(paddings_data[i * 2]);
+      paddings->emplace_back(paddings_data[i * 2 + 1]);
+    }
+  } else if (paddings_tensor->data_type() == mindspore::kNumberTypeInt32) {
+    auto paddings_data = reinterpret_cast<int32_t *>(paddings_tensor->data_c());
+    for (auto i = 0; i < rank; ++i) {
+      paddings->emplace_back(paddings_data[i * 2]);
+      paddings->emplace_back(paddings_data[i * 2 + 1]);
+    }
+  }
+  return RET_OK;
+}
+
 int Pad::InferShape(std::vector<Tensor *> inputs, std::vector<Tensor *> outputs) {
   MS_ASSERT(this->primitive_ != nullptr);
   if (this->primitive_ == nullptr) {
@@ -83,28 +170,19 @@ int Pad::InferShape(std::vector<Tensor *> inputs, std::vector<Tensor *> outputs)
   output->set_format(input->format());
   output->set_data_type(input->data_type());
   if (!infer_flag()) {
-    return RET_OK;
+    return RET_INFER_INVALID;
   }
 
   std::vector<int> paddings;
   if (inputs.size() == 1) {
     paddings = GetPaddings();
   } else {
-    // mirror pad
-    auto paddings_tensor = inputs.at(1);
-    int rank = static_cast<int>(inputs.front()->shape().size());
-    MS_ASSERT(paddings_tensor->ElementsNum() == 2 * rank);
-    int *paddings_data = reinterpret_cast<int *>(paddings_tensor->MutableData());
-    if (paddings_data == nullptr) {
-      return RET_INFER_ERR;
-    }
-    paddings.clear();
-    for (auto i = 0; i < rank; ++i) {
-      paddings.emplace_back(paddings_data[i * 2]);
-      paddings.emplace_back(paddings_data[i * 2 + 1]);
-    }
+    GetPaddingFromInput(inputs, &paddings);
   }
 
+  if (paddings.empty()) {
+    return RET_INFER_INVALID;
+  }
   auto input_shape = input->shape();
   std::vector<int> output_shape;
   MS_ASSERT(input->shape().size() <= 4);

@@ -16,6 +16,7 @@
 #include "backend/optimizer/ascend/ir_fusion/adam_apply_one_fusion.h"
 #include "backend/optimizer/common/helper.h"
 #include "backend/session/anf_runtime_algorithm.h"
+#include "utils/trace_base.h"
 namespace mindspore {
 namespace opt {
 const BaseRef AdamApplyOneFusion::DefinePattern() const {
@@ -27,7 +28,7 @@ const BaseRef AdamApplyOneFusion::DefinePattern() const {
   VectorRef mul1 = VectorRef({prim::kPrimMul, mul_x_input_vars_[1], input_vars_[0]});
   VectorRef mul0 = VectorRef({prim::kPrimMul, mul_x_input_vars_[0], input_vars_[2]});
   VectorRef add0 = VectorRef({add0_var_, mul0, mul1});
-  VectorRef true_div0 = VectorRef({prim_real_div, add0, VectorRef({prim::kPrimTensorAdd, sqrt0, add2_y_})});
+  VectorRef true_div0 = VectorRef({prim_real_div, add0, VectorRef({prim::kPrimAdd, sqrt0, add2_y_})});
   return VectorRef({prim::kPrimSub, input_vars_[3], VectorRef({prim::kPrimMul, input_vars_[4], true_div0})});
 }
 
@@ -40,7 +41,7 @@ const BaseRef AdamApplyOneCond1Fusion::DefinePattern() const {
   VectorRef mul1 = VectorRef({prim::kPrimMul, mul_x_input_vars_[1], input_vars_[0]});
   VectorRef mul0 = VectorRef({prim::kPrimMul, mul_x_input_vars_[0], input_vars_[2]});
   VectorRef add0 = VectorRef({add0_var_, mul0, mul1});
-  VectorRef true_div0 = VectorRef({prim_real_div, add0, VectorRef({prim::kPrimTensorAdd, add2_y_, sqrt0})});
+  VectorRef true_div0 = VectorRef({prim_real_div, add0, VectorRef({prim::kPrimAdd, add2_y_, sqrt0})});
   return VectorRef({prim::kPrimSub, input_vars_[3], VectorRef({prim::kPrimMul, input_vars_[4], true_div0})});
 }
 
@@ -53,7 +54,7 @@ const BaseRef AdamApplyOneCond2Fusion::DefinePattern() const {
   VectorRef mul1 = VectorRef({prim::kPrimMul, mul_x_input_vars_[1], input_vars_[0]});
   VectorRef mul0 = VectorRef({prim::kPrimMul, mul_x_input_vars_[0], input_vars_[2]});
   VectorRef add0 = VectorRef({add0_var_, mul0, mul1});
-  VectorRef true_div0 = VectorRef({prim_real_div, add0, VectorRef({prim::kPrimTensorAdd, sqrt0, add2_y_})});
+  VectorRef true_div0 = VectorRef({prim_real_div, add0, VectorRef({prim::kPrimAdd, sqrt0, add2_y_})});
   return VectorRef({prim::kPrimSub, input_vars_[3], VectorRef({prim::kPrimMul, true_div0, input_vars_[4]})});
 }
 
@@ -66,7 +67,7 @@ const BaseRef AdamApplyOneCond3Fusion::DefinePattern() const {
   VectorRef mul1 = VectorRef({prim::kPrimMul, mul_x_input_vars_[1], input_vars_[0]});
   VectorRef mul0 = VectorRef({prim::kPrimMul, mul_x_input_vars_[0], input_vars_[2]});
   VectorRef add0 = VectorRef({add0_var_, mul0, mul1});
-  VectorRef true_div0 = VectorRef({prim_real_div, add0, VectorRef({prim::kPrimTensorAdd, sqrt0, add2_y_})});
+  VectorRef true_div0 = VectorRef({prim_real_div, add0, VectorRef({prim::kPrimAdd, sqrt0, add2_y_})});
   return VectorRef({prim::kPrimSub, input_vars_[3], VectorRef({prim::kPrimMul, true_div0, input_vars_[4]})});
 }
 
@@ -79,7 +80,7 @@ const BaseRef AdamApplyOneCond4Fusion::DefinePattern() const {
   VectorRef mul1 = VectorRef({prim::kPrimMul, mul_x_input_vars_[1], input_vars_[0]});
   VectorRef mul0 = VectorRef({prim::kPrimMul, mul_x_input_vars_[0], input_vars_[2]});
   VectorRef add0 = VectorRef({add0_var_, mul0, mul1});
-  VectorRef true_div0 = VectorRef({prim_real_div, add0, VectorRef({prim::kPrimTensorAdd, add2_y_, sqrt0})});
+  VectorRef true_div0 = VectorRef({prim_real_div, add0, VectorRef({prim::kPrimAdd, add2_y_, sqrt0})});
   return VectorRef({prim::kPrimSub, input_vars_[3], VectorRef({prim::kPrimMul, true_div0, input_vars_[4]})});
 }
 
@@ -93,7 +94,7 @@ const BaseRef AdamApplyOneAssignFusion::DefinePattern() const {
   VectorRef mul1 = VectorRef({prim::kPrimMul, mul_x_input_vars_[1], input_vars_[0]});
   VectorRef mul0 = VectorRef({prim::kPrimMul, mul_x_input_vars_[0], input_vars_[2]});
   VectorRef add0 = VectorRef({add0_var_, mul0, mul1});
-  VectorRef true_div0 = VectorRef({prim_real_div, add0, VectorRef({prim::kPrimTensorAdd, sqrt0, add2_y_})});
+  VectorRef true_div0 = VectorRef({prim_real_div, add0, VectorRef({prim::kPrimAdd, sqrt0, add2_y_})});
   VectorRef sub0 = VectorRef({sub0_var_, input_vars_[3], VectorRef({prim::kPrimMul, input_vars_[4], true_div0})});
   VectorRef assign0 = VectorRef({prim::kPrimAssign, input_vars_[3], sub0});
   VectorRef depend0 = VectorRef({prim::kPrimDepend, sub0, assign0});
@@ -113,7 +114,7 @@ const BaseRef AdamApplyOneAssignCond1Fusion::DefinePattern() const {
   VectorRef mul1 = VectorRef({prim::kPrimMul, mul_x_input_vars_[1], input_vars_[0]});
   VectorRef mul0 = VectorRef({prim::kPrimMul, mul_x_input_vars_[0], input_vars_[2]});
   VectorRef add0 = VectorRef({add0_var_, mul0, mul1});
-  VectorRef true_div0 = VectorRef({prim_real_div, add0, VectorRef({prim::kPrimTensorAdd, add2_y_, sqrt0})});
+  VectorRef true_div0 = VectorRef({prim_real_div, add0, VectorRef({prim::kPrimAdd, add2_y_, sqrt0})});
   VectorRef sub0 = VectorRef({sub0_var_, input_vars_[3], VectorRef({prim::kPrimMul, input_vars_[4], true_div0})});
   VectorRef assign0 = VectorRef({prim::kPrimAssign, input_vars_[3], sub0});
   VectorRef depend0 = VectorRef({prim::kPrimDepend, sub0, assign0});
@@ -133,7 +134,7 @@ const BaseRef AdamApplyOneAssignCond2Fusion::DefinePattern() const {
   VectorRef mul1 = VectorRef({prim::kPrimMul, mul_x_input_vars_[1], input_vars_[0]});
   VectorRef mul0 = VectorRef({prim::kPrimMul, mul_x_input_vars_[0], input_vars_[2]});
   VectorRef add0 = VectorRef({add0_var_, mul0, mul1});
-  VectorRef true_div0 = VectorRef({prim_real_div, add0, VectorRef({prim::kPrimTensorAdd, sqrt0, add2_y_})});
+  VectorRef true_div0 = VectorRef({prim_real_div, add0, VectorRef({prim::kPrimAdd, sqrt0, add2_y_})});
   VectorRef sub0 = VectorRef({sub0_var_, input_vars_[3], VectorRef({prim::kPrimMul, true_div0, input_vars_[4]})});
   VectorRef assign0 = VectorRef({prim::kPrimAssign, input_vars_[3], sub0});
   VectorRef depend0 = VectorRef({prim::kPrimDepend, sub0, assign0});
@@ -153,7 +154,7 @@ const BaseRef AdamApplyOneAssignCond3Fusion::DefinePattern() const {
   VectorRef mul1 = VectorRef({prim::kPrimMul, mul_x_input_vars_[1], input_vars_[0]});
   VectorRef mul0 = VectorRef({prim::kPrimMul, mul_x_input_vars_[0], input_vars_[2]});
   VectorRef add0 = VectorRef({add0_var_, mul0, mul1});
-  VectorRef true_div0 = VectorRef({prim_real_div, add0, VectorRef({prim::kPrimTensorAdd, sqrt0, add2_y_})});
+  VectorRef true_div0 = VectorRef({prim_real_div, add0, VectorRef({prim::kPrimAdd, sqrt0, add2_y_})});
   VectorRef sub0 = VectorRef({sub0_var_, input_vars_[3], VectorRef({prim::kPrimMul, true_div0, input_vars_[4]})});
   VectorRef assign0 = VectorRef({prim::kPrimAssign, input_vars_[3], sub0});
   VectorRef depend0 = VectorRef({prim::kPrimDepend, sub0, assign0});
@@ -173,7 +174,7 @@ const BaseRef AdamApplyOneAssignCond4Fusion::DefinePattern() const {
   VectorRef mul1 = VectorRef({prim::kPrimMul, mul_x_input_vars_[1], input_vars_[0]});
   VectorRef mul0 = VectorRef({prim::kPrimMul, mul_x_input_vars_[0], input_vars_[2]});
   VectorRef add0 = VectorRef({add0_var_, mul0, mul1});
-  VectorRef true_div0 = VectorRef({prim_real_div, add0, VectorRef({prim::kPrimTensorAdd, add2_y_, sqrt0})});
+  VectorRef true_div0 = VectorRef({prim_real_div, add0, VectorRef({prim::kPrimAdd, add2_y_, sqrt0})});
   VectorRef sub0 = VectorRef({sub0_var_, input_vars_[3], VectorRef({prim::kPrimMul, true_div0, input_vars_[4]})});
   VectorRef assign0 = VectorRef({prim::kPrimAssign, input_vars_[3], sub0});
   VectorRef depend0 = VectorRef({prim::kPrimDepend, sub0, assign0});
@@ -218,7 +219,8 @@ const AnfNodePtr AdamApplyOneFusion::Process(const FuncGraphPtr &func_graph, con
   if (AnfAlgo::CheckPrimitiveType(node, prim::kPrimDepend)) {
     auto iter_sub0 = (*equiv).find(sub0_var_);
     if (iter_sub0 == (*equiv).end()) {
-      MS_LOG(EXCEPTION) << "The equiv map is expected to contains the sub0 var after matched.";
+      MS_LOG(EXCEPTION) << "The equiv map is expected to contains the sub0 var after matched."
+                        << " trace: " << trace::DumpSourceLines(node);
     }
     sub0 = utils::cast<AnfNodePtr>(iter_sub0->second);
   }
@@ -233,11 +235,13 @@ const AnfNodePtr AdamApplyOneFusion::Process(const FuncGraphPtr &func_graph, con
   AbstractBasePtrList new_node_abstract_list;
   auto iter_add0 = (*equiv).find(add0_var_);
   if (iter_add0 == (*equiv).end()) {
-    MS_LOG(EXCEPTION) << "The equiv map is expected to contains the add0 var after matched.";
+    MS_LOG(EXCEPTION) << "The equiv map is expected to contains the add0 var after matched."
+                      << " trace: " << trace::DumpSourceLines(node);
   }
   auto iter_add1 = (*equiv).find(add1_var_);
   if (iter_add1 == (*equiv).end()) {
-    MS_LOG(EXCEPTION) << "The equiv map is expected to contains the add1 var after matched.";
+    MS_LOG(EXCEPTION) << "The equiv map is expected to contains the add1 var after matched."
+                      << " trace: " << trace::DumpSourceLines(node);
   }
   auto add0 = utils::cast<AnfNodePtr>(iter_add0->second);
   MS_EXCEPTION_IF_NULL(add0);
@@ -253,7 +257,7 @@ const AnfNodePtr AdamApplyOneFusion::Process(const FuncGraphPtr &func_graph, con
   CreateMultipleOutputsOfAnfNode(func_graph, new_node, kAdamApplyOneOutputNum, &new_node_outputs);
   if (new_node_outputs.size() != kAdamApplyOneOutputNum) {
     MS_LOG(EXCEPTION) << "The output size of node " << new_node->DebugString() << " should be "
-                      << kAdamApplyOneOutputNum;
+                      << kAdamApplyOneOutputNum << " trace: " << trace::DumpSourceLines(node);
   }
   auto manager = func_graph->manager();
   MS_EXCEPTION_IF_NULL(manager);

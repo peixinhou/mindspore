@@ -71,6 +71,8 @@ Status StorageContainer::Read(WritableSlice *dest, off64_t offset) const noexcep
     RETURN_STATUS_UNEXPECTED(strerror(errno));
   }
   auto r_sz = read(fd_, dest->GetMutablePointer(), sz);
+#elif defined(__APPLE__)
+  auto r_sz = pread(fd_, dest->GetMutablePointer(), sz, offset);
 #else
   auto r_sz = pread64(fd_, dest->GetMutablePointer(), sz, offset);
 #endif
@@ -94,13 +96,15 @@ Status StorageContainer::Write(const ReadableSlice &dest, off64_t offset) const 
     RETURN_STATUS_UNEXPECTED(strerror(errno));
   }
   auto r_sz = write(fd_, dest.GetPointer(), sz);
+#elif defined(__APPLE__)
+  auto r_sz = pwrite(fd_, dest.GetPointer(), sz, offset);
 #else
   auto r_sz = pwrite64(fd_, dest.GetPointer(), sz, offset);
 #endif
   if (r_sz != sz) {
     errno_t err = (r_sz == 0) ? EOF : errno;
     if (errno == ENOSPC) {
-      return Status(StatusCode::kNoSpace, __LINE__, __FILE__);
+      return Status(StatusCode::kMDNoSpace, __LINE__, __FILE__);
     } else {
       RETURN_STATUS_UNEXPECTED(strerror(err));
     }
@@ -153,7 +157,7 @@ Status StorageContainer::CreateStorageContainer(std::shared_ptr<StorageContainer
   Status rc;
   auto sc = new (std::nothrow) StorageContainer(path);
   if (sc == nullptr) {
-    return Status(StatusCode::kOutOfMemory);
+    return Status(StatusCode::kMDOutOfMemory);
   }
   rc = sc->Create();
   if (rc.IsOk()) {

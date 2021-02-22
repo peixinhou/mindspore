@@ -18,7 +18,6 @@ use to_bytes and to_str to encode and decode strings into a specified format.
 """
 from enum import IntEnum
 
-import copy
 import numpy as np
 import mindspore._c_dataengine as cde
 
@@ -39,8 +38,7 @@ class Vocab(cde.Vocab):
 
     @classmethod
     @check_from_dataset
-    def from_dataset(cls, dataset, columns=None, freq_range=None, top_k=None, special_tokens=None,
-                     special_first=True):
+    def from_dataset(cls, dataset, columns=None, freq_range=None, top_k=None, special_tokens=None, special_first=True):
         """
         Build a vocab from a dataset.
 
@@ -67,23 +65,9 @@ class Vocab(cde.Vocab):
                 is specified and special_first is set to True, special_tokens will be prepended (default=True).
 
         Returns:
-            Vocab, Vocab object built from dataset.
+            Vocab, vocab built from the dataset.
         """
-
-        vocab = Vocab()
-        if columns is None:
-            columns = []
-        if not isinstance(columns, list):
-            columns = [columns]
-        if freq_range is None:
-            freq_range = (None, None)
-        if special_tokens is None:
-            special_tokens = []
-        root = copy.deepcopy(dataset).build_vocab(vocab, columns, freq_range, top_k, special_tokens, special_first)
-        for d in root.create_dict_iterator(num_epochs=1):
-            if d is not None:
-                raise ValueError("from_dataset should receive data other than None.")
-        return vocab
+        return dataset.build_vocab(columns, freq_range, top_k, special_tokens, special_first)
 
     @classmethod
     @check_from_list
@@ -97,6 +81,9 @@ class Vocab(cde.Vocab):
                 special_tokens=["<pad>","<unk>"] (default=None, no special tokens will be added).
             special_first(bool, optional): whether special_tokens will be prepended/appended to vocab, If special_tokens
                 is specified and special_first is set to True, special_tokens will be prepended (default=True).
+
+        Returns:
+            Vocab, vocab built from the `list`.
         """
         if special_tokens is None:
             special_tokens = []
@@ -118,6 +105,9 @@ class Vocab(cde.Vocab):
             special_first (bool, optional): whether special_tokens will be prepended/appended to vocab,
                 If special_tokens is specified and special_first is set to True,
                 special_tokens will be prepended (default=True).
+
+        Returns:
+            Vocab, vocab built from the file.
         """
         if vocab_size is None:
             vocab_size = -1
@@ -134,6 +124,9 @@ class Vocab(cde.Vocab):
         Args:
             word_dict (dict): dict contains word and id pairs, where word should be str and id be int. id is recommended
                 to start from 0 and be continuous. ValueError will be raised if id is negative.
+
+        Returns:
+            Vocab, vocab built from the `dict`.
         """
 
         return super().from_dict(word_dict)
@@ -143,6 +136,7 @@ class SentencePieceVocab(cde.SentencePieceVocab):
     """
     SentencePiece obiect that is used to segmentate words
     """
+
     @classmethod
     @check_from_dataset_sentencepiece
     def from_dataset(cls, dataset, col_names, vocab_size, character_coverage, model_type, params):
@@ -156,21 +150,16 @@ class SentencePieceVocab(cde.SentencePieceVocab):
             character_coverage(float): Amount of characters covered by the model, good defaults are: 0.9995 for
                 languages. with rich character set like Japanese or Chinese and 1.0 for other languages with small
                 character set.
-            model_type(SentencePieceModel): Choose from unigram (default), bpe, char, or word. The input sentence
+            model_type(SentencePieceModel): Choose from UNIGRAM (default), BPE, CHAR, or WORD. The input sentence
                 must be pretokenized when using word type.
             params(dict): A dictionary with no incoming parameters.
 
         Returns:
-            SentencePiece, SentencePiece object from dataset.
+            SentencePieceVocab, vocab built from the dataset.
         """
 
-        vocab = SentencePieceVocab()
-        root = copy.deepcopy(dataset).build_sentencepiece_vocab(vocab, col_names, vocab_size, character_coverage,
-                                                                model_type, params)
-        for d in root.create_dict_iterator(num_epochs=1):
-            if d is None:
-                raise ValueError("from_dataset should receive data other than None.")
-        return vocab
+        return dataset.build_sentencepiece_vocab(col_names, vocab_size, character_coverage,
+                                                 DE_C_INTER_SENTENCEPIECE_MODE[model_type], params)
 
     @classmethod
     @check_from_file_sentencepiece
@@ -193,6 +182,9 @@ class SentencePieceVocab(cde.SentencePieceVocab):
 
                     input_sentence_size 0
                     max_sentencepiece_length 16
+
+        Returns:
+            SentencePieceVocab, vocab built from the file.
         """
         return super().from_file(file_path, vocab_size, character_coverage,
                                  DE_C_INTER_SENTENCEPIECE_MODE[model_type], params)
@@ -208,7 +200,7 @@ class SentencePieceVocab(cde.SentencePieceVocab):
             path(str): Path to store model.
             filename(str): The name of the file.
         """
-        return super().save_model(vocab, path, filename)
+        super().save_model(vocab, path, filename)
 
 
 def to_str(array, encoding='utf8'):
@@ -269,6 +261,7 @@ class SentencePieceModel(IntEnum):
     BPE = 1
     CHAR = 2
     WORD = 3
+
 
 DE_C_INTER_SENTENCEPIECE_MODE = {
     SentencePieceModel.UNIGRAM: cde.SentencePieceModel.DE_SENTENCE_PIECE_UNIGRAM,

@@ -33,11 +33,28 @@ def _tensor_run_opt_ext(opt, momentum, learning_rate, gradient, weight, accum, s
 
 class SGD(Optimizer):
     r"""
-    Implements stochastic gradient descent (optionally with momentum).
+    Implements stochastic gradient descent. Momentum is optional.
 
     Introduction to SGD can be found at https://en.wikipedia.org/wiki/Stochastic_gradient_descent.
     Nesterov momentum is based on the formula from paper `On the importance of initialization and
     momentum in deep learning <http://proceedings.mlr.press/v28/sutskever13.html>`_.
+
+    .. math::
+            v_{t+1} = u \ast v_{t} + gradient \ast (1-dampening)
+
+    If nesterov is True:
+
+        .. math::
+                p_{t+1} = p_{t} - lr \ast (gradient + u \ast v_{t+1})
+
+    If nesterov is Flase:
+
+        .. math::
+                p_{t+1} = p_{t} - lr \ast v_{t+1}
+
+    To be noticed, for the first step, v_{t+1} = gradient
+
+    Here : where p, v and u denote the parameters, accum, and momentum respectively.
 
     Note:
         When separating parameter groups, the weight decay in each group will be applied on the parameters if the
@@ -45,21 +62,6 @@ class SGD(Optimizer):
         on the parameters without 'beta' or 'gamma' in their names if `weight_decay` is positive.
 
         To improve parameter groups performance, the customized order of parameters can be supported.
-
-    .. math::
-            v_{t+1} = u \ast v_{t} + gradient \ast (1-dampening)
-
-    If nesterov is True:
-        .. math::
-                p_{t+1} = p_{t} - lr \ast (gradient + u \ast v_{t+1})
-
-    If nesterov is Flase:
-        .. math::
-                p_{t+1} = p_{t} - lr \ast v_{t+1}
-
-    To be noticed, for the first step, v_{t+1} = gradient
-
-    Here : where p, v and u denote the parameters, accum, and momentum respectively.
 
     Args:
         params (Union[list[Parameter], list[dict]]): When the `params` is a list of `Parameter` which will be updated,
@@ -103,6 +105,9 @@ class SGD(Optimizer):
     Raises:
         ValueError: If the momentum, dampening or weight_decay value is less than 0.0.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> net = Net()
         >>> #1) All parameters use the same learning rate and weight decay
@@ -112,8 +117,8 @@ class SGD(Optimizer):
         >>> conv_params = list(filter(lambda x: 'conv' in x.name, net.trainable_params()))
         >>> no_conv_params = list(filter(lambda x: 'conv' not in x.name, net.trainable_params()))
         >>> group_params = [{'params': conv_params, 'weight_decay': 0.01},
-        >>>                 {'params': no_conv_params, 'lr': 0.01},
-        >>>                 {'order_params': net.trainable_params()}]
+        ...                 {'params': no_conv_params, 'lr': 0.01},
+        ...                 {'order_params': net.trainable_params()}]
         >>> optim = nn.SGD(group_params, learning_rate=0.1, weight_decay=0.0)
         >>> # The conv_params's parameters will use a learning rate of default value 0.1 and a weight decay of 0.01.
         >>> # The no_conv_params's parameters will use a learning rate of 0.01 and a weight decay of default value 0.0.

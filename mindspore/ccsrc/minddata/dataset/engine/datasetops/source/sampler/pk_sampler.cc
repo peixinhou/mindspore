@@ -28,9 +28,12 @@ PKSamplerRT::PKSamplerRT(int64_t num_samples, int64_t val, bool shuffle, int64_t
       samples_per_class_(val) {}
 
 Status PKSamplerRT::InitSampler() {
+  if (is_initialized) {
+    return Status::OK();
+  }
   labels_.reserve(label_to_ids_.size());
   for (const auto &pair : label_to_ids_) {
-    if (pair.second.empty() == false) {
+    if (!pair.second.empty()) {
       labels_.push_back(pair.first);
     }
   }
@@ -58,6 +61,7 @@ Status PKSamplerRT::InitSampler() {
   CHECK_FAIL_RETURN_UNEXPECTED(
     num_samples_ > 0, "Invalid parameter, num_class or K (num samples per class) must be greater than 0, but got " +
                         std::to_string(num_samples_));
+  is_initialized = true;
   return Status::OK();
 }
 
@@ -76,6 +80,7 @@ Status PKSamplerRT::GetNextSample(std::unique_ptr<DataBuffer> *out_buffer) {
     int64_t last_id = (samples_per_buffer_ + next_id_ > num_samples_) ? num_samples_ : samples_per_buffer_ + next_id_;
     RETURN_IF_NOT_OK(CreateSamplerTensor(&sample_ids, last_id - next_id_));
     auto id_ptr = sample_ids->begin<int64_t>();
+    CHECK_FAIL_RETURN_UNEXPECTED(samples_per_class_ != 0, "samples cannot be zero.");
     while (next_id_ < last_id && id_ptr != sample_ids->end<int64_t>()) {
       int64_t cls_id = next_id_++ / samples_per_class_;
       const std::vector<int64_t> &samples = label_to_ids_[labels_[cls_id]];
@@ -115,13 +120,32 @@ Status PKSamplerRT::HandshakeRandomAccessOp(const RandomAccessOp *op) {
   return Status::OK();
 }
 
-void PKSamplerRT::Print(std::ostream &out, bool show_all) const {
+void PKSamplerRT::SamplerPrint(std::ostream &out, bool show_all) const {
   out << "\nSampler: PKSampler";
   if (show_all) {
     // Call the super class for displaying any common detailed info
-    SamplerRT::Print(out, show_all);
+    SamplerRT::SamplerPrint(out, show_all);
     // Then add our own info if any
   }
+}
+
+Status PKSamplerRT::to_json(nlohmann::json *out_json) {
+  nlohmann::json args;
+  args["sampler_name"] = "PKSampler";
+  args["num_val"] = samples_per_class_;
+  args["shuffle"] = shuffle_;
+  args["num_samples"] = num_samples_;
+  if (this->HasChildSampler()) {
+    std::vector<nlohmann::json> children_args;
+    for (auto child : child_) {
+      nlohmann::json child_arg;
+      RETURN_IF_NOT_OK(child->to_json(&child_arg));
+      children_args.push_back(child_arg);
+    }
+    args["child_sampler"] = children_args;
+  }
+  *out_json = args;
+  return Status::OK();
 }
 }  // namespace dataset
 }  // namespace mindspore

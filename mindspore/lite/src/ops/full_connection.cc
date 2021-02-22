@@ -70,9 +70,9 @@ int FullConnection::InferShape(std::vector<lite::Tensor *> inputs_, std::vector<
   auto output = outputs_.front();
   MS_ASSERT(output != nullptr);
   if (!infer_flag()) {
-    return RET_OK;
+    return RET_INFER_INVALID;
   }
-  if ((GetHasBias() && inputs_.size() != kMultiNum) || (!GetHasBias() && inputs_.size() != kDoubleNum)) {
+  if ((GetHasBias() && inputs_.size() != kTripleNum) || (!GetHasBias() && inputs_.size() != kDoubleNum)) {
     MS_LOG(ERROR) << "Input tensors num error";
     return RET_INPUT_TENSOR_ERROR;
   }

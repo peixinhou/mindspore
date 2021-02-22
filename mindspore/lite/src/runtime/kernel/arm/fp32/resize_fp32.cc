@@ -15,21 +15,39 @@
  */
 
 #include "src/runtime/kernel/arm/fp32/resize_fp32.h"
-#include <algorithm>
-#include "include/errorcode.h"
-#include "nnacl/fp32/resize.h"
 #include "schema/model_generated.h"
+#include "src/kernel_registry.h"
 #include "src/runtime/runtime_api.h"
 
 using mindspore::kernel::KERNEL_ARCH::kCPU;
+using mindspore::lite::KernelRegistrar;
 using mindspore::lite::RET_ERROR;
 using mindspore::lite::RET_INVALID_OP_ATTR;
 using mindspore::lite::RET_NULL_PTR;
 using mindspore::lite::RET_OK;
+using mindspore::schema::PrimitiveType_Resize;
 
 namespace mindspore::kernel {
 int ResizeCPUKernel::Init() {
   auto ret = ResizeBaseCPUKernel::Init();
+  switch (coordinate_transform_mode_) {
+    case schema::CoordinateTransformMode_COMMON:
+    case schema::CoordinateTransformMode_ASYMMETRIC:
+      calculate_ = CalculateAsymmetric;
+      break;
+    case schema::CoordinateTransformMode_ALIGN_CORNERS:
+      calculate_ = CalculateAlignCorners;
+      break;
+    case schema::CoordinateTransformMode_PYTORCH_HALF_PIXEL:
+    case schema::CoordinateTransformMode_TF_HALF_PIXEL:
+    case schema::CoordinateTransformMode_HALF_PIXEL:
+      calculate_ = CalculateHalfPixel;
+      break;
+    default:
+      MS_LOG(ERROR) << "Do not support coordinate transform mode. Mode is"
+                    << schema::EnumNameCoordinateTransformMode(
+                         static_cast<schema::CoordinateTransformMode>(coordinate_transform_mode_));
+  }
   if (ret != RET_OK) {
     return ret;
   }
@@ -42,6 +60,10 @@ int ResizeCPUKernel::Init() {
 int ResizeCPUKernel::ReSize() {
   int ret = RET_OK;
   if (method_ == static_cast<int>(schema::ResizeMethod_LINEAR)) {
+    if (!const_shape_) {
+      new_height_ = out_tensors_.at(0)->shape()[1];
+      new_width_ = out_tensors_.at(0)->shape()[2];
+    }
     FreeTmpBuffer();
     ret = MallocTmpBuffer();
     if (ret != RET_OK) {
@@ -51,8 +73,8 @@ int ResizeCPUKernel::ReSize() {
 
     auto input = in_tensors_.at(0);
     auto input_shape = input->shape();
-    ret = PrepareResizeBilinear(input_shape.data(), out_tensors_.at(0)->shape().data(), align_corners_, y_bottoms_,
-                                y_tops_, x_lefts_, x_rights_, y_bottom_weights_, x_left_weights_);
+    ret = PrepareResizeBilinear(input_shape.data(), out_tensors_.at(0)->shape().data(), calculate_, y_bottoms_, y_tops_,
+                                x_lefts_, x_rights_, y_bottom_weights_, x_left_weights_);
     if (ret != RET_OK) {
       FreeTmpBuffer();
     }
@@ -100,9 +122,9 @@ int ResizeCPUKernel::MallocTmpBuffer() {
     MS_LOG(ERROR) << "malloc data failed";
     return RET_NULL_PTR;
   }
-
   return RET_OK;
 }
+
 void ResizeCPUKernel::FreeTmpBuffer() {
   if (y_bottoms_ != nullptr) {
     free(y_bottoms_);
@@ -147,11 +169,11 @@ int ResizeImpl(void *cdata, int task_id) {
 
 int ResizeCPUKernel::RunImpl(int task_id) {
   auto input = in_tensors_.at(0);
-  auto input_data = reinterpret_cast<float *>(input->MutableData());
+  auto input_data = reinterpret_cast<float *>(input->data_c());
   if (input_data == nullptr) {
     return RET_NULL_PTR;
   }
-  auto output_data = reinterpret_cast<float *>(out_tensors_.at(0)->MutableData());
+  auto output_data = reinterpret_cast<float *>(out_tensors_.at(0)->data_c());
   if (output_data == nullptr) {
     return RET_NULL_PTR;
   }
@@ -159,42 +181,25 @@ int ResizeCPUKernel::RunImpl(int task_id) {
   if (context_ == nullptr) {
     return RET_NULL_PTR;
   }
-
   int ret = 0;
   switch (method_) {
     case static_cast<int>(schema::ResizeMethod_LINEAR): {
-      int n_h_begin, n_h_end;
-      int n = out_tensors_.at(0)->shape().at(0);
-      int h = new_height_;
-      int unit = UP_DIV(n * h, context_->thread_num_);
-      n_h_begin = unit * task_id;
-      n_h_end = std::min(n_h_begin + unit, n * h);
+      int unit = UP_DIV(new_height_, context_->thread_num_);
+      int h_begin = unit * task_id;
+      int h_end = std::min(h_begin + unit, new_height_);
       int c = in_tensors_.at(0)->shape().at(3);
       float *line0 = line_buffer_ + new_width_ * c * 2 * task_id;
       float *line1 = line0 + new_width_ * c;
-      ret = ResizeBilinear2(input_data, output_data, input_shape.data(), out_tensors_.at(0)->shape().data(), y_bottoms_,
-                            y_tops_, x_lefts_, x_rights_, y_bottom_weights_, x_left_weights_, line0, line1, n_h_begin,
-                            n_h_end);
-
+      ret =
+        ResizeBilinear(input_data, output_data, input_shape.data(), out_tensors_.at(0)->shape().data(), y_bottoms_,
+                       y_tops_, x_lefts_, x_rights_, y_bottom_weights_, x_left_weights_, line0, line1, h_begin, h_end);
       break;
     }
     case static_cast<int>(schema::ResizeMethod_NEAREST): {
-      if (in_tensors_.size() == lite::kDoubleNum && !const_shape_) {
-        auto out_shape = in_tensors_.at(1);
-        auto data = reinterpret_cast<int32_t *>(out_shape->MutableData());
-        if (data == nullptr) {
-          MS_LOG(ERROR) << "The out shape data is nullptr.";
-          return RET_NULL_PTR;
-        } else {
-          out_tensors_.at(0)->shape().at(1) = static_cast<int64_t>(data[0]);
-          out_tensors_.at(0)->shape().at(2) = static_cast<int64_t>(data[1]);
-        }
-      }
       ret = ResizeNearestNeighbor(input_data, output_data, input_shape.data(), out_tensors_[0]->shape().data(),
-                                  align_corners_, task_id, context_->thread_num_);
+                                  calculate_, coordinate_transform_mode_, task_id, context_->thread_num_);
       break;
     }
-    case schema::ResizeMethod_UNKNOW:
     default: {
       MS_LOG(ERROR) << "Resize unknown method " << method_;
       ret = RET_ERROR;
@@ -210,7 +215,8 @@ int ResizeCPUKernel::Run() {
     FreeTmpBuffer();
     return RET_ERROR;
   }
-
   return RET_OK;
 }
+
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Resize, LiteKernelCreator<ResizeCPUKernel>)
 }  // namespace mindspore::kernel

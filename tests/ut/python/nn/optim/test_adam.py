@@ -22,10 +22,12 @@ from mindspore.common.api import _executor
 from mindspore.nn import TrainOneStepCell, WithLossCell
 from mindspore.nn.optim import Adam, AdamWeightDecay
 from mindspore.ops import operations as P
-import mindspore.nn.learning_rate_schedule as lr_schedules
-from mindspore.nn.dynamic_lr import polynomial_decay_lr
 
-context.set_context(enable_sparse=True)
+@pytest.fixture(scope="module", autouse=True)
+def setup_teardown():
+    context.set_context(enable_sparse=True)
+    yield
+    context.set_context(enable_sparse=False)
 
 class Net(nn.Cell):
     """ Net definition """
@@ -137,7 +139,7 @@ def test_adam_group1():
     net_with_loss = WithLossCell(net, loss)
     all_params = net.trainable_params()
 
-    poly_decay_lr = polynomial_decay_lr(0.01, 0.0001, total_step=10, step_per_epoch=1, decay_epoch=3, power=1.0)
+    poly_decay_lr = nn.polynomial_decay_lr(0.01, 0.0001, total_step=10, step_per_epoch=1, decay_epoch=3, power=1.0)
 
     group_params = [{'params': [all_params[0]], 'lr': poly_decay_lr, 'weight_decay': 0.9},
                     {'params': [all_params[1]]}]
@@ -157,7 +159,7 @@ def test_adam_group2():
     net_with_loss = WithLossCell(net, loss)
     all_params = net.trainable_params()
 
-    schedule_lr = lr_schedules.PolynomialDecayLR(0.01, 0.0001, 3, power=1.0)
+    schedule_lr = nn.PolynomialDecayLR(0.01, 0.0001, 3, power=1.0)
     group_params = [{'params': [all_params[0]], 'lr': 0.02, 'weight_decay': 0.9},
                     {'params': [all_params[1]]}]
     optimizer = nn.Adam(group_params, learning_rate=schedule_lr)
@@ -175,10 +177,28 @@ def test_adamweightdecay_group():
     net_with_loss = WithLossCell(net, loss)
     all_params = net.trainable_params()
 
-    schedule_lr = lr_schedules.PolynomialDecayLR(0.01, 0.0001, 3, power=1.0)
+    schedule_lr = nn.PolynomialDecayLR(0.01, 0.0001, 3, power=1.0)
     group_params = [{'params': [all_params[0]], 'lr': 0.02, 'weight_decay': 0.9},
                     {'params': [all_params[1]]}]
     optimizer = nn.AdamWeightDecay(group_params, learning_rate=schedule_lr)
+    train_network = TrainOneStepCell(net_with_loss, optimizer)
+    _executor.compile(train_network, inputs, label)
+
+
+def test_adamoffload_group():
+    """ test_adam_group_lr_and_weight_decay """
+    inputs = Tensor(np.ones([1, 64]).astype(np.float32))
+    label = Tensor(np.zeros([1, 10]).astype(np.float32))
+    net = Net()
+    net.set_train()
+    loss = nn.SoftmaxCrossEntropyWithLogits()
+    net_with_loss = WithLossCell(net, loss)
+    all_params = net.trainable_params()
+
+    schedule_lr = nn.PolynomialDecayLR(0.01, 0.0001, 3, power=1.0)
+    group_params = [{'params': [all_params[0]], 'lr': 0.02, 'weight_decay': 0.9},
+                    {'params': [all_params[1]]}]
+    optimizer = nn.AdamOffload(group_params, learning_rate=schedule_lr)
     train_network = TrainOneStepCell(net_with_loss, optimizer)
     _executor.compile(train_network, inputs, label)
 

@@ -1,5 +1,5 @@
 /**
- * Copyright 2019 Huawei Technologies Co., Ltd
+ * Copyright 2019-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -133,7 +133,7 @@ class MapOp : public ParallelOp {
     int32_t build_op_connector_size_;
 
     // Check if the required parameters are set by the builder.
-    // @return Status The error code return
+    // @return Status The status code returned
     Status sanityCheck() const;
   };
 
@@ -170,24 +170,12 @@ class MapOp : public ParallelOp {
   // provide the master loop that drives the logic for performing the work
   // This main thread creates local queues, pulls databuffers from the previous
   // op's Connector and distributes them to the local queues. Workers pull from the local queues.
-  // @return Status The error code return
+  // @return Status The status code returned
   Status operator()() override;
 
   // Getter
   // @return the number of threads consuming data from previous op's output Connector.
   int32_t num_consumers() const override;
-
-  /// \brief Base-class override for NodePass pre-visit acceptor
-  /// \param[in] p The node to visit
-  /// \param[out] modified Indicator if the node was modified
-  /// \return Status of the node visit
-  Status PreAccept(NodePass *p, bool *modified) override;
-
-  /// \brief Base-class override for NodePass visitor acceptor.
-  /// \param[in] p Pointer to the NodePass to be accepted.
-  /// \param[out] modified Whether this node visit modified the pipeline.
-  /// \return - Status of the node visit.
-  Status Accept(NodePass *p, bool *modified) override;
 
   // Op name getter
   // @return Name of the current Op
@@ -239,7 +227,7 @@ class MapOp : public ParallelOp {
   // applying a list of TensorOps to each of the data, process the results and then
   // pushing them back to MapOp's output Connector to be fetched by the next Op.
   // @param worker_id The id assigned to this thread/worker upon creation.
-  // @return Status The error code return
+  // @return Status The status code returned
   Status WorkerEntry(int32_t worker_id) override;  //  In: workerId assigned by tree_
 
   // Private function for worker thread to perform TensorOp's compute function and get the result.

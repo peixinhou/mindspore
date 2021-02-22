@@ -23,7 +23,7 @@ class DataConfig:
     test_num_of_parts = 3
     batch_size = 16000
     data_field_size = 39
-    data_format = 2
+    data_format = 1
 
 class ModelConfig:
     """model config"""
@@ -35,6 +35,7 @@ class ModelConfig:
     init_args = [-0.01, 0.01]
     weight_bias_init = ['normal', 'normal']
     keep_prob = 0.9
+    convert_dtype = True
 
 class TrainConfig:
     """train config"""

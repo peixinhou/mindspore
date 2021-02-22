@@ -14,7 +14,6 @@
 # ============================================================================
 """evaluate imagenet"""
 import argparse
-import os
 
 import mindspore.nn as nn
 from mindspore import context
@@ -33,9 +32,8 @@ if __name__ == '__main__':
     parser.add_argument('--platform', type=str, default='GPU', choices=('Ascend', 'GPU'), help='run platform')
     args_opt = parser.parse_args()
 
-    if args_opt.platform == 'Ascend':
-        device_id = int(os.getenv('DEVICE_ID'))
-        context.set_context(device_id=device_id)
+    if args_opt.platform != 'GPU':
+        raise ValueError("Only supported GPU training.")
 
     context.set_context(mode=context.GRAPH_MODE, device_target=args_opt.platform)
 
@@ -49,7 +47,7 @@ if __name__ == '__main__':
     ckpt = load_checkpoint(args_opt.checkpoint)
     load_param_into_net(net, ckpt)
     net.set_train(False)
-    val_data_url = os.path.join(args_opt.data_path, 'val')
+    val_data_url = args_opt.data_path
     dataset = create_dataset_val(cfg.batch_size, val_data_url, workers=cfg.workers, distributed=False)
     loss = LabelSmoothingCrossEntropy(smooth_factor=cfg.smoothing)
     eval_metrics = {'Loss': nn.Loss(),

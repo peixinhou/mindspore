@@ -17,24 +17,35 @@
 #define MINDSPORE_LITE_NNACL_PAD_PARAMETER_H_
 
 #include "nnacl/op_base.h"
-#include "nnacl/quantization/quantize.h"
 
 #define MAX_PAD_SIZE 8
 #define DEFAULT_PAD_NDIMS 4
 
+typedef struct PadQuantArg {
+  QuantArg *in_quant_args_;
+  QuantArg *out_quanr_args_;
+  int8_t *constant_value_;
+} PadQuantArg;
+
 typedef struct PadParameter {
   // Primitive parameter
   OpParameter op_parameter_;
-  int paddings_[MAX_PAD_SIZE];
+  int paddings_[MAX_SHAPE_SIZE];
   int pad_mode_;
   float constant_value_;
   // shape correlative
   int padding_length;
   // other parameter
-  int in_strides[DEFAULT_PAD_NDIMS];
+  int in_strides[COMM_SHAPE_SIZE];
   int out_strides[DEFAULT_PAD_NDIMS];
   int mirror_offset_;
   PadQuantArg pad_quant_arg_;
 } PadParameter;
+
+typedef struct MirrorPadBlock {
+  int out_offset_;
+  int out_stride_[DEFAULT_PAD_NDIMS];
+  int size_[DEFAULT_PAD_NDIMS];
+} MirrorPadBlock;
 
 #endif  // MINDSPORE_LITE_NNACL_PAD_PARAMETER_H_

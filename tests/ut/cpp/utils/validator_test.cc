@@ -23,6 +23,7 @@
 #include "ir/manager.h"
 #include "pipeline/jit/static_analysis/prim.h"
 #include "frontend/operator/ops.h"
+#include "base/core_ops.h"
 
 namespace mindspore {
 namespace validator {
@@ -35,15 +36,15 @@ class TestValidator : public UT::Common {
 };
 
 TEST_F(TestValidator, ValidateOperation01) {
-  auto node = NewValueNode(std::make_shared<Primitive>("scalar_add"));
+  auto node = NewValueNode(std::make_shared<Primitive>(prim::kScalarAdd));
   ValidateOperation(node);
   // normally, the above statement should not exit, so expected the following statement execute
   EXPECT_TRUE(true);
 }
 
 TEST_F(TestValidator, ValidateAbstract01) {
-  AnfNodePtr node = NewValueNode(1);
-  abstract::AbstractBasePtr abstract_v1 = abstract::FromValue(1, false);
+  AnfNodePtr node = NewValueNode(static_cast<int64_t>(1));
+  abstract::AbstractBasePtr abstract_v1 = abstract::FromValue(static_cast<int64_t>(1), false);
   node->set_abstract(abstract_v1);
   ValidateAbstract(node);
   // normally, the above statement should not exit, so expected the following statement execute

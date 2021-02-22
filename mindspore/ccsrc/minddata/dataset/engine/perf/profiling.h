@@ -33,6 +33,7 @@ const char kDeviceQueueTracingName[] = "Device_Queue_Tracing";
 const char kDatasetIteratorTracingName[] = "Dataset_Iterator_Tracing";
 const char kConnectorSizeSamplingName[] = "Connector_Size_Sampling";
 const char kConnectorThroughputSamplingName[] = "Connector_Throughput_Sampling";
+const char kCpuSamplingName[] = "Cpu_Sampling";
 
 // Profiling is a class of basic unit of profiling action
 // This base class encapsulate the serialization output logic
@@ -87,23 +88,28 @@ class ProfilingManager {
   Status Initialize();
 
   // Save profile data to file
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status SaveProfilingData();
 
   // Sampling node getter
   // @param name - The name of the requested node
   // @param node - Pointer to the shared pointer for the Sampling node
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status GetSamplingNode(const std::string &name, std::shared_ptr<Sampling> *node);
 
   // Tracing node getter
   // @param name - The name of the requested node
   // @param node - Pointer to the shared pointer for the Tracing node
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status GetTracingNode(const std::string &name, std::shared_ptr<Tracing> *node);
 
-  // If profiling is enabled.
+  // return true if env variable has profiling enabled and enabled_ is set to true.
   bool IsProfilingEnable() const;
+
+  // Calling this would disable Profiling functionality for the entire duration of ExecutionTree. It cannot be
+  // re-enabled. Each execution_tree is associated with a unique profiling_manager which will start when tree is
+  // launched. This is the master off switch, once called, it won't start profiler even if env variable says so.
+  void DisableProfiling() { enabled_ = false; }
 
   const std::unordered_map<std::string, std::shared_ptr<Sampling>> &GetSamplingNodes() { return sampling_nodes_; }
 
@@ -114,23 +120,24 @@ class ProfilingManager {
 
  private:
   std::unique_ptr<Monitor> perf_monitor_;
+  bool enabled_;
   std::unordered_map<std::string, std::shared_ptr<Tracing>> tracing_nodes_;
 
   std::unordered_map<std::string, std::shared_ptr<Sampling>> sampling_nodes_;
 
   // Register profile node to tree
   // @param node - Profiling node
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status RegisterTracingNode(std::shared_ptr<Tracing> node);
 
   // Register profile node to tree
   // @param node - Profiling node
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status RegisterSamplingNode(std::shared_ptr<Sampling> node);
 
-  ExecutionTree *tree_ = nullptr;  // ExecutionTree pointer
-  std::string dir_path_;           // where to create profiling file
-  std::string device_id_;          // used when create profiling file,filename_deviceid.suffix
+  ExecutionTree *tree_;    // ExecutionTree pointer
+  std::string dir_path_;   // where to create profiling file
+  std::string device_id_;  // used when create profiling file,filename_device_id.suffix
 };
 
 enum ProfilingType { TIME, CONNECTOR_DEPTH };
@@ -144,7 +151,7 @@ enum ProfilingTimeSubType {
 
 class ProfilingTime {
  public:
-  static int64_t GetCurMilliSecond();
+  static uint64_t GetCurMilliSecond();
 };
 }  // namespace dataset
 }  // namespace mindspore

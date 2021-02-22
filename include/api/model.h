@@ -20,39 +20,36 @@
 #include <vector>
 #include <map>
 #include <memory>
+#include <utility>
 #include "include/api/status.h"
 #include "include/api/types.h"
+#include "include/api/graph.h"
+#include "include/api/cell.h"
 
 namespace mindspore {
-namespace api {
 class ModelImpl;
-// todo: minddata c++ interface
-class DataSet {};
-class NetWork {};
+struct Context;
 
 class MS_API Model {
  public:
-  Model(const std::string &device_type, uint32_t device_id);
-  Model(NetWork network, const std::string &device_type, uint32_t device_id);
+  explicit Model(const std::vector<Output> &network, const std::shared_ptr<Context> &model_context = nullptr);
+  explicit Model(const GraphCell &graph, const std::shared_ptr<Context> &model_context = nullptr);
   ~Model();
   Model(const Model &) = delete;
   void operator=(const Model &) = delete;
 
-  Status LoadModel(const Buffer &model_data, ModelType type, const std::map<std::string, std::string> &options);
-  Status LoadModel(const std::string &file_name, ModelType type, const std::map<std::string, std::string> &options);
-  Status UnloadModel();
+  Status Build();
+  Status Resize(const std::vector<MSTensor> &inputs, const std::vector<std::vector<int64_t>> &dims);
 
-  Status Train(const DataSet &dataset, std::map<std::string, Buffer> *outputs);
-  Status Eval(const DataSet &dataset, std::map<std::string, Buffer> *outputs);
-  Status Predict(const std::map<std::string, Buffer> &inputs, std::map<std::string, Buffer> *outputs);
-  Status Predict(const std::vector<Buffer> &inputs, std::map<std::string, Buffer> *outputs);
+  Status Predict(const std::vector<MSTensor> &inputs, std::vector<MSTensor> *outputs);
 
-  Status GetInputsInfo(std::vector<Tensor> *tensor_list) const;
-  Status GetOutputsInfo(std::vector<Tensor> *tensor_list) const;
+  std::vector<MSTensor> GetInputs();
+  std::vector<MSTensor> GetOutputs();
+
+  static bool CheckModelSupport(const std::string &device_type, ModelType model_type);
 
  private:
   std::shared_ptr<ModelImpl> impl_;
 };
-}  // namespace api
 }  // namespace mindspore
 #endif  // MINDSPORE_INCLUDE_API_MODEL_H

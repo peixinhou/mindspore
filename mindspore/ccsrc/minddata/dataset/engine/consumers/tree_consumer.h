@@ -41,7 +41,9 @@ class TreeConsumer {
   /// \return Status error code.
   virtual Status Init(std::shared_ptr<DatasetNode> d);
 
-  Status Terminate();
+  /// Internal function to perform the termination
+  /// \return Status error code
+  virtual Status Terminate();
 
  protected:
   /// The class owns the tree_adapter that handles execution tree operations.
@@ -58,6 +60,8 @@ class IteratorConsumer : public TreeConsumer {
   /// \param num_epochs number of epochs. Default to -1 (infinite epochs).
   explicit IteratorConsumer(int32_t num_epochs = -1) : TreeConsumer(), num_epochs_(num_epochs) {}
 
+  ~IteratorConsumer() = default;
+
   Status Init(std::shared_ptr<DatasetNode> d) override;
 
   /// Returns the next row in a vector format
@@ -68,7 +72,12 @@ class IteratorConsumer : public TreeConsumer {
   /// Returns the next row in as a map
   /// \param[out] out std::map of string to Tensor
   /// \return Status error code
-  Status GetNextAsMap(std::unordered_map<std::string, TensorPtr> *out);
+  Status GetNextAsMap(std::unordered_map<std::string, TensorPtr> *const out);
+
+  /// Returns the next row in as a vector
+  /// \param[out] out std::vector of pairs of string to Tensor
+  /// \return Status error code
+  Status GetNextAsOrderedPair(std::vector<std::pair<std::string, std::shared_ptr<Tensor>>> *const vec);
 
  protected:
   /// Method to return the name of the consumer
@@ -77,6 +86,7 @@ class IteratorConsumer : public TreeConsumer {
 
  private:
   int32_t num_epochs_;
+  std::vector<std::pair<std::string, int32_t>> column_order_;  // key: column name, val: column id
 };
 
 #ifndef ENABLE_ANDROID
@@ -90,6 +100,8 @@ class SaveToDisk : public TreeConsumer {
   explicit SaveToDisk(std::string dataset_path, int32_t num_files = 1, std::string dataset_type = "mindrecord")
       : TreeConsumer(), dataset_path_(dataset_path), num_files_(num_files), dataset_type_(dataset_type) {}
 
+  ~SaveToDisk() = default;
+
   /// \brief Parameters validation
   /// \return Status Status::OK() if all the parameters are valid
   Status ValidateParams();
@@ -97,7 +109,7 @@ class SaveToDisk : public TreeConsumer {
   /// Save the given dataset to MindRecord format on disk. This is a blocking method (i.e., after returning, all rows
   /// would be written to disk)
   /// \return  Status error code
-  Status Save();
+  virtual Status Save();
 
  protected:
   /// Method to return the name of the consumer
@@ -106,7 +118,7 @@ class SaveToDisk : public TreeConsumer {
 
  private:
   template <typename T, typename S>
-  Status TransfromTensor(const unsigned char *src, const TensorShape &shape, const int64_t num_of_elements,
+  Status TransformTensor(const unsigned char *src, const TensorShape &shape, const int64_t num_of_elements,
                          std::unique_ptr<T> *data, std::unique_ptr<std::vector<uint8_t>> *data_ptr,
                          std::unique_ptr<S> *s, bool need_convert = false);
 
@@ -118,6 +130,12 @@ class SaveToDisk : public TreeConsumer {
                                 nlohmann::json *row_raw_data,
                                 std::map<std::string, std::unique_ptr<std::vector<uint8_t>>> *row_bin_data);
 
+  Status FetchFloatData(std::shared_ptr<Tensor> tensor, std::string column_name, nlohmann::json *row_raw_data,
+                        std::unique_ptr<std::vector<uint8_t>> *data_ptr);
+
+  Status FetchItemData(std::shared_ptr<Tensor> tensor, std::string column_name, nlohmann::json *row_raw_data,
+                       std::map<std::string, std::unique_ptr<std::vector<uint8_t>>> *row_bin_data);
+
   std::string dataset_path_;
   int32_t num_files_;
   std::string dataset_type_;
@@ -127,22 +145,29 @@ class SaveToDisk : public TreeConsumer {
 /// Consumer that iterates over the dataset and send it to a device
 class ToDevice : public TreeConsumer {
  public:
-  explicit ToDevice(bool send_epoch_end, int32_t num_epochs = -1)
-      : TreeConsumer(), send_epoch_end_(send_epoch_end), num_epochs_(num_epochs) {}
+  explicit ToDevice(int32_t num_epochs = -1) : TreeConsumer(), num_epochs_(num_epochs) {}
+
+  ~ToDevice() = default;
 
   Status Init(std::shared_ptr<DatasetNode> d) override;
 
+  Status Terminate() override;
+
   /// Send the data to device
   /// \return  Status error code
-  Status Send();
+  virtual Status Send();
 
   /// Stop to send data to device
   /// \return  Status error code
-  Status Stop();
+  virtual Status Stop();
 
   /// Continue to send data to device
   /// \return  Status error code
-  Status Continue();
+  virtual Status Continue();
+
+  /// Get data info from TDT
+  /// \return  Status error code
+  virtual Status GetDataInfo(std::vector<DataType> *const types, std::vector<TensorShape> *const shapes);
 
  protected:
   /// Method to return the name of the consumer
@@ -150,8 +175,6 @@ class ToDevice : public TreeConsumer {
   std::string Name() override { return "ToDevice"; }
 
  private:
-  std::string device_type_;
-  bool send_epoch_end_;
   int32_t num_epochs_;
 };
 
@@ -159,22 +182,59 @@ class ToDevice : public TreeConsumer {
 class TreeGetters : public TreeConsumer {
  public:
   TreeGetters();
+  ~TreeGetters() = default;
   Status Init(std::shared_ptr<DatasetNode> d) override;
-  Status GetDatasetSize(int64_t *size);
+
   Status GetOutputTypes(std::vector<DataType> *types);
   Status GetOutputShapes(std::vector<TensorShape> *shapes);
   Status GetBatchSize(int64_t *batch_size);
   Status GetRepeatCount(int64_t *repeat_count);
   Status GetNumClasses(int64_t *num_classes);
-  bool isInitialized();
+  Status GetColumnNames(std::vector<std::string> *output);
+  Status GetClassIndexing(std::vector<std::pair<std::string, std::vector<int32_t>>> *output_class_indexing);
   std::string Name() override { return "TreeGetters"; }
-  Status GetRow(TensorRow *r);
+  virtual Status GetRow(TensorRow *row);
 
  private:
+  Status GetFirstRowShapeAndType();
+
+  std::shared_ptr<DatasetNode> root_;
   int64_t dataset_size_;
-  TensorRow row_;
-  bool init_flag_;  // indicate whether the tree has initialized
-  bool row_flag_;   // indicate whether the first row has been stored in row_
+  std::vector<DataType> first_row_type_;
+  std::vector<TensorShape> first_row_shape_;
+  bool first_row_obtained_;  // whether first row (which could be empty) is obtained by TreeGetter
+  bool init_flag_;           // indicate whether the tree has initialized
+
+  Status InternalInit();
+};
+
+/// Consumer that is used to get some pipeline information
+class DatasetSizeGetter : public TreeConsumer, public std::enable_shared_from_this<DatasetSizeGetter> {
+ public:
+  DatasetSizeGetter() : dataset_size_(-1) {}
+  ~DatasetSizeGetter() = default;
+  Status Init(std::shared_ptr<DatasetNode> d) override;
+  Status Terminate() override;
+
+  /// \brief Function to get the dataset size
+  /// \param[in] estimate This is only supported by some of the ops and it's used to speed up the process of getting
+  ///     dataset size at the expense of accuracy.
+  /// \param[out] dataset_size the size of the dataset
+  /// \return Status of the function
+  Status GetDatasetSize(int64_t *size, bool estimate = false);
+
+  virtual Status GetRow(const std::shared_ptr<TreeAdapter> &tree_adapter, TensorRow *row);
+  std::string Name() override { return "DatasetSizeGetter"; }
+
+  /// \brief Gets the dataset size by iterating over the entire dataset on a sub tree starting from ir_node
+  /// param[in] ir_node The node that marks the top most of the sub tree on which we want to iterate
+  /// \return Status - The status code return
+  Status DryRun(std::shared_ptr<DatasetNode> ir_node, int64_t *dataset_size);
+
+ private:
+  std::shared_ptr<DatasetNode> root_;
+  std::vector<std::shared_ptr<TreeAdapter>> tree_adapters_;  // this is vector to handle different branch of zip
+  int64_t dataset_size_;
 };
 
 class BuildVocabConsumer : public TreeConsumer {
@@ -182,11 +242,13 @@ class BuildVocabConsumer : public TreeConsumer {
   /// BuildVocabConsumer Constructor which will call the base class default constructor.
   BuildVocabConsumer() = default;
 
+  ~BuildVocabConsumer() = default;
+
   Status Init(std::shared_ptr<DatasetNode> d) override;
 
   /// Start consuming
   /// \return  Status error code
-  Status Start();
+  virtual Status Start();
 
  protected:
   /// Method to return the name of the consumer

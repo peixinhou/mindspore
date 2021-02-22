@@ -99,8 +99,6 @@ int Pooling::UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &in
       attr->format = schema::Format::Format_NUM_OF_FORMAT;
     }
 
-    attr->avgMode = 1;
-
     auto pad_mode = GetValue<std::string>(prim.GetAttr("padding"));
     if (pad_mode == "VALID") {
       attr->padMode = schema::PadMode_VALID;
@@ -110,11 +108,11 @@ int Pooling::UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &in
       attr->padMode = schema::PadMode_NOTSET;
     }
 
-    auto kernel_size = GetValue<std::vector<int>>(prim.GetAttr("ksize"));
+    auto kernel_size = CastToInt(prim.GetAttr("ksize"));
     attr->windowH = kernel_size.at(2);
     attr->windowW = kernel_size.at(3);
 
-    auto stride = GetValue<std::vector<int>>(prim.GetAttr("strides"));
+    auto stride = CastToInt(prim.GetAttr("strides"));
     attr->strideH = stride.at(2);
     attr->strideW = stride.at(3);
     this->primitive_->value.value = attr;
@@ -181,12 +179,11 @@ int Pooling::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> out
   output->set_data_type(input->data_type());
   output->set_format(schema::Format::Format_NHWC);
   if (!infer_flag()) {
-    return RET_OK;
+    return RET_INFER_INVALID;
   }
   int input_h = input->shape().at(1);
   int input_w = input->shape().at(2);
 
-  MS_ASSERT(pooling_prim != nullptr);
   auto window_h = GetWindowH();
   auto window_w = GetWindowW();
   if (GetGlobal()) {
@@ -229,8 +226,8 @@ int Pooling::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> out
     }
   }
   auto input_shape = input->shape();
-  input_shape.at(1) = output_h;
-  input_shape.at(2) = output_w;
+  input_shape.at(1) = output_h > 0 ? output_h : 1;
+  input_shape.at(2) = output_w > 0 ? output_w : 1;
   output->set_shape(input_shape);
   return RET_OK;
 }

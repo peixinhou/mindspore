@@ -39,6 +39,7 @@
 #include "tools/common/tensor_util.h"
 #include "src/common/file_utils.h"
 #include "src/common/utils.h"
+#include "tools/converter/quantizer/weight_quantizer.h"
 
 using std::string;
 using std::vector;
@@ -103,7 +104,7 @@ STATUS DivergInfo::ComputeThreshold() {
     return RET_OK;
   }
 
-  if (method_x == kMethodOutlier) {
+  if (method_x == kMethodOutlier && this->min_datas.size() > 0) {
     this->percent_result = OutlierMethod(min_datas, max_datas);
     this->best_T = std::max(std::fabs(percent_result.first), std::fabs(percent_result.second));
     return RET_OK;
@@ -225,7 +226,7 @@ std::pair<CNodePtr, float> DivergInfo::GetScale() {
   MS_ASSERT(quant_max - quant_min != 0);
   float scale = (max_value - min_value) / (quant_max - quant_min);
   this->scale_tmp = scale;
-  MS_ASSERT(fabs(scale) < 1e-6);
+  MS_ASSERT(fabs(scale) <= 0.0f);
   return std::make_pair(this->cnode, scale);
 }
 
@@ -239,7 +240,7 @@ std::pair<CNodePtr, int32_t> DivergInfo::GetZeropoint() {
     MS_LOG(WARNING) << "unexpectd quant range, quant_min: " << quant_min << " quant_max: " << quant_max;
   }
   if (this->method_x == kMethodOutlier) {
-    MS_ASSERT(fabs(scale_tmp) < 1e-6);
+    MS_ASSERT(fabs(scale_tmp) <= 0.0f);
     zero_point = std::round(quant_max - percent_result.second / scale_tmp);
   }
   return std::make_pair(this->cnode, zero_point);
@@ -380,182 +381,16 @@ STATUS Calibrator::AddQuantizedOp(const CNodePtr &node) {
   return RET_OK;
 }
 
-void Calibrator::AddImage(const string &file, size_t index) {
-  if (index >= images_.size()) {
-    MS_LOG(ERROR) << "images_ size: " << images_.size() << " but index: " << index;
-    return;
-  }
-  auto exist = [](const string &file) {
-    struct stat buf {};
-    return stat(file.c_str(), &buf) == 0;
-  };
-  if (exist(file)) {
-    this->images_[index].push_back(file);
-  } else {
-    MS_LOG(WARNING) << "invalid image file path: " << file;
-  }
-}
-
 STATUS Calibrator::GenerateInputData(size_t input_index, size_t image_index,
                                      mindspore::tensor::MSTensor *tensor) const {
-  MS_ASSERT(tensor != nullptr);
-  if (input_index >= images_.size()) {
-    MS_LOG(ERROR) << "images_ size: " << images_.size() << " but input_index: " << input_index;
-    return RET_ERROR;
-  }
-  if (image_index >= images_[input_index].size()) {
-    MS_LOG(ERROR) << "images_[input_index] size: " << images_[input_index].size()
-                  << " but image_index: " << image_index;
-    return RET_ERROR;
-  }
-  string path = images_[input_index][image_index];
-  MS_LOG(INFO) << "read image: " << path;
-  size_t size;
-  char *bin_buf = ReadFile(path.c_str(), &size);
-  if (bin_buf == nullptr) {
-    MS_LOG(ERROR) << "ReadFile return nullptr";
-    return RET_ERROR;
-  }
-  auto data = tensor->MutableData();
-  if (data == nullptr) {
-    MS_LOG(ERROR) << "Get tensor MutableData return nullptr";
-    return RET_NULL_PTR;
-  }
-  if (size != tensor->Size()) {
-    MS_LOG(ERROR) << "the input data is not consistent with model input, file_size: " << size
-                  << " input tensor size: " << tensor->Size();
-    return RET_ERROR;
-  }
-  auto ret = memcpy_s(data, tensor->Size(), bin_buf, size);
-  if (ret != EOK) {
-    MS_LOG(ERROR) << "memcpy_s error: " << ret;
-    delete[] bin_buf;
-    return RET_ERROR;
-  }
-  delete[] bin_buf;
-  return RET_OK;
+  return CopyInputDataToTensor(input_index, image_index, images_, tensor);
 }
 
 STATUS Calibrator::CollectImages() {
-  this->images_.resize(config_param_.image_paths.size());
-  auto input_i = 0;
-  bool multi_input = config_param_.image_paths.size() > 1;
-  for (const auto &image_path : config_param_.image_paths) {
-    DIR *root = opendir(image_path.c_str());
-    if (root == nullptr) {
-      MS_LOG(ERROR) << "invalid image path: " << image_path;
-      return RET_PARAM_INVALID;
-    }
-    struct dirent *image_dir = readdir(root);
-    size_t count = 0;
-    while (image_dir != nullptr) {
-      string file_name(image_dir->d_name);
-      if (file_name != "." && file_name != "..") {
-        const std::string file_path = image_path + "/" + file_name;
-        if (multi_input || config_param_.batch_count == 0) {
-          this->AddImage(file_path, input_i);
-          count++;
-        } else if (count < config_param_.batch_count) {
-          this->AddImage(file_path, input_i);
-          count++;
-        } else {
-          break;
-        }
-      }
-      image_dir = readdir(root);
-    }
-    std::sort(images_[input_i].begin(), images_[input_i].end());
-    if (config_param_.batch_count != 0 && config_param_.batch_count < images_[input_i].size()) {
-      images_[input_i].resize(config_param_.batch_count);
-    }
-    closedir(root);
-    input_i++;
-  }
-  return RET_OK;
+  return CollectCalibInputs(config_param_.image_paths, config_param_.batch_count, &images_);
 }
 
-STATUS Calibrator::ReadConfig() {
-  if (config_path_.empty() || config_path_.length() > PATH_MAX) {
-    MS_LOG(ERROR) << "invalid config path!";
-    return RET_PARAM_INVALID;
-  }
-  // check whether config file path is valid
-  char *resolved_path = new (std::nothrow) char[PATH_MAX]{0};
-  if (resolved_path == nullptr) {
-    MS_LOG(ERROR) << "New an object failed.";
-    return RET_ERROR;
-  }
-#ifdef _WIN32
-  if (_fullpath(resolved_path, config_path_.c_str(), 1024) != nullptr) {
-    config_path_ = string(resolved_path);
-  }
-#else
-  if (realpath(config_path_.c_str(), resolved_path) != nullptr) {
-    config_path_ = string(resolved_path);
-  }
-#endif
-  std::ifstream fs(config_path_.c_str(), std::ifstream::in);
-  if (!fs.is_open()) {
-    MS_LOG(ERROR) << "config proto file %s open failed: " << config_path_;
-    delete[] resolved_path;
-    return RET_PARAM_INVALID;
-  }
-  std::string line;
-  while (std::getline(fs, line)) {
-    auto index = line.find('=');
-    if (index == std::string::npos) {
-      MS_LOG(ERROR) << "the config file is invalid, can not find '=', please check";
-      delete[] resolved_path;
-      return RET_PARAM_INVALID;
-    }
-    auto key = line.substr(0, index);
-    auto value = line.substr(index + 1);
-    Trim(&key);
-    Trim(&value);
-    if (key == "image_path") {
-      auto &raw_image_paths = value;
-      auto ind = raw_image_paths.find(',');
-      while (ind != std::string::npos) {
-        auto image_path = raw_image_paths.substr(0, ind);
-        Trim(&image_path);
-        config_param_.image_paths.push_back(image_path);
-        raw_image_paths = raw_image_paths.substr(ind + 1);
-        Trim(&raw_image_paths);
-        ind = raw_image_paths.find(',');
-      }
-      config_param_.image_paths.push_back(raw_image_paths);
-    } else if (key == "batch_count") {
-      config_param_.batch_count = std::stoul(value);
-    } else if (key == "thread_num") {
-      config_param_.thread_num = std::stoul(value);
-    } else if (key == "method_x") {
-      if (value != kMethodKL && value != kMethodMaxMin && value != kMethodOutlier) {
-        MS_LOG(WARNING) << "unsupported method_x: " << value << ". Use default value.";
-      } else {
-        config_param_.method_x = value;
-      }
-    } else if (key == "bias_correction") {
-      std::for_each(value.begin(), value.end(), ::tolower);
-      if (value == "true") {
-        config_param_.bias_correction = true;
-      }
-    } else {
-      MS_LOG(WARNING) << "unsupported parameter";
-    }
-  }
-
-  for (const auto &path : config_param_.image_paths) {
-    MS_LOG(DEBUG) << "calibration data_path: " << path;
-  }
-  MS_LOG(DEBUG) << "batch_count: " << config_param_.batch_count << "  "
-                << "method_x: " << config_param_.method_x << "  "
-                << "thread_num: " << config_param_.thread_num << " "
-                << "bias_correction: " << config_param_.bias_correction;
-
-  delete[] resolved_path;
-  fs.close();
-  return RET_OK;
-}
+STATUS Calibrator::ReadConfig() { return ParseConfigFile(config_path_, &config_param_); }
 
 Calibrator::Calibrator(string path, size_t bit_num, int quant_max, int quant_min)
     : config_path_(std::move(path)), bit_num_(bit_num), quant_max_(quant_max), quant_min_(quant_min) {}
@@ -583,6 +418,13 @@ PostTrainingQuantizer::PostTrainingQuantizer(FuncGraphPtr graph, string path, in
   }
 }
 
+PostTrainingQuantizer::~PostTrainingQuantizer() {
+  delete fp32_session_;
+  delete fp32_model_;
+  delete int8_session_;
+  delete int8_model_;
+}
+
 STATUS PostTrainingQuantizer::DoQuantInput(double scale, int32_t zeropoint, struct MaxMin *max_min,
                                            const std::shared_ptr<PrimitiveC> &lite_primitive) const {
   MS_ASSERT(max_min != nullptr);
@@ -595,6 +437,8 @@ STATUS PostTrainingQuantizer::DoQuantInput(double scale, int32_t zeropoint, stru
   quant_param.numBits = bit_num;
   quant_param.narrowRange = false;
   quant_param.inited = true;
+  quant_param.roundType = 1;
+  quant_param.multiplier = 1;
   std::vector<schema::QuantParamT> quant_params = {quant_param};
   lite_primitive->AddInputQuantParam(quant_params);
   return RET_OK;
@@ -612,13 +456,15 @@ STATUS PostTrainingQuantizer::DoQuantOutput(double scale, int zeropoint, struct 
   quant_param.numBits = bit_num;
   quant_param.narrowRange = false;
   quant_param.inited = true;
+  quant_param.roundType = 1;
+  quant_param.multiplier = 1;
   std::vector<schema::QuantParamT> quant_params = {quant_param};
   lite_primitive->AddOutputQuantParam(quant_params);
   return RET_OK;
 }
 
-STATUS PostTrainingQuantizer::DoWeightQuant(const AnfNodePtr &weight, std::shared_ptr<PrimitiveC> primitive_c,
-                                            bool perchanel) const {
+STATUS PostTrainingQuantizer::DoWeightQuant(const std::string &op_name, const AnfNodePtr &weight,
+                                            std::shared_ptr<PrimitiveC> primitive_c, bool perchanel) const {
   MS_ASSERT(weight != nullptr);
   MS_ASSERT(lite_primitive != nullptr);
   // perlayer
@@ -629,15 +475,28 @@ STATUS PostTrainingQuantizer::DoWeightQuant(const AnfNodePtr &weight, std::share
   auto parameter = std::dynamic_pointer_cast<Parameter>(weight);
   if (parameter == nullptr) {
     MS_LOG(ERROR) << weight->fullname_with_scope() << " can not cast to Parameter";
-    return RET_ERROR;
+    return RET_NULL_PTR;
   }
   ParamValueLitePtr paramValue = std::dynamic_pointer_cast<ParamValueLite>(parameter->default_param());
   if (paramValue == nullptr) {
     MS_LOG(ERROR) << weight->fullname_with_scope() << " can not get value";
-    return RET_ERROR;
+    return RET_NULL_PTR;
   }
-  auto status = QuantFilter<int8_t>(paramValue, std::move(primitive_c), QuantType_PostTraining, quant_max, quant_min,
-                                    bit_num, perchanel);
+  auto bit_num_t = bit_num;
+  auto quant_max_t = quant_max;
+  auto quant_min_t = quant_min;
+  if (calibrator_->config_param_.mixed) {
+    auto opname_iter = opname_bit_.find(op_name);
+    if (opname_iter == opname_bit_.end()) {
+      MS_LOG(WARNING) << op_name << " not in the opname_bit_ map";
+    } else {
+      bit_num_t = opname_iter->second;
+      quant_max_t = (1 << (unsigned int)(bit_num_t - 1)) - 1;
+      quant_min_t = -(1 << (unsigned int)(bit_num_t - 1));
+    }
+  }
+  auto status = QuantFilter<int8_t>(paramValue, std::move(primitive_c), QuantType_PostTraining, quant_max_t,
+                                    quant_min_t, bit_num_t, perchanel);
   if (status != RET_OK) {
     MS_LOG(ERROR) << "QuantFilter failed: " << status;
     return status;
@@ -646,7 +505,7 @@ STATUS PostTrainingQuantizer::DoWeightQuant(const AnfNodePtr &weight, std::share
   auto abstractBase = parameter->abstract();
   if (abstractBase == nullptr) {
     MS_LOG(ERROR) << "Abstract of parameter is nullptr, " << parameter->name();
-    return RET_ERROR;
+    return RET_NULL_PTR;
   }
   if (!utils::isa<abstract::AbstractTensorPtr>(abstractBase)) {
     MS_LOG(ERROR) << "Abstract of parameter should be anstract tensor, " << parameter->name();
@@ -655,7 +514,7 @@ STATUS PostTrainingQuantizer::DoWeightQuant(const AnfNodePtr &weight, std::share
   auto abstractTensor = utils::cast<abstract::AbstractTensorPtr>(abstractBase);
   if (abstractTensor == nullptr || abstractTensor->element() == nullptr) {
     MS_LOG(ERROR) << "abstractTensor is nullptr, " << parameter->name();
-    return RET_ERROR;
+    return RET_NULL_PTR;
   }
   abstractTensor->element()->set_type(TypeIdToType(kNumberTypeInt8));
   return RET_OK;
@@ -716,29 +575,23 @@ STATUS PostTrainingQuantizer::DoBiasQuant(const AnfNodePtr &bias, const std::sha
     quant_params.emplace_back(quant_param);
   }
   // quant bias data
-  auto *quant_datas = new (std::nothrow) int32_t[shape_size];
-  if (quant_datas == nullptr) {
-    MS_LOG(ERROR) << "null pointer dereferencing.";
-    return RET_NULL_PTR;
-  }
+  std::vector<int32_t> quant_datas(shape_size);
+
   auto *raw_datas = static_cast<float *>(bias_param->tensor_addr());
   double bias_scale_tmp;
   const constexpr int32_t quanted_bias_abs_limit = 0.5 * INT32_MAX;
-  for (size_t i = 0; i < shape_size; i++) {
-    if (bias_scales.size() == 1) {
-      bias_scale_tmp = bias_scales[0];
-    } else {
+
+  if (bias_scales.size() == shape_size) {
+    for (size_t i = 0; i < shape_size; i++) {
       bias_scale_tmp = bias_scales[i];
-    }
-    if (fabs(bias_scale_tmp) <= 0.0f) {
-      MS_LOG(ERROR) << "divisor 'bias_scale_tmp' cannot be 0.";
-      return RET_ERROR;
-    }
-    if (std::abs(raw_datas[i] / bias_scale_tmp) >= quanted_bias_abs_limit) {
-      MS_LOG(DEBUG) << "quanted bias over flow, maybe the scale of weight: " << active_weight_quant_params[1][i].scale
-                    << " is too small, need to update";
-      // update filter scale and zp
-      if (input_scales.size() == 1 && active_weight_quant_params[1].size() == shape_size) {
+      if (fabs(bias_scale_tmp) <= 0.0f) {
+        MS_LOG(ERROR) << "divisor 'bias_scale_tmp' cannot be 0.";
+        return RET_ERROR;
+      }
+      if (std::abs(raw_datas[i] / bias_scale_tmp) >= quanted_bias_abs_limit) {
+        MS_LOG(DEBUG) << "quanted bias over flow, maybe the scale of weight: " << active_weight_quant_params[1][i].scale
+                      << " is too small, need to update";
+        // update filter scale and zp
         double activate_scale = input_scales[0];
         double filter_scale = std::abs(raw_datas[i]) / (activate_scale * quanted_bias_abs_limit);
         active_weight_quant_params[1][i].scale = filter_scale;
@@ -747,22 +600,52 @@ STATUS PostTrainingQuantizer::DoBiasQuant(const AnfNodePtr &bias, const std::sha
         bias_scale_tmp = std::abs(raw_datas[i]) / quanted_bias_abs_limit;
         quant_params[i].scale = bias_scale_tmp;
         MS_LOG(DEBUG) << "new filter scale: " << filter_scale;
-      } else {
-        MS_LOG(WARNING) << "unexpected input_scales size: " << input_scales.size()
-                        << " weight_scales size: " << active_weight_quant_params[1].size();
+      }
+      auto quant_data = (int32_t)std::round(raw_datas[i] / bias_scale_tmp);
+      quant_datas[i] = quant_data;
+    }
+  } else if (bias_scales.size() == 1) {
+    // for fc, per tensor quant
+    bias_scale_tmp = quant_params[0].scale;
+    float max_raw_data = 0.0f;
+    for (size_t i = 0; i < shape_size; i++) {
+      if (std::abs(raw_datas[i]) > max_raw_data) {
+        max_raw_data = std::abs(raw_datas[i]);
       }
     }
-    auto quant_data = (int32_t)std::round(raw_datas[i] / bias_scale_tmp);
-    quant_datas[i] = quant_data;
-  }
-  primitive_c->AddInputQuantParam(quant_params);
-  auto ret = memcpy_s(bias_param->tensor_addr(), bias_param->tensor_size(), quant_datas, shape_size * sizeof(int32_t));
-  if (ret != EOK) {
-    MS_LOG(ERROR) << "memcpy_s failed.";
-    delete[] quant_datas;
+    if (fabs(bias_scale_tmp) <= 0.0f) {
+      MS_LOG(ERROR) << "divisor 'bias_scale_tmp' cannot be 0.";
+      return RET_ERROR;
+    }
+    if (std::abs(max_raw_data / bias_scale_tmp) >= quanted_bias_abs_limit) {
+      MS_LOG(DEBUG) << "quanted bias over flow, maybe the scale of weight: " << active_weight_quant_params[1][0].scale
+                    << " is too small, need to update";
+      double activate_scale = input_scales[0];
+      double filter_scale = std::abs(max_raw_data) / (activate_scale * quanted_bias_abs_limit);
+      active_weight_quant_params[1][0].scale = filter_scale;
+      active_weight_quant_params[1][0].zeroPoint = 0;
+      primitive_c->set_input_quant_params(active_weight_quant_params);
+      bias_scale_tmp = max_raw_data / quanted_bias_abs_limit;
+      quant_params[0].scale = bias_scale_tmp;
+      MS_LOG(DEBUG) << "new filter scale: " << filter_scale;
+    }
+    for (size_t i = 0; i < shape_size; i++) {
+      auto quant_data = (int32_t)std::round(raw_datas[i] / bias_scale_tmp);
+      quant_datas[i] = quant_data;
+    }
+  } else {
+    MS_LOG(ERROR) << "unexpected input_scales size: " << input_scales.size()
+                  << " weight_scales size: " << active_weight_quant_params[1].size();
     return RET_ERROR;
   }
-  delete[] quant_datas;
+
+  primitive_c->AddInputQuantParam(quant_params);
+  auto ret =
+    memcpy_s(bias_param->tensor_addr(), bias_param->tensor_size(), quant_datas.data(), shape_size * sizeof(int32_t));
+  if (ret != EOK) {
+    MS_LOG(ERROR) << "memcpy_s failed.";
+    return RET_ERROR;
+  }
   // set dtype
   auto abstractBase = bias_parameter_ptr->abstract();
   if (abstractBase == nullptr) {
@@ -809,7 +692,7 @@ STATUS PostTrainingQuantizer::QuantNode() {
         MS_LOG(WARNING) << "index value node is null";
         continue;
       }
-      size_t index = GetValue<int>(index_value_node->value());
+      size_t index = CastToInt(index_value_node->value()).front();
       auto input_node = cnode->input(1);
       MS_ASSERT(input_node != nullptr);
       auto input_cnode = std::dynamic_pointer_cast<mindspore::CNode>(input_node);
@@ -832,7 +715,7 @@ STATUS PostTrainingQuantizer::QuantNode() {
       continue;
     } else if (op_type != PrimitiveType_Conv2D && op_type != PrimitiveType_DepthwiseConv2D &&
                op_type != PrimitiveType_DeConv2D && op_type != PrimitiveType_DeDepthwiseConv2D &&
-               op_type != PrimitiveType_FullConnection) {
+               op_type != PrimitiveType_FullConnection && op_type != PrimitiveType_LayerNorm) {
       for (size_t i = 1; i < cnode->inputs().size(); i++) {
         auto input_node = cnode->input(i);
         MS_ASSERT(input_node != nullptr);
@@ -843,6 +726,9 @@ STATUS PostTrainingQuantizer::QuantNode() {
           }
         }
         if (input_node->isa<mindspore::CNode>()) {
+          if (op_type == PrimitiveType_Gather) {
+            continue;
+          }
           auto input_cnode = std::dynamic_pointer_cast<mindspore::CNode>(input_node);
           auto input_cnode_primitive_c = GetValueNode<std::shared_ptr<PrimitiveC>>(input_cnode->input(0));
           if (input_cnode_primitive_c == nullptr) {
@@ -890,7 +776,7 @@ STATUS PostTrainingQuantizer::QuantNode() {
           }
           if (abstractTensor->element()->GetTypeTrack()->type_id() == kNumberTypeFloat32) {
             MS_LOG(DEBUG) << "this parameter do quant";
-            DoWeightQuant(input_node, primitive_c, false);
+            DoWeightQuant(op_name, input_node, primitive_c, false);
           } else {
             MS_LOG(DEBUG) << "this parameter no need to do quant";
           }
@@ -907,12 +793,12 @@ STATUS PostTrainingQuantizer::QuantNode() {
       DoQuantInput(input_scale, input_zp, &input_min_max, primitive_c);
       // do weight quant
       auto weight = cnode->input(2);
-      bool perchannel = per_channel_;
-      if (op_type == PrimitiveType_FullConnection || op_type == PrimitiveType_DeConv2D ||
-          op_type == PrimitiveType_DeDepthwiseConv2D) {
-        perchannel = false;
+      bool perchannel = false;
+      if (op_type == PrimitiveType_Conv2D || op_type == PrimitiveType_DepthwiseConv2D ||
+          op_type == PrimitiveType_FullConnection) {
+        perchannel = true;
       }
-      DoWeightQuant(weight, primitive_c, perchannel);
+      DoWeightQuant(op_name, weight, primitive_c, perchannel);
       // do bias quant
       if (cnode->inputs().size() == 4) {
         auto bias = cnode->input(3);
@@ -951,18 +837,8 @@ STATUS PostTrainingQuantizer::UpdateDivergInverval() {
  * 3. save quantied node
  **/
 STATUS PostTrainingQuantizer::PreProcess() {
-  if (this->calibrator_ == nullptr) {
-    MS_LOG(ERROR) << "calibrator is null!";
-    return RET_ERROR;
-  }
-  // 1. generate config param
-  STATUS status = calibrator_->ReadConfig();
-  if (status != RET_OK) {
-    MS_LOG(ERROR) << "read proto text failed!";
-    return status;
-  }
   // 2. collect image files
-  status = calibrator_->CollectImages();
+  auto status = calibrator_->CollectImages();
   if (status != RET_OK) {
     MS_LOG(ERROR) << "collect images failed!";
     return status;
@@ -1080,7 +956,6 @@ STATUS PostTrainingQuantizer::DoInference() {
       size_t output_i = 0;
       for (const auto &tensor : afterOutputs) {
         const auto *tensor_data = static_cast<const float *>(tensor->MutableData());
-        MS_ASSERT(tensor_data != nullptr);
         size_t elem_count = tensor->ElementsNum();
         vector<float> data(tensor_data, tensor_data + elem_count);
         this->calibrator_->RecordMaxValue(data, (*diverg_info_map)[callParam.node_name][output_i]);
@@ -1422,7 +1297,10 @@ STATUS PostTrainingQuantizer::BiasCorrection(const FuncGraphPtr &func_graph) {
 
         ParamValueLitePtr param_value = std::make_shared<ParamValueLite>();
         MS_ASSERT(param_value != nullptr);
-        param_value->set_tensor_shape(shape);
+        std::vector<int32_t> shape_vector;
+        (void)std::transform(shape.begin(), shape.end(), std::back_inserter(shape_vector),
+                             [](const int64_t &value) { return static_cast<int32_t>(value); });
+        param_value->set_tensor_shape(shape_vector);
         param_value->set_tensor_type(kNumberTypeFloat32);
 
         auto size = sizeof(float) * bias_diff.size();
@@ -1437,30 +1315,10 @@ STATUS PostTrainingQuantizer::BiasCorrection(const FuncGraphPtr &func_graph) {
           delete[] tensor_data;
           return false;
         }
-        param_value->set_tensor_addr(tensor_data);
-        param_value->set_tensor_size(size);
+        param_value->SetTensorData(tensor_data, size);
         parameter->set_default_param(param_value);
         cnode->add_input(parameter);
         DoBiasQuant(parameter, primitive_c);
-
-        auto op_type = (schema::PrimitiveType)primitive_c->Type();
-        if (op_type == schema::PrimitiveType_Conv2D) {
-          auto conv2d = primitive_c->primitiveT()->value.AsConv2D();
-          if (conv2d == nullptr) {
-            MS_LOG(ERROR) << "conv2d is null";
-            delete[] tensor_data;
-            return RET_ERROR;
-          }
-          conv2d->hasBias = true;
-        } else if (op_type == schema::PrimitiveType_DepthwiseConv2D) {
-          auto depthwise_conv2d = primitive_c->primitiveT()->value.AsDepthwiseConv2D();
-          if (depthwise_conv2d == nullptr) {
-            MS_LOG(ERROR) << "conv2d is null";
-            delete[] tensor_data;
-            return RET_ERROR;
-          }
-          depthwise_conv2d->hasBias = true;
-        }
         delete[] tensor_data;
       } else {
         MS_LOG(ERROR) << "unexpected input_quant_params size: " << input_quant_params.size();
@@ -1502,7 +1360,9 @@ STATUS PostTrainingQuantizer::CollectDataFrequency() {
       }
       for (size_t i = 0; i < (*diverg_info_map)[callParam.node_name].size(); i++) {
         auto tensor = beforeInputs[i];
+        MS_ASSERT(tensor != nullptr);
         const auto *tensor_data = static_cast<const float *>(tensor->MutableData());
+        MS_ASSERT(tensor_data != nullptr);
         size_t elem_count = tensor->ElementsNum();
         vector<float> data(tensor_data, tensor_data + elem_count);
         this->calibrator_->UpdateDataFrequency(data, (*diverg_info_map)[callParam.node_name][i]);
@@ -1523,6 +1383,7 @@ STATUS PostTrainingQuantizer::CollectDataFrequency() {
       int output_i = 0;
       for (const auto &tensor : after_outputs) {
         const auto *tensor_data = static_cast<const float *>(tensor->MutableData());
+        MS_ASSERT(tensor_data != nullptr);
         size_t elem_count = tensor->ElementsNum();
         vector<float> data(tensor_data, tensor_data + elem_count);
         this->calibrator_->UpdateDataFrequency(data, (*diverg_info_map)[call_param.node_name][output_i]);
@@ -1544,51 +1405,48 @@ STATUS PostTrainingQuantizer::ComputeThreshold() { return this->calibrator_->Com
 
 STATUS PostTrainingQuantizer::DoQuantize(FuncGraphPtr func_graph) {
   MS_LOG(INFO) << "start to parse config file";
-  STATUS status = PreProcess();
+  if (this->calibrator_ == nullptr) {
+    MS_LOG(ERROR) << "calibrator is null!";
+    return RET_ERROR;
+  }
+  // 1. generate config param
+  STATUS status = calibrator_->ReadConfig();
+  if (status != RET_OK) {
+    MS_LOG(ERROR) << "read proto text failed!";
+    return status;
+  }
+
+  if (calibrator_->config_param_.mixed) {
+    // get opname_bit map
+    auto weight_quant_func_graph = CopyFuncGraph(func_graph);
+    if (weight_quant_func_graph == nullptr) {
+      MS_LOG(ERROR) << "CopyFuncGraph error";
+      return RET_ERROR;
+    }
+    WeightQuantizer weight_quantizer(weight_quant_func_graph, calibrator_->config_param_);
+    weight_quantizer.flags = flags;
+    status = weight_quantizer.DoQuantize(weight_quant_func_graph);
+    if (status != RET_OK) {
+      MS_LOG(ERROR) << "Do mix weight quant error";
+      return RET_ERROR;
+    }
+    opname_bit_ = weight_quantizer.opname_bit_;
+  }
+
+  status = PreProcess();
   if (status != RET_OK) {
     MS_LOG(ERROR) << "do pre process failed!";
     return status;
   }
+
   // anf -- fb
-  auto meta_graph = Export(func_graph, true, true);
-  if (meta_graph == nullptr) {
-    MS_LOG(ERROR) << "Export to meta_graph return nullptr";
-    return RET_ERROR;
-  }
-
-  // transform
-  GraphDefTransform transform;
-  transform.SetGraphDef(meta_graph);
   flags.quantType = schema::QuantType_QUANT_NONE;
-  status = transform.Transform(flags);
-  if (status != RET_OK) {
-    MS_LOG(ERROR) << "FBTransform model failed " << status;
-    return RET_ERROR;
-  }
   MS_LOG(INFO) << "start create session";
-  flatbuffers::FlatBufferBuilder builder(1024);
-  auto offset = schema::MetaGraph::Pack(builder, meta_graph);
-  builder.Finish(offset);
-  size_t size = builder.GetSize();
-  auto *content = reinterpret_cast<const char *>(builder.GetBufferPointer());
-  if (content == nullptr) {
-    MS_LOG(ERROR) << "GetBufferPointer nullptr";
-    return RET_ERROR;
-  }
-  auto model = lite::Model::Import(content, size);
-
-  Context ctx;
-  ctx.thread_num_ = calibrator_->GetThreadNum();
-
-  fp32_session_ = dynamic_cast<mindspore::lite::LiteSession *>(session::LiteSession::CreateSession(&ctx));
-  if (fp32_session_ == nullptr) {
+  auto sm = CreateSessionByFuncGraph(func_graph, flags, calibrator_->GetThreadNum());
+  fp32_session_ = sm.session;
+  fp32_model_ = sm.model;
+  if (fp32_session_ == nullptr || fp32_model_ == nullptr) {
     MS_LOG(ERROR) << "create session failed!";
-    return RET_ERROR;
-  }
-
-  auto ret = fp32_session_->CompileGraph(model);
-  if (ret != lite::RET_OK) {
-    MS_LOG(ERROR) << "compile graph error";
     return RET_ERROR;
   }
 
@@ -1630,46 +1488,13 @@ STATUS PostTrainingQuantizer::DoQuantize(FuncGraphPtr func_graph) {
 
   if (calibrator_->GetBiasCorrection()) {
     // init in8 session
-    // anf -- fb
-    auto int8_meta_graph = Export(func_graph, true, true);
-    if (int8_meta_graph == nullptr) {
-      MS_LOG(ERROR) << "Export to int8_meta_graph return nullptr";
-      return RET_ERROR;
-    }
-
-    // transform
-    GraphDefTransform fb_transform;
-    fb_transform.SetGraphDef(int8_meta_graph);
+    MS_LOG(INFO) << "create quant session";
     flags.quantType = schema::QuantType_PostTraining;
-    status = fb_transform.Transform(flags);
-    if (status != RET_OK) {
-      MS_LOG(ERROR) << "FBTransform model failed " << status;
-      return RET_ERROR;
-    }
-    MS_LOG(INFO) << "start create quantized session";
-    flatbuffers::FlatBufferBuilder int8_builder(1024);
-    auto int8_offset = schema::MetaGraph::Pack(int8_builder, int8_meta_graph);
-    int8_builder.Finish(int8_offset);
-    size = int8_builder.GetSize();
-    auto *int8_content = reinterpret_cast<const char *>(int8_builder.GetBufferPointer());
-    if (int8_content == nullptr) {
-      MS_LOG(ERROR) << "GetBufferPointer nullptr";
-      return RET_ERROR;
-    }
-    auto int8_model = lite::Model::Import(int8_content, size);
-
-    Context int8_ctx;
-    int8_ctx.thread_num_ = calibrator_->GetThreadNum();
-    int8_ctx.device_list_[0].device_info_.cpu_device_info_.cpu_bind_mode_ = HIGHER_CPU;
-
-    int8_session_ = dynamic_cast<mindspore::lite::LiteSession *>(session::LiteSession::CreateSession(&int8_ctx));
-    if (int8_session_ == nullptr) {
+    auto int8_sm = CreateSessionByFuncGraph(func_graph, flags, calibrator_->GetThreadNum());
+    int8_session_ = int8_sm.session;
+    int8_model_ = int8_sm.model;
+    if (int8_session_ == nullptr || int8_model_ == nullptr) {
       MS_LOG(ERROR) << "create session failed!";
-      return RET_ERROR;
-    }
-    ret = int8_session_->CompileGraph(int8_model);
-    if (ret != lite::RET_OK) {
-      MS_LOG(ERROR) << "compile graph error";
       return RET_ERROR;
     }
 

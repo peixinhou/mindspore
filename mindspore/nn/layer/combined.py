@@ -30,9 +30,9 @@ __all__ = [
 
 class Conv2dBnAct(Cell):
     r"""
-    A combination of convolution, Batchnorm, activation layer.
+    A combination of convolution, Batchnorm, and activation layer.
 
-    This part is a more detailed overview of Conv2d op.
+    This part is a more detailed overview of Conv2d operation.
 
     Args:
         in_channels (int): The number of input channel :math:`C_{in}`.
@@ -76,11 +76,15 @@ class Conv2dBnAct(Cell):
     Outputs:
         Tensor of shape :math:`(N, C_{out}, H_{out}, W_{out})`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
-        >>> net = nn.Conv2dBnAct(120, 240, 4, has_bn=True, activation='ReLU')
+        >>> net = nn.Conv2dBnAct(120, 240, 4, has_bn=True, activation='relu')
         >>> input = Tensor(np.ones([1, 120, 1024, 640]), mindspore.float32)
         >>> result = net(input)
-        >>> result.shape
+        >>> output = result.shape
+        >>> print(output)
         (1, 240, 1024, 640)
     """
 
@@ -97,7 +101,7 @@ class Conv2dBnAct(Cell):
                  weight_init='normal',
                  bias_init='zeros',
                  has_bn=False,
-                 momentum=0.9,
+                 momentum=0.997,
                  eps=1e-5,
                  activation=None,
                  alpha=0.2,
@@ -150,7 +154,6 @@ class DenseBnAct(Cell):
         bias_init (Union[Tensor, str, Initializer, numbers.Number]): The trainable bias_init parameter. The dtype is
             same as input. The values of str refer to the function `initializer`. Default: 'zeros'.
         has_bias (bool): Specifies whether the layer uses a bias vector. Default: True.
-        activation (Cell): The regularization function applied to the output of the layer, eg. 'ReLU'. Default: None.
         has_bn (bool): Specifies to use batchnorm or not. Default: False.
         momentum (float): Momentum for moving average for batchnorm, must be [0, 1]. Default:0.9
         eps (float): Term added to the denominator to improve numerical stability for batchnorm, should be greater
@@ -167,11 +170,15 @@ class DenseBnAct(Cell):
     Outputs:
         Tensor of shape :math:`(N, out\_channels)`.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> net = nn.DenseBnAct(3, 4)
         >>> input = Tensor(np.random.randint(0, 255, [2, 3]), mindspore.float32)
         >>> result = net(input)
-        >>> result.shape
+        >>> output = result.shape
+        >>> print(output)
         (2, 4)
     """
 

@@ -22,6 +22,7 @@
 #include <utility>
 #include <memory>
 #include <map>
+#include <set>
 #include "backend/session/session_context.h"
 #include "backend/session/kernel_graph.h"
 #include "backend/session/anf_runtime_algorithm.h"
@@ -49,37 +50,55 @@ struct OpRunInfo {
   std::string op_name;
   PrimitivePtr primitive;
   AbstractBasePtr abstract;
-  ValuePtr value = nullptr;
   bool is_dynamic_shape = false;
+  bool is_auto_mixed_precision = false;
+  std::string next_op_name = "";
+#if defined(__APPLE__)
+  int next_input_index = 0;
+#else
+  size_t next_input_index = 0;
+#endif
 };
+
+struct InputTensorInfo {
+  std::vector<tensor::TensorPtr> input_tensors;
+  std::vector<int64_t> input_tensors_mask;
+  std::set<KernelWithIndex> input_kernel;
+};
+
+struct OutputTensorInfo {
+  tensor::TensorPtr output_stub_tensor;
+  bool is_weight;
+};
+
 using OpRunInfoPtr = std::shared_ptr<OpRunInfo>;
 class Executor;
+
 class SessionBasic : public std::enable_shared_from_this<SessionBasic> {
  public:
-  SessionBasic() : context_(nullptr), summary_callback_(nullptr), device_id_(0), run_op_graph_id_(0) {
+  SessionBasic() : context_(nullptr), summary_callback_(nullptr), device_id_(0) {
 #if !defined(_WIN32) && !defined(_WIN64)
     debugger_ = nullptr;
 #endif
   }
 
   virtual void Init(uint32_t device_id) { device_id_ = device_id; }
-
-  void InitDevice(const std::string &device_name, uint32_t device_id);
-
+  void InitExecutor(const std::string &device_name, uint32_t device_id);
+  virtual void SyncStream() {}
   virtual ~SessionBasic() { summary_callback_ = nullptr; }
 
-  GraphId CompileGraph(const AnfNodePtrList &lst, const AnfNodePtrList &outputs);
+  GraphId CompileGraph(const GraphSegmentPtr &segment, const AnfNodePtrList &outputs);
   GraphId CompileGraph(NotNull<FuncGraphPtr> func_graph);
   void BuildGraph(GraphId graphId);
   void RunGraph(const GraphId &graph_id, const std::vector<tensor::TensorPtr> &inputs, VectorRef *outputs);
   void RunGraphAsync(const GraphId &graph_id, const std::vector<tensor::TensorPtr> &inputs, VectorRef *outputs);
-  void BuildOp(OpRunInfo *, const GraphInfo &, const std::vector<tensor::TensorPtr> &input_tensors,
-               const std::vector<int> &tensors_mask);
-  void RunOp(OpRunInfo *, const GraphInfo &, const std::vector<tensor::TensorPtr> &input_tensors, VectorRef *outputs);
+  void RunOp(OpRunInfo *, const GraphInfo &, std::vector<tensor::TensorPtr> *input_tensors, VectorRef *outputs,
+             const std::vector<int64_t> &tensors_mask);
+  void RunOpsInGraph(const GraphId &graph_id, const std::vector<tensor::TensorPtr> &inputs, VectorRef *outputs);
 
   virtual void RegisterSummaryCallBackFunc(const CallBackFunc &callback);
 
-  void CreateCNodeKernelGraph(const AnfNodePtr node, KernelGraphPtr graph);
+  bool CreateCNodeOfKernelGraph(const AnfNodePtr &node, KernelGraph *graph);
 
   std::shared_ptr<KernelGraph> ConstructKernelGraph(const AnfNodePtrList &lst, const AnfNodePtrList &outputs);
   std::shared_ptr<KernelGraph> ConstructKernelGraph(const FuncGraphPtr &func_graph,
@@ -90,18 +109,24 @@ class SessionBasic : public std::enable_shared_from_this<SessionBasic> {
   CNodePtr CreateNewCNode(CNodePtr cnode, KernelGraph *graph);
 
   // get graph id in child graphs by ME front anf node pointer
-  virtual GraphId GetGraphIdByNode(const AnfNodePtr &) const { return kInvalidGraphId; }
+  virtual GraphId GetGraphIdByNode(const AnfNodePtr &) const;
   virtual GraphId GetFinalRunGraph() const { return kInvalidGraphId; }
-  void CheckPSModeConsistence(const KernelGraphPtr &Kernel_graph);
   void AssignParamKey(const KernelGraphPtr &kernel_graph);
   void InitPSParamAndOptim(const KernelGraphPtr &kernel_graph, const std::vector<tensor::TensorPtr> &inputs_const);
+  bool IsGetNextGraph(const GraphId &graph_id, std::string *channel_name);
   virtual bool CheckModelInputs(uint32_t graph_id, const std::vector<tensor::TensorPtr> &inputs,
                                 std::string *error_msg) const {
     return true;
   }
-  virtual void GetModelInputsInfo(uint32_t graph_id, std::vector<tensor::TensorPtr> *inputs) const {}
+  void GetModelInputsInfo(uint32_t graph_id, std::vector<tensor::TensorPtr> *inputs,
+                          std::vector<std::string> *inputs_name) const;
+  void GetModelOutputsInfo(uint32_t graph_id, std::vector<tensor::TensorPtr> *outputs,
+                           std::vector<std::string> *outputs_name) const;
   std::vector<tensor::TensorPtr> GetInputNeedLockTensors(const GraphId &graph_id,
                                                          const std::vector<tensor::TensorPtr> &inputs);
+  // Get graph by graph id, if not exist return null ptr
+  KernelGraphPtr GetGraph(GraphId graph_id) const;
+  void ClearGraph();
 #ifdef ENABLE_DEBUGGER
   // set debugger
   void SetDebugger() {
@@ -113,7 +138,7 @@ class SessionBasic : public std::enable_shared_from_this<SessionBasic> {
 #endif
 
  private:
-  CNodePtr CreateSwitchInput(const AnfNodePtr &node_input, KernelGraph *graph);
+  CNodePtr CreateSwitchInput(const CNodePtr &cnode, const AnfNodePtr &node_input, KernelGraph *graph);
   std::vector<AnfNodePtr> CreateSwitchOrPartialNode(const CNodePtr &cnode, KernelGraph *graph);
   std::vector<AnfNodePtr> CreateValueNode(const CNodePtr &cnode, KernelGraph *graph);
   void CreateCNodeInputs(const CNodePtr &cnode, KernelGraph *graph, std::vector<AnfNodePtr> *cnode_inputs);
@@ -121,6 +146,8 @@ class SessionBasic : public std::enable_shared_from_this<SessionBasic> {
   void GetCNodeInfo(const CNodePtr &cnode, std::vector<AnfNodePtr> *cnode_inputs);
   void GetNewCNodeInputs(const CNodePtr &cnode, KernelGraph *graph, std::vector<AnfNodePtr> *cnode_inputs,
                          std::unordered_map<AnfNodePtr, AnfNodePtr> *other_graph_cnode);
+  std::vector<AnfNodePtr> CreateCallSwitchLayerInputs(const CNodePtr &cnode, KernelGraph *graph);
+  void CreateCallNodeReturnFunction(const CNodePtr &cnode, const AnfNodePtr &real_input);
 
  protected:
   friend class Executor;
@@ -128,11 +155,13 @@ class SessionBasic : public std::enable_shared_from_this<SessionBasic> {
   friend class CompileGraphTask;
   friend class BuildGraphTask;
   friend class RunGraphTask;
-  friend class BuildOpTask;
   friend class RunOpTask;
+  friend class RunOpsInGraphTask;
+  virtual bool IsSupportSummary() { return true; }
   virtual void CreateOutputTensors(const GraphId &graph_id, const std::vector<tensor::TensorPtr> &input_tensors,
                                    VectorRef *outputs,
                                    std::map<tensor::TensorPtr, session::KernelWithIndex> *tensor_to_node);
+  virtual void UnifyMindIR(const KernelGraphPtr &graph) = 0;
   virtual GraphId CompileGraphImpl(const AnfNodePtrList &lst, const AnfNodePtrList &outputs) = 0;
   virtual GraphId CompileGraphImpl(NotNull<FuncGraphPtr> func_graph) { return kInvalidGraphId; }
   virtual GraphId CompileGraphImpl(NotNull<FuncGraphPtr> func_graph, const std::vector<tensor::TensorPtr> &inputs) {
@@ -142,20 +171,25 @@ class SessionBasic : public std::enable_shared_from_this<SessionBasic> {
   virtual void RunGraphImpl(const GraphId &graph_id, const std::vector<tensor::TensorPtr> &inputs,
                             VectorRef *outputs) = 0;
   virtual void BuildOpImpl(const OpRunInfo &op_run_info, const GraphInfo &graph_info,
-                           const std::vector<tensor::TensorPtr> &input_tensors, const std::vector<int> &tensors_mask) {}
-  virtual void RunOpImpl(const OpRunInfo &op_run_info, const GraphInfo &graph_info,
-                         const std::vector<tensor::TensorPtr> &input_tensors, VectorRef *outputs) {}
+                           const std::vector<tensor::TensorPtr> &input_tensors,
+                           const std::vector<int64_t> &tensors_mask) {}
+  virtual void RunOpImpl(const GraphInfo &graph_info, OpRunInfo *op_run_info,
+                         std::vector<tensor::TensorPtr> *input_tensors, VectorRef *outputs,
+                         const std::vector<int64_t> &tensors_mask) {}
+  void RunOpsInGraphImpl(const GraphId &graph_id, const std::vector<tensor::TensorPtr> &inputs, VectorRef *outputs);
+  virtual void BuildOpsInGraph(const GraphId &graph_id, const std::map<AnfNodePtr, size_t> &parameter_index,
+                               const std::vector<tensor::TensorPtr> &graph_inputs,
+                               const std::map<KernelWithIndex, size_t> &cnode_refcount) {}
   void RunInfer(NotNull<FuncGraphPtr> func_graph, const std::vector<tensor::TensorPtr> &inputs);
-  // Get graph by graph id ,if not exist return null ptr
-  KernelGraphPtr GetGraph(GraphId graph_id) const;
 
   virtual void SetSummaryNodes(KernelGraph *graph);
 
   virtual void LoadInputData(const std::shared_ptr<KernelGraph> &kernel_graph,
                              const std::vector<tensor::TensorPtr> &inputs_const) const;
+  void EraseValueNodeTensor(const std::vector<int64_t> &tensors_mask, std::vector<tensor::TensorPtr> *input_tensors);
   void UpdateOutputs(const std::shared_ptr<KernelGraph> &kernel_graph, VectorRef *const outputs,
                      const std::vector<tensor::TensorPtr> &input_tensors) const;
-  void Reorder(std::vector<CNodePtr> *node_list);
+  void UpdateOutputAbstract(const std::shared_ptr<KernelGraph> &kernel_graph, OpRunInfo *op_run_info) const;
   void Summary(KernelGraph *graph);
   // create graph output for RunOp
   void CreateOutputNode(const CNodePtr &cnode, const std::shared_ptr<KernelGraph> &graph);
@@ -163,7 +197,19 @@ class SessionBasic : public std::enable_shared_from_this<SessionBasic> {
   // create a single run op graph
   std::shared_ptr<KernelGraph> ConstructSingleOpGraph(const OpRunInfo &op_run_info,
                                                       const std::vector<tensor::TensorPtr> &input_tensors,
-                                                      const std::vector<int> &tensors_mask);
+                                                      const std::vector<int64_t> &tensors_mask, bool is_ascend = false);
+  // Generate graph info for a single op graph
+  GraphInfo GetSingleOpGraphInfo(const CNodePtr &kernel, const std::vector<tensor::TensorPtr> &input_tensors);
+  void GetSingleOpRunInfo(const CNodePtr cnode, OpRunInfo *run_info);
+  tensor::TensorPtr GetValueNodeOutputTensor(const AnfNodePtr &node, size_t output_index);
+  tensor::TensorPtr GetParameterOutputTensor(const AnfNodePtr &node,
+                                             const std::map<AnfNodePtr, size_t> &parameter_index,
+                                             const std::vector<tensor::TensorPtr> &graph_inputs);
+  tensor::TensorPtr GetCNodeOutputTensor(const KernelWithIndex &kernel_with_index,
+                                         const std::map<KernelWithIndex, tensor::TensorPtr> &op_output);
+  void GetOpInputTensors(const CNodePtr &cnode, const std::map<KernelWithIndex, tensor::TensorPtr> &op_output,
+                         const std::map<AnfNodePtr, size_t> &parameter_index,
+                         const std::vector<tensor::TensorPtr> &graph_inputs, InputTensorInfo *input_tensor_info);
   // create a new kernel graph and update the graph sum
   KernelGraphPtr NewKernelGraph();
   std::vector<AnfNodePtr> CreateParameterFromTuple(const AnfNodePtr &node, KernelGraph *graph);
@@ -175,18 +221,29 @@ class SessionBasic : public std::enable_shared_from_this<SessionBasic> {
   void InitInternalOutputParameter(const AnfNodePtr &out_node, const AnfNodePtr &parameter);
   AnfNodePtr FindPullNode(const AnfNodePtr &push_node, const std::vector<AnfNodePtr> &node_list);
   void UpdateGraphDynamicShapeAttr(const NotNull<KernelGraphPtr> &root_graph);
+  void UpdateAllGraphDynamicShapeAttr(const std::vector<KernelGraphPtr> &all_graphs);
+  void RunOpRemoveNopNode(const KernelGraphPtr &kernel_graph) const;
+  void RunOpHideNopNode(const KernelGraphPtr &kernel_graph) const;
+#if (ENABLE_CPU && (ENABLE_D || ENABLE_GPU))
+  void CheckPSModeConsistence(const KernelGraphPtr &kernel_graph) const;
+  void GetBatchElements(const AnfNodePtr &kernel_node) const;
+  void InitPsWorker(const KernelGraphPtr &kernel_graph);
+#endif
 
   std::unordered_map<GraphId, std::shared_ptr<KernelGraph>> graphs_;
   std::unordered_map<GraphInfo, std::shared_ptr<KernelGraph>> run_op_graphs_;
   std::unordered_map<FuncGraphPtr, KernelGraphPtr> front_backend_graph_map_;
+  std::unordered_map<GraphId, std::vector<GraphId>> parent_graphs_;
   std::shared_ptr<Context> context_;
   CallBackFunc summary_callback_;
   static GraphId graph_sum_;
   uint32_t device_id_;
-  uint32_t run_op_graph_id_;
   std::shared_ptr<Executor> executor_;
 #if !defined(_WIN32) && !defined(_WIN64)
   std::shared_ptr<Debugger> debugger_;
+#endif
+#if (ENABLE_CPU && (ENABLE_D || ENABLE_GPU))
+  bool initialized_ps_cache_{false};
 #endif
 };
 

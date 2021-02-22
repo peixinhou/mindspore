@@ -1,4 +1,4 @@
-# Copyright 2020 Huawei Technologies Co., Ltd
+# Copyright 2020-2021 Huawei Technologies Co., Ltd
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ Testing UniformAugment in DE
 import numpy as np
 import pytest
 
-import mindspore.dataset.engine as de
+import mindspore.dataset as ds
 import mindspore.dataset.transforms.py_transforms
 import mindspore.dataset.vision.c_transforms as C
 import mindspore.dataset.vision.py_transforms as F
@@ -28,6 +28,24 @@ from util import visualize_list, diff_mse
 DATA_DIR = "../data/dataset/testImageNetData/train/"
 
 
+def test_uniform_augment_callable(num_ops=2):
+    """
+    Test UniformAugment is callable
+    """
+    logger.info("test_uniform_augment_callable")
+    img = np.fromfile("../data/dataset/apple.jpg", dtype=np.uint8)
+    logger.info("Image.type: {}, Image.shape: {}".format(type(img), img.shape))
+
+    decode_op = C.Decode()
+    img = decode_op(img)
+
+    transforms_ua = [C.RandomCrop(size=[400, 400], padding=[32, 32, 32, 32]),
+                     C.RandomCrop(size=[400, 400], padding=[32, 32, 32, 32])]
+    uni_aug = C.UniformAugment(transforms=transforms_ua, num_ops=num_ops)
+    img = uni_aug([img, img])
+    assert ((np.shape(img) == (2, 2268, 4032, 3)) or (np.shape(img) == (1, 400, 400, 3)))
+
+
 def test_uniform_augment(plot=False, num_ops=2):
     """
     Test UniformAugment
@@ -35,13 +53,13 @@ def test_uniform_augment(plot=False, num_ops=2):
     logger.info("Test UniformAugment")
 
     # Original Images
-    ds = de.ImageFolderDataset(dataset_dir=DATA_DIR, shuffle=False)
+    data_set = ds.ImageFolderDataset(dataset_dir=DATA_DIR, shuffle=False)
 
     transforms_original = mindspore.dataset.transforms.py_transforms.Compose([F.Decode(),
                                                                               F.Resize((224, 224)),
                                                                               F.ToTensor()])
 
-    ds_original = ds.map(operations=transforms_original, input_columns="image")
+    ds_original = data_set.map(operations=transforms_original, input_columns="image")
 
     ds_original = ds_original.batch(512)
 
@@ -54,7 +72,7 @@ def test_uniform_augment(plot=False, num_ops=2):
                                         axis=0)
 
             # UniformAugment Images
-    ds = de.ImageFolderDataset(dataset_dir=DATA_DIR, shuffle=False)
+    data_set = ds.ImageFolderDataset(dataset_dir=DATA_DIR, shuffle=False)
 
     transform_list = [F.RandomRotation(45),
                       F.RandomColor(),
@@ -70,7 +88,7 @@ def test_uniform_augment(plot=False, num_ops=2):
                                                                              num_ops=num_ops),
                                                             F.ToTensor()])
 
-    ds_ua = ds.map(operations=transforms_ua, input_columns="image")
+    ds_ua = data_set.map(operations=transforms_ua, input_columns="image")
 
     ds_ua = ds_ua.batch(512)
 
@@ -99,12 +117,12 @@ def test_cpp_uniform_augment(plot=False, num_ops=2):
     logger.info("Test CPP UniformAugment")
 
     # Original Images
-    ds = de.ImageFolderDataset(dataset_dir=DATA_DIR, shuffle=False)
+    data_set = ds.ImageFolderDataset(dataset_dir=DATA_DIR, shuffle=False)
 
     transforms_original = [C.Decode(), C.Resize(size=[224, 224]),
                            F.ToTensor()]
 
-    ds_original = ds.map(operations=transforms_original, input_columns="image")
+    ds_original = data_set.map(operations=transforms_original, input_columns="image")
 
     ds_original = ds_original.batch(512)
 
@@ -117,7 +135,7 @@ def test_cpp_uniform_augment(plot=False, num_ops=2):
                                         axis=0)
 
     # UniformAugment Images
-    ds = de.ImageFolderDataset(dataset_dir=DATA_DIR, shuffle=False)
+    data_set = ds.ImageFolderDataset(dataset_dir=DATA_DIR, shuffle=False)
     transforms_ua = [C.RandomCrop(size=[224, 224], padding=[32, 32, 32, 32]),
                      C.RandomHorizontalFlip(),
                      C.RandomVerticalFlip(),
@@ -130,7 +148,7 @@ def test_cpp_uniform_augment(plot=False, num_ops=2):
                       uni_aug,
                       F.ToTensor()]
 
-    ds_ua = ds.map(operations=transforms_all, input_columns="image", num_parallel_workers=1)
+    ds_ua = data_set.map(operations=transforms_all, input_columns="image", num_parallel_workers=1)
 
     ds_ua = ds_ua.batch(512)
 
@@ -168,9 +186,7 @@ def test_cpp_uniform_augment_exception_pyops(num_ops=2):
         C.UniformAugment(transforms=transforms_ua, num_ops=num_ops)
 
     logger.info("Got an exception in DE: {}".format(str(e)))
-    assert "Argument tensor_ops[5] with value" \
-           " <mindspore.dataset.vision.py_transforms.Invert" in str(e.value)
-    assert "is not of type (<class 'mindspore._c_dataengine.TensorOp'>,)" in str(e.value)
+    assert "Type of Transforms[5] must be c_transform" in str(e.value)
 
 
 def test_cpp_uniform_augment_exception_large_numops(num_ops=6):
@@ -240,7 +256,7 @@ def test_cpp_uniform_augment_random_crop_badinput(num_ops=1):
     logger.info("Test CPP UniformAugment with random_crop bad input")
     batch_size = 2
     cifar10_dir = "../data/dataset/testCifar10Data"
-    ds1 = de.Cifar10Dataset(cifar10_dir, shuffle=False)  # shape = [32,32,3]
+    ds1 = ds.Cifar10Dataset(cifar10_dir, shuffle=False)  # shape = [32,32,3]
 
     transforms_ua = [
         # Note: crop size [224, 224] > image size [32, 32]
@@ -257,10 +273,11 @@ def test_cpp_uniform_augment_random_crop_badinput(num_ops=1):
         for _ in ds1.create_dict_iterator(num_epochs=1, output_numpy=True):
             num_batches += 1
     except Exception as e:
-        assert "Crop size" in str(e)
+        assert "crop size" in str(e)
 
 
 if __name__ == "__main__":
+    test_uniform_augment_callable(num_ops=2)
     test_uniform_augment(num_ops=1, plot=True)
     test_cpp_uniform_augment(num_ops=1, plot=True)
     test_cpp_uniform_augment_exception_pyops(num_ops=1)

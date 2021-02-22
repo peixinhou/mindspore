@@ -26,9 +26,12 @@
 
 #include "album_op_android.h"  //NOLINT
 #include "minddata/dataset/include/execute.h"
+#include "minddata/dataset/include/type_id.h"
 #include "minddata/dataset/util/path.h"
 #include "minddata/dataset/include/vision.h"
 #include "minddata/dataset/util/data_helper.h"
+#include "minddata/dataset/core/de_tensor.h"
+#include "include/api/types.h"
 #if defined(__ANDROID__) || defined(ANDROID)
 #include <android/log.h>
 #include <android/asset_manager.h>
@@ -38,15 +41,16 @@ using mindspore::dataset::Path;
 using mindspore::dataset::Tensor;
 
 using TensorOperation = mindspore::dataset::TensorOperation;
+using RotateOperation = mindspore::dataset::vision::RotateOperation;
 
 using mindspore::LogStream;
 using mindspore::MsLogLevel::DEBUG;
 using mindspore::MsLogLevel::ERROR;
 using mindspore::MsLogLevel::INFO;
 
+using mindspore::Status;
 using mindspore::dataset::BorderType;
 using mindspore::dataset::InterpolationMode;
-using mindspore::dataset::Status;
 
 class MDToDApi {
  public:
@@ -59,11 +63,11 @@ class MDToDApi {
 
  public:
   MDToDApi() : _iter(nullptr), _augs({}), _storage_folder(""), _file_id(-1), _hasBatch(false) {
-    MS_LOG(WARNING) << "MDToDAPI Call constractor";
+    MS_LOG(INFO) << "MDToDAPI Call constructor";
   }
   ~MDToDApi() {
-    MS_LOG(WARNING) << "MDToDAPI Call destractor";
-    // derefernce dataset and iterator
+    MS_LOG(INFO) << "MDToDAPI Call destractor";
+    // dereference dataset and iterator
     _augs.clear();
   }
 };
@@ -84,14 +88,14 @@ extern "C"
 
 int MDToDApi_pathTest(const char* path) {
   Path f(path);
-  MS_LOG(WARNING) << f.Exists() << f.IsDirectory() << f.ParentPath();
+  MS_LOG(INFO) << f.Exists() << f.IsDirectory() << f.ParentPath();
   // Print out the first few items in the directory
   auto dir_it = Path::DirIterator::OpenDirectory(&f);
-  MS_LOG(WARNING) << dir_it.get();
+  MS_LOG(INFO) << dir_it.get();
   int i = 0;
   while (dir_it->hasNext()) {
     Path v = dir_it->next();
-    MS_LOG(WARNING) << v.toString() << "\n";
+    MS_LOG(INFO) << v.toString() << "\n";
     i++;
     if (i > 5) break;
   }
@@ -99,33 +103,38 @@ int MDToDApi_pathTest(const char* path) {
 }
 
 extern "C" MDToDApi *MDToDApi_createPipeLine(MDToDConf_t MDConf) {
-  MS_LOG(WARNING) << "Start createPipeLine";
+  MS_LOG(INFO) << "Start createPipeLine";
   std::string folder_path(MDConf.pFolderPath);
   std::string schema_file(MDConf.pSchemFile);
   std::vector<std::string> column_names = MDToDBuffToVector(MDConf.columnsToReadBuff);
   if (std::find(column_names.begin(), column_names.end(), "id") == column_names.end()) {
-    MS_LOG(WARNING) << "Column id not foud adding it ";
+    MS_LOG(INFO) << "Column id not foud adding it ";
     column_names.push_back("id");
   }
   std::vector<std::shared_ptr<TensorOperation>> mapOperations;
   if (std::find(column_names.begin(), column_names.end(), "image") != column_names.end()) {
-    MS_LOG(WARNING) << "Found column image create map with:";
-    MS_LOG(WARNING) << "resize: { " << MDConf.ResizeSizeWH[0] << ", " << MDConf.ResizeSizeWH[1] << " }";
-    MS_LOG(WARNING) << "crop: { " << MDConf.CropSizeWH[0] << ", " << MDConf.CropSizeWH[1] << " }";
-    MS_LOG(WARNING) << "MEAN: { " << MDConf.MEAN[0] << ", " << MDConf.MEAN[1] << ", " << MDConf.MEAN[2] << " }";
-    MS_LOG(WARNING) << "STD: { " << MDConf.STD[0] << ", " << MDConf.STD[1] << ", " << MDConf.STD[2] << " }";
+    MS_LOG(INFO) << "Found column image create map with:";
+    MS_LOG(INFO) << "resize: { " << MDConf.ResizeSizeWH[0] << ", " << MDConf.ResizeSizeWH[1] << " }";
+    MS_LOG(INFO) << "crop: { " << MDConf.CropSizeWH[0] << ", " << MDConf.CropSizeWH[1] << " }";
+    MS_LOG(INFO) << "MEAN: { " << MDConf.MEAN[0] << ", " << MDConf.MEAN[1] << ", " << MDConf.MEAN[2] << " }";
+    MS_LOG(INFO) << "STD: { " << MDConf.STD[0] << ", " << MDConf.STD[1] << ", " << MDConf.STD[2] << " }";
 
     if ((MDConf.ResizeSizeWH[0] != 0) && (MDConf.ResizeSizeWH[1] != 0)) {
-      std::vector<int> Resize(MDConf.ResizeSizeWH, MDConf.ResizeSizeWH + 2);
-      std::shared_ptr<TensorOperation> resize_op = mindspore::dataset::vision::Resize(Resize);
-      MS_LOG(WARNING) << "Push back resize";
+      std::shared_ptr<TensorOperation> resize_op =
+        mindspore::dataset::vision::Resize({MDConf.ResizeSizeWH[0], MDConf.ResizeSizeWH[1]});
+      MS_LOG(INFO) << "Push back resize";
       mapOperations.push_back(resize_op);
+    }
+    if (1 == MDConf.fixOrientation) {
+      std::shared_ptr<TensorOperation> rotate_op = mindspore::dataset::vision::Rotate();
+      MS_LOG(INFO) << "Push back rotate";
+      mapOperations.push_back(rotate_op);
       // hasBatch = true;  Batch not currently supported inMInddata-Lite
     }
     if ((MDConf.CropSizeWH[0] != 0) && (MDConf.CropSizeWH[1] != 0)) {
       std::vector<int> Crop(MDConf.CropSizeWH, MDConf.CropSizeWH + 2);
       std::shared_ptr<TensorOperation> center_crop_op = mindspore::dataset::vision::CenterCrop(Crop);
-      MS_LOG(WARNING) << "Push back crop";
+      MS_LOG(INFO) << "Push back crop";
       mapOperations.push_back(center_crop_op);
       // hasBatch = true;  Batch not currently supported inMInddata-Lite
     }
@@ -136,9 +145,10 @@ extern "C" MDToDApi *MDToDApi_createPipeLine(MDToDConf_t MDConf) {
   const std::set<std::string> exts = {};
   if (MDConf.fileid > -1) {
     // read specific image using SequentialSampler witn
-    iter = std::make_shared<mindspore::dataset::AlbumOp>(folder_path, true, schema_file, exts, MDConf.fileid);
+    iter =
+      std::make_shared<mindspore::dataset::AlbumOp>(folder_path, true, schema_file, column_names, exts, MDConf.fileid);
   } else {
-    iter = std::make_shared<mindspore::dataset::AlbumOp>(folder_path, true, schema_file, exts);
+    iter = std::make_shared<mindspore::dataset::AlbumOp>(folder_path, true, schema_file, column_names, exts);
   }
 
   // Create objects for the tensor ops
@@ -245,16 +255,16 @@ void GetTensorToBuff(std::unordered_map<std::string, std::shared_ptr<Tensor>> ro
 
 extern "C" int MDToDApi_GetNext(MDToDApi *pMDToDApi, MDToDResult_t *results) {
   MS_LOG(INFO) << "Start GetNext";
-  if (pMDToDApi == nullptr) {
+  if (pMDToDApi == nullptr || pMDToDApi->_iter == nullptr) {
     MS_LOG(ERROR) << "GetNext called with null ptr. abort";
     return -1;
   }
 
-  // Set defualt
+  // Set default
   results->fileid = -1;
   results->embeddingBuff.DataSize = 0;
   results->imageBuff.DataSize = 0;
-  MS_LOG(INFO) << "Start GetNext [1]";
+  MS_LOG(INFO) << "Start GetNext [1]" << pMDToDApi;
   // get next row for dataset
   std::unordered_map<std::string, std::shared_ptr<Tensor>> row;
   if (pMDToDApi->_iter == nullptr) {
@@ -264,16 +274,33 @@ extern "C" int MDToDApi_GetNext(MDToDApi *pMDToDApi, MDToDResult_t *results) {
   // create Execute functions, this replaces Map in Pipeline
 
   bool ret = pMDToDApi->_iter->GetNextRow(&row);
+  uint32_t orientation = 0;
   if (row.size() != 0 && ret) {
+    GetValue<uint32_t>(row, "orientation", &orientation);
+    MS_LOG(INFO) << "get orientation from row = " << orientation;
     if ((pMDToDApi->_augs).size() > 0) {
       // String and Tensors
-      GetTensorToBuff(row, "image_filename", pMDToDApi->_hasBatch, &results->fileNameBuff);
+
       // for each operation, run eager mode, single threaded operation, will have to memcpy
       // regardless
       for (int i = 0; i < (pMDToDApi->_augs).size(); i++) {
         // each Execute call will invoke a memcpy, this cannot really be optimized further
         // for this use case, std move is added for fail save.
-        row["image"] = mindspore::dataset::Execute((pMDToDApi->_augs)[i])(std::move(row["image"]));
+        if (pMDToDApi->_augs[i]->Name() == "Rotate") {
+          if (orientation > 1) {
+            RotateOperation *p = static_cast<RotateOperation *>(pMDToDApi->_augs[i].get());
+            p->setAngle(orientation);
+            orientation = 0;  // clear oriation filed if already performed
+          } else {
+            continue;
+          }
+        }
+        mindspore::MSTensor image(std::make_shared<mindspore::dataset::DETensor>(row["image"]));
+        (void)mindspore::dataset::Execute((pMDToDApi->_augs)[i])(image, &image);
+        mindspore::dataset::Tensor::CreateFromMemory(
+          mindspore::dataset::TensorShape(image.Shape()),
+          mindspore::dataset::MSTypeToDEType(static_cast<mindspore::TypeId>(image.DataType())),
+          (const uint8_t *)(image.Data().get()), &(row["image"]));
         if (row["image"] == nullptr) {
           // nullptr means that the eager mode image processing failed, we fail in this case
           return -1;
@@ -286,6 +313,7 @@ extern "C" int MDToDApi_GetNext(MDToDApi *pMDToDApi, MDToDResult_t *results) {
     // IS FOR TRAIN
     GetValue<int32_t>(row, "_isForTrain", &results->isForTrain);
     GetValue<int32_t>(row, "_noOfFaces", &results->noOfFaces);
+    results->orientation = (int32_t)orientation;
     // String and Tensors
     GetTensorToBuff(row, "image_filename", pMDToDApi->_hasBatch, &results->fileNameBuff);
     GetTensorToBuff(row, "image", pMDToDApi->_hasBatch, &results->imageBuff);
@@ -304,21 +332,21 @@ extern "C" int MDToDApi_GetNext(MDToDApi *pMDToDApi, MDToDResult_t *results) {
 
 extern "C" int MDToDApi_Stop(MDToDApi *pMDToDApi) {
   // Manually terminate the pipeline
-  MS_LOG(WARNING) << "pipline stoped";
+  MS_LOG(INFO) << "pipline stopped";
   return 0;
 }
 
 extern "C" int MDToDApi_Destroy(MDToDApi *pMDToDApi) {
-  MS_LOG(WARNING) << "pipline deleted start";
+  MS_LOG(INFO) << "pipline deleted start";
   delete pMDToDApi;
-  MS_LOG(WARNING) << "pipline deleted end";
+  MS_LOG(INFO) << "pipline deleted end";
   return 0;
 }
 
 int GetJsonFullFileName(const MDToDApi *pMDToDApi, std::string *filePath) {
   int64_t file_id = pMDToDApi->_file_id;
   if (file_id < 0) {
-    MS_LOG(ERROR) << "Illigal file ID to update: " << file_id << ".";
+    MS_LOG(ERROR) << "Illegal file ID to update: " << file_id << ".";
     return -1;
   }
   std::string converted = std::to_string(pMDToDApi->_file_id);
@@ -387,7 +415,7 @@ extern "C" int MDToDApi_UpdateFloatArray(MDToDApi *pMDToDApi, const char *column
   auto columnName = std::string(column);
   std::string file_path;
   if (0 != GetJsonFullFileName(pMDToDApi, &file_path)) {
-    MS_LOG(ERROR) << "Faile to updaet " << columnName;
+    MS_LOG(ERROR) << "Failed to updaet " << columnName;
     return -1;
   }
   MS_LOG(INFO) << "Start Update float Array column: " << columnName << " in file " << file_path;

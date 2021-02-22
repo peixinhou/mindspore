@@ -15,11 +15,6 @@
  */
 
 #include "src/runtime/kernel/arm/int8/scale_int8.h"
-
-#include <string.h>
-#include <vector>
-#include "nnacl/int8/scale_int8.h"
-#include "nnacl/arithmetic_common.h"
 #include "schema/model_generated.h"
 #include "src/kernel_registry.h"
 #include "include/errorcode.h"
@@ -66,9 +61,9 @@ int ScaleInt8CPUKernel::InitScaleOffset() {
         return RET_ERROR;
       }
       malloced_scale_ = true;
-      TileOneDimensionUint8(reinterpret_cast<uint8_t *>(in_tensors_.at(1)->data_c()),
-                            reinterpret_cast<uint8_t *>(input1_data_), 0, tile_para->ndim_, tile_para->in_shape1_,
-                            tile_para->in_strides1_, tile_para->out_strides_, tile_para->multiples1_);
+      TileOneDimensionInt8(reinterpret_cast<int8_t *>(in_tensors_.at(1)->data_c()),
+                           reinterpret_cast<int8_t *>(input1_data_), 0, tile_para->ndim_, tile_para->in_shape1_,
+                           tile_para->in_strides1_, tile_para->out_strides_, tile_para->multiples1_);
     }
   }
 
@@ -93,9 +88,9 @@ int ScaleInt8CPUKernel::InitScaleOffset() {
           return RET_ERROR;
         }
         malloced_offset_ = true;
-        TileOneDimensionUint8(reinterpret_cast<uint8_t *>(in_tensors_.at(2)->data_c()),
-                              reinterpret_cast<uint8_t *>(input2_data_), 0, tile_para->ndim_, tile_para->in_shape1_,
-                              tile_para->in_strides1_, tile_para->out_strides_, tile_para->multiples1_);
+        TileOneDimensionInt8(reinterpret_cast<int8_t *>(in_tensors_.at(2)->data_c()),
+                             reinterpret_cast<int8_t *>(input2_data_), 0, tile_para->ndim_, tile_para->in_shape1_,
+                             tile_para->in_strides1_, tile_para->out_strides_, tile_para->multiples1_);
       }
     }
   }
@@ -305,9 +300,9 @@ int ScaleInt8CPUKernel::Run() {
         MS_LOG(ERROR) << "malloc input1_data_  failed.";
         return RET_ERROR;
       }
-      TileOneDimensionUint8(reinterpret_cast<uint8_t *>(in_tensors_.at(1)->data_c()),
-                            reinterpret_cast<uint8_t *>(input1_data_), 0, tile_para->ndim_, tile_para->in_shape1_,
-                            tile_para->in_strides1_, tile_para->out_strides_, tile_para->multiples1_);
+      TileOneDimensionInt8(reinterpret_cast<int8_t *>(in_tensors_.at(1)->data_c()),
+                           reinterpret_cast<int8_t *>(input1_data_), 0, tile_para->ndim_, tile_para->in_shape1_,
+                           tile_para->in_strides1_, tile_para->out_strides_, tile_para->multiples1_);
     }
 
     // If has bias, bias is passed by previous node case, need do broadcasting online
@@ -319,9 +314,9 @@ int ScaleInt8CPUKernel::Run() {
         input1_data_ = nullptr;
         return RET_ERROR;
       }
-      TileOneDimensionUint8(reinterpret_cast<uint8_t *>(in_tensors_.at(2)->data_c()),
-                            reinterpret_cast<uint8_t *>(input2_data_), 0, tile_para->ndim_, tile_para->in_shape1_,
-                            tile_para->in_strides1_, tile_para->out_strides_, tile_para->multiples1_);
+      TileOneDimensionInt8(reinterpret_cast<int8_t *>(in_tensors_.at(2)->data_c()),
+                           reinterpret_cast<int8_t *>(input2_data_), 0, tile_para->ndim_, tile_para->in_shape1_,
+                           tile_para->in_strides1_, tile_para->out_strides_, tile_para->multiples1_);
     }
 
     auto ret = ParallelLaunch(this->context_->thread_pool_, ScaleRunInt8, this, op_parameter_->thread_num_);
@@ -352,31 +347,5 @@ int ScaleInt8CPUKernel::Run() {
   return RET_OK;
 }
 
-kernel::LiteKernel *CpuScaleInt8KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                              const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter,
-                                              const lite::InnerContext *ctx, const kernel::KernelKey &desc,
-                                              const mindspore::lite::PrimitiveC *primitive) {
-  MS_ASSERT(desc.type == schema::PrimitiveType_Scale);
-  if (opParameter == nullptr) {
-    MS_LOG(ERROR) << "opParameter is nullptr";
-    return nullptr;
-  }
-  auto *kernel = new (std::nothrow) ScaleInt8CPUKernel(opParameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "New kernel fails.";
-    free(opParameter);
-    return nullptr;
-  }
-
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
-}
-
-REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Scale, CpuScaleInt8KernelCreator)
+REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Scale, LiteKernelCreator<ScaleInt8CPUKernel>)
 }  // namespace mindspore::kernel

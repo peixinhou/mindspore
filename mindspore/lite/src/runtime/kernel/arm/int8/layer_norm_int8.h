@@ -31,7 +31,7 @@ class LayerNormInt8CPUKernel : public LiteKernel {
       : LiteKernel(parameter, inputs, outputs, ctx, primitive) {
     param_ = reinterpret_cast<LayerNormParameter *>(parameter);
   }
-  ~LayerNormInt8CPUKernel() override{};
+  ~LayerNormInt8CPUKernel() override;
 
   int Init() override;
   int ReSize() override;
@@ -41,17 +41,15 @@ class LayerNormInt8CPUKernel : public LiteKernel {
   int DoExecute(int task_id);
 
  private:
-  void SetQuantArgs();
+  int SetQuantArgs();
 
  private:
   LayerNormParameter *param_ = nullptr;
   LayerNormQuantArg quant_param_;
-  int outer_size_ = 0;
-  int inner_size_ = 0;
   int8_t *src_ptr_ = nullptr;
   int8_t *dst_ptr_ = nullptr;
-  int8_t *gamma_ptr_ = nullptr;
-  int32_t *beta_ptr_ = nullptr;
+  float *gamma_ptr_ = nullptr;
+  float *beta_ptr_ = nullptr;
 };
 }  // namespace mindspore::kernel
 

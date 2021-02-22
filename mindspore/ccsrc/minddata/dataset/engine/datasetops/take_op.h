@@ -1,5 +1,5 @@
 /**
- * Copyright 2020 Huawei Technologies Co., Ltd
+ * Copyright 2020-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -75,23 +75,12 @@ class TakeOp : public PipelineOp {
 
   // All dataset ops operate by launching a thread (see ExecutionTree). This class functor will
   // provide the master loop that drives the logic for performing the work
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status operator()() override;
-
-  // Base-class override for NodePass visitor acceptor.
-  // @param p - Pointer to the NodePass to be accepted.
-  // @param modified - Whether this node visit modified the pipeline.
-  // @return - Status of the node visit.
-  Status Accept(NodePass *p, bool *modified) override;
 
   // Op name getter
   // @return Name of the current Op
   std::string Name() const override { return kTakeOp; }
-
-  /// \brief Base-class override for GetDatasetSize
-  /// \param[out] dataset_size the size of the dataset
-  /// \return Status of the function
-  Status GetDatasetSize(int64_t *dataset_size) override;
 
  private:
   int32_t max_takes_;   // The number of takes that the user requested

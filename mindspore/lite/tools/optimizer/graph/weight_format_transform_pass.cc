@@ -15,6 +15,8 @@
  */
 #include "tools/optimizer/graph/weight_format_transform_pass.h"
 #include <memory>
+#include <algorithm>
+#include <vector>
 #include "tools/optimizer/common/gllo_utils.h"
 
 using mindspore::lite::converter::FmkType_CAFFE;
@@ -41,11 +43,9 @@ lite::STATUS WeightFormatTransformPass::ConvWeightFormatTrans(const FuncGraphPtr
       continue;
     }
     auto type = opt::GetCNodeType(node);
-    if (type != schema::PrimitiveType_Conv2D && type != schema::PrimitiveType_DepthwiseConv2D
-#ifdef SUPPORT_TRAIN
-        && type != schema::PrimitiveType_Conv2DGradInput && type != schema::PrimitiveType_GroupConv2DGradInput
-#endif
-        && type != schema::PrimitiveType_DeConv2D && type != schema::PrimitiveType_DeDepthwiseConv2D) {
+    if (type != schema::PrimitiveType_Conv2D && type != schema::PrimitiveType_DepthwiseConv2D &&
+        type != schema::PrimitiveType_Conv2DGradInput && type != schema::PrimitiveType_GroupConv2DGradInput &&
+        type != schema::PrimitiveType_DeConv2D && type != schema::PrimitiveType_DeDepthwiseConv2D) {
       continue;
     }
     auto conv_cnode = node->cast<CNodePtr>();
@@ -75,7 +75,11 @@ lite::STATUS WeightFormatTransformPass::ConvWeightFormatTrans(const FuncGraphPtr
     }
     auto type_id = static_cast<TypeId>(weight_value->tensor_type());
     auto type_ptr = TypeIdToType(type_id);
-    auto abstract_tensor = std::make_shared<abstract::AbstractTensor>(type_ptr, weight_value->tensor_shape());
+    auto shape = weight_value->tensor_shape();
+    std::vector<int64_t> shape_vector;
+    (void)std::transform(shape.begin(), shape.end(), std::back_inserter(shape_vector),
+                         [](const int32_t &value) { return static_cast<int64_t>(value); });
+    auto abstract_tensor = std::make_shared<abstract::AbstractTensor>(type_ptr, shape_vector);
     weight_node->set_abstract(abstract_tensor);
   }
   return RET_OK;

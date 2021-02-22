@@ -22,7 +22,7 @@ namespace kernel {
 void SigmoidCrossEntropyWithLogitsGradCPUKernel::InitKernel(const CNodePtr &kernel_node) {
   CheckParam(kernel_node);
   dtype_ = AnfAlgo::GetPrevNodeOutputInferDataType(kernel_node, 0);
-  std::vector<uint64_t> x_shape = AnfAlgo::GetPrevNodeOutputInferShape(kernel_node, 0);
+  std::vector<size_t> x_shape = AnfAlgo::GetPrevNodeOutputInferShape(kernel_node, 0);
   for (const uint64_t &d : x_shape) {
     tensor_size_ *= d;
   }
@@ -33,8 +33,10 @@ bool SigmoidCrossEntropyWithLogitsGradCPUKernel::Launch(const std::vector<kernel
                                                         const std::vector<kernel::AddressPtr> &outputs) {
   if (dtype_ == kNumberTypeFloat16) {
     LaunchKernel<float16>(inputs, outputs);
-  } else if (dtype_ == kNumberTypeFloat32) {
+  } else if (dtype_ == kNumberTypeFloat32 || dtype_ == kNumberTypeFloat64) {
     LaunchKernel<float>(inputs, outputs);
+  } else {
+    MS_LOG(EXCEPTION) << "input dtype only support float16, float32, float64";
   }
   return true;
 }

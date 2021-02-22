@@ -37,27 +37,31 @@ WeightedRandomSamplerRT::WeightedRandomSamplerRT(int64_t num_samples, const std:
 
 // Initialized this Sampler.
 Status WeightedRandomSamplerRT::InitSampler() {
+  if (is_initialized) {
+    return Status::OK();
+  }
   // Special value of 0 for num_samples means that the user wants to sample the entire set of data.
   // If the user asked to sample more rows than exists in the dataset, adjust the num_samples accordingly.
   if (num_samples_ == 0 || num_samples_ > num_rows_) {
     num_samples_ = num_rows_;
   }
-  CHECK_FAIL_RETURN_UNEXPECTED(num_rows_ > 0 && num_samples_,
-                               "Invalid parameter, num_samples & num_rows must be greater than 0, but got num_rows: " +
-                                 std::to_string(num_rows_) + ", num_samples: " + std::to_string(num_samples_));
+  CHECK_FAIL_RETURN_UNEXPECTED(
+    num_rows_ > 0 && num_samples_,
+    "Invalid parameter, num_samples and num_rows must be greater than 0, but got num_rows: " +
+      std::to_string(num_rows_) + ", num_samples: " + std::to_string(num_samples_));
   CHECK_FAIL_RETURN_UNEXPECTED(samples_per_buffer_ > 0,
                                "Invalid parameter, samples_per_buffer must be greater than 0, but got " +
                                  std::to_string(samples_per_buffer_) + ".\n");
 
   if (weights_.size() > static_cast<size_t>(num_rows_)) {
-    return Status(StatusCode::kUnexpectedError, __LINE__, __FILE__,
+    return Status(StatusCode::kMDUnexpectedError, __LINE__, __FILE__,
                   "Invalid parameter, size of sample weights must be less than or equal to num of data, "
                   "otherwise might cause generated id out of bound or other errors, but got weight size: " +
                     std::to_string(weights_.size()) + ", num of data: " + std::to_string(num_rows_));
   }
   if (!replacement_ && (weights_.size() < static_cast<size_t>(num_samples_))) {
     RETURN_STATUS_UNEXPECTED(
-      "Invalid parameter, without replacement, weights size must be greater than or equal to num_samples, "
+      "Invalid parameter, without replacement, weight size must be greater than or equal to num_samples, "
       "but got weight size: " +
       std::to_string(weights_.size()) + ", num_samples: " + std::to_string(num_samples_));
   }
@@ -74,6 +78,7 @@ Status WeightedRandomSamplerRT::InitSampler() {
     discrete_dist_ = std::make_unique<std::discrete_distribution<int64_t>>(weights_.begin(), weights_.end());
   }
 
+  is_initialized = true;
   return Status::OK();
 }
 
@@ -114,7 +119,7 @@ Status WeightedRandomSamplerRT::ResetSampler() {
 // Get the sample ids.
 Status WeightedRandomSamplerRT::GetNextSample(std::unique_ptr<DataBuffer> *out_buffer) {
   if (weights_.size() > static_cast<size_t>(num_rows_)) {
-    return Status(StatusCode::kUnexpectedError, __LINE__, __FILE__,
+    return Status(StatusCode::kMDUnexpectedError, __LINE__, __FILE__,
                   "Invalid parameter, size of sample weights must be less than or equal to num of data, "
                   "otherwise might cause generated id out of bound or other errors, but got weight size: " +
                     std::to_string(weights_.size()) + ", num of data: " + std::to_string(num_rows_));
@@ -122,7 +127,7 @@ Status WeightedRandomSamplerRT::GetNextSample(std::unique_ptr<DataBuffer> *out_b
 
   if (!replacement_ && (weights_.size() < static_cast<size_t>(num_samples_))) {
     RETURN_STATUS_UNEXPECTED(
-      "Invalid parameter, without replacement, weights size must be greater than or equal to num_samples, "
+      "Invalid parameter, without replacement, weight size must be greater than or equal to num_samples, "
       "but got weight size: " +
       std::to_string(weights_.size()) + ", num_samples: " + std::to_string(num_samples_));
   }
@@ -180,13 +185,32 @@ Status WeightedRandomSamplerRT::GetNextSample(std::unique_ptr<DataBuffer> *out_b
   return Status::OK();
 }
 
-void WeightedRandomSamplerRT::Print(std::ostream &out, bool show_all) const {
+void WeightedRandomSamplerRT::SamplerPrint(std::ostream &out, bool show_all) const {
   out << "\nSampler: WeightedRandomSampler";
   if (show_all) {
     // Call the super class for displaying any common detailed info
-    SamplerRT::Print(out, show_all);
+    SamplerRT::SamplerPrint(out, show_all);
     // Then add our own info if any
   }
+}
+
+Status WeightedRandomSamplerRT::to_json(nlohmann::json *out_json) {
+  nlohmann::json args;
+  args["sampler_name"] = "WeightedRandomSampler";
+  args["weights"] = weights_;
+  args["num_samples"] = num_samples_;
+  args["replacement"] = replacement_;
+  if (this->HasChildSampler()) {
+    std::vector<nlohmann::json> children_args;
+    for (auto child : child_) {
+      nlohmann::json child_arg;
+      RETURN_IF_NOT_OK(child->to_json(&child_arg));
+      children_args.push_back(child_arg);
+    }
+    args["child_sampler"] = children_args;
+  }
+  *out_json = args;
+  return Status::OK();
 }
 }  // namespace dataset
 }  // namespace mindspore

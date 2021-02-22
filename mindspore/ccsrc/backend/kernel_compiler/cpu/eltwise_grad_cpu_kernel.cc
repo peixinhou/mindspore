@@ -73,8 +73,62 @@ void EltWiseGradCPUKernel::SqrtGrad(const T *input1, const T *input2, T *out, si
 template <typename T>
 void EltWiseGradCPUKernel::TanhGrad(const T *input1, const T *input2, T *out, size_t start, size_t end) {
   for (size_t i = start; i < end; i++) {
-    T tmp = (1 - input1[i]);
-    out[i] = input2[i] * tmp * tmp;
+    T tmp = input1[i] * input1[i];
+    out[i] = input2[i] * (1 - tmp);
+  }
+}
+
+template <typename T>
+void EltWiseGradCPUKernel::GeluGrad(const T *input1, const T *input2, T *out, size_t start, size_t end) {
+  for (size_t i = start; i < end; i++) {
+    T x = input2[i];
+    auto double_x = static_cast<T>(x);
+    T tanh_res = (T)std::tanh(0.7978845608 * (double_x + 0.044715 * double_x * double_x * double_x));
+    T mul_right = (T)(0.7978845608 + 0.1070322244 * double_x * double_x);
+    T y_res = (((T)1.0 + tanh_res) + x * ((T)1.0 - tanh_res * tanh_res) * mul_right) / (T)2.0;
+    out[i] = input1[i] * y_res;
+  }
+}
+
+template <typename T>
+void EltWiseGradCPUKernel::AsinGrad(const T *input1, const T *input2, T *out, size_t start, size_t end) {
+  for (size_t i = start; i < end; i++) {
+    T dividend = input2[i];
+    T divisor = sqrt(1 - input1[i] * input1[i]);
+    if (divisor == 0) {
+      if (dividend == 0) {
+        out[i] = std::numeric_limits<T>::quiet_NaN();
+        continue;
+      }
+      if (std::numeric_limits<T>::has_infinity) {
+        out[i] = dividend > 0 ? std::numeric_limits<T>::infinity() : -std::numeric_limits<T>::infinity();
+      } else {
+        out[i] = dividend > 0 ? std::numeric_limits<T>::max() : std::numeric_limits<T>::min();
+      }
+      continue;
+    }
+    out[i] = dividend / divisor;
+  }
+}
+
+template <typename T>
+void EltWiseGradCPUKernel::ACosGrad(const T *input1, const T *input2, T *out, size_t start, size_t end) {
+  for (size_t i = start; i < end; i++) {
+    T dividend = -input2[i];
+    T divisor = sqrt(1 - input1[i] * input1[i]);
+    if (divisor == 0) {
+      if (dividend == 0) {
+        out[i] = std::numeric_limits<T>::quiet_NaN();
+        continue;
+      }
+      if (std::numeric_limits<T>::has_infinity) {
+        out[i] = dividend > 0 ? std::numeric_limits<T>::infinity() : -std::numeric_limits<T>::infinity();
+      } else {
+        out[i] = dividend > 0 ? std::numeric_limits<T>::max() : std::numeric_limits<T>::min();
+      }
+      continue;
+    }
+    out[i] = dividend / divisor;
   }
 }
 
@@ -93,6 +147,12 @@ void EltWiseGradCPUKernel::InitKernel(const CNodePtr &kernel_node) {
     operate_type_ = TANHGRAD;
   } else if (kernel_name == "SqrtGrad") {
     operate_type_ = SQRTGRAD;
+  } else if (kernel_name == "GeLUGrad") {
+    operate_type_ = GELUGRAD;
+  } else if (kernel_name == "AsinGrad") {
+    operate_type_ = ASINGRAD;
+  } else if (kernel_name == "ACosGrad") {
+    operate_type_ = ACOSGRAD;
   } else {
     MS_LOG(EXCEPTION) << "Not support " << kernel_name;
   }
@@ -123,14 +183,14 @@ void EltWiseGradCPUKernel::InitKernel(const CNodePtr &kernel_node) {
 bool EltWiseGradCPUKernel::Launch(const std::vector<kernel::AddressPtr> &inputs,
                                   const std::vector<kernel::AddressPtr> & /*workspace*/,
                                   const std::vector<kernel::AddressPtr> &outputs) {
-  if (dtype_ == kNumberTypeInt32) {
+  if (dtype_ == kNumberTypeInt32 || dtype_ == kNumberTypeInt16) {
     LaunchKernel<int>(inputs, outputs);
-  } else if (dtype_ == kNumberTypeFloat32) {
+  } else if (dtype_ == kNumberTypeFloat32 || dtype_ == kNumberTypeFloat16 || dtype_ == kNumberTypeFloat64) {
     LaunchKernel<float>(inputs, outputs);
   } else if (dtype_ == kNumberTypeInt64) {
     LaunchKernel<int64_t>(inputs, outputs);
   } else {
-    MS_LOG(EXCEPTION) << "Only support int32, float32, but actual data type is " << TypeIdLabel(dtype_);
+    MS_LOG(EXCEPTION) << "Data type is " << TypeIdLabel(dtype_) << "is not support.";
   }
   return true;
 }
@@ -146,9 +206,17 @@ void EltWiseGradCPUKernel::LaunchKernel(const std::vector<AddressPtr> &inputs, c
   size_t thread_num = lens < 128 * max_thread_num ? std::ceil(lens / 128.0) : max_thread_num;
   MS_LOG(INFO) << "Lens=" << lens << "; use thread_num=" << thread_num << "; max_thread_num: " << max_thread_num;
   std::vector<std::thread> threads;
+  if (thread_num < 1) {
+    MS_LOG(ERROR) << "Invalid value: thread_num " << thread_num;
+    return;
+  }
   threads.reserve(thread_num);
   size_t start = 0;
   size_t once_compute_size = (lens + thread_num - 1) / thread_num;
+  if (once_compute_size < 1) {
+    MS_LOG(ERROR) << "Invalid value: once_compute_size " << once_compute_size;
+    return;
+  }
   while (start < lens) {
     size_t end = (start + once_compute_size) > lens ? lens : (start + once_compute_size);
     if (operate_type_ == RELUGRAD) {
@@ -164,6 +232,12 @@ void EltWiseGradCPUKernel::LaunchKernel(const std::vector<AddressPtr> &inputs, c
       threads.emplace_back(std::thread(&EltWiseGradCPUKernel::TanhGrad<T>, this, input1, input2, output, start, end));
     } else if (operate_type_ == SQRTGRAD) {
       threads.emplace_back(std::thread(&EltWiseGradCPUKernel::SqrtGrad<T>, this, input1, input2, output, start, end));
+    } else if (operate_type_ == GELUGRAD) {
+      threads.emplace_back(std::thread(&EltWiseGradCPUKernel::GeluGrad<T>, this, input1, input2, output, start, end));
+    } else if (operate_type_ == ASINGRAD) {
+      threads.emplace_back(std::thread(&EltWiseGradCPUKernel::AsinGrad<T>, this, input1, input2, output, start, end));
+    } else if (operate_type_ == ACOSGRAD) {
+      threads.emplace_back(std::thread(&EltWiseGradCPUKernel::ACosGrad<T>, this, input1, input2, output, start, end));
     } else {
       MS_LOG(EXCEPTION) << "Not support " << operate_type_;
     }

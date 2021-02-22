@@ -21,13 +21,11 @@ from mindspore.nn import Cell
 import mindspore.ops.operations as P
 import mindspore.ops.operations._grad_ops as G
 
-context.set_context(mode=context.GRAPH_MODE, enable_graph_kernel=True, device_target="GPU")
-
 
 class GeluNet(Cell):
     def __init__(self):
         super(GeluNet, self).__init__()
-        self.gelu = P.Gelu()
+        self.gelu = P.GeLU()
 
     def construct(self, x):
         return self.gelu(x)
@@ -36,7 +34,7 @@ class GeluNet(Cell):
 class GeluGradNet(Cell):
     def __init__(self):
         super(GeluGradNet, self).__init__()
-        self.gelu_grad = G.GeluGrad()
+        self.gelu_grad = G.GeLUGrad()
 
     def construct(self, dy, x, y):
         return self.gelu_grad(dy, x, y)
@@ -48,10 +46,8 @@ def CalGelu(x):
     return expect
 
 
-@pytest.mark.level0
-@pytest.mark.platform_x86_gpu_training
-@pytest.mark.env_onecard
 def test_gelu():
+    np.random.seed(0)
     input_x = np.random.normal(0, 1, [2, 3, 4, 3]).astype(np.float32)
 
     net = GeluNet()
@@ -63,10 +59,8 @@ def test_gelu():
     assert res
 
 
-@pytest.mark.level0
-@pytest.mark.platform_x86_gpu_training
-@pytest.mark.env_onecard
 def test_gelu_grad():
+    np.random.seed(0)
     input_dy = np.random.normal(0, 1, [2, 3, 4, 3]).astype(np.float32)
     input_x = np.random.normal(0, 1, [2, 3, 4, 3]).astype(np.float32)
     input_y = CalGelu(input_x)
@@ -81,3 +75,29 @@ def test_gelu_grad():
 
     res = np.allclose(expect, result.asnumpy(), rtol=1.e-4, atol=1.e-7, equal_nan=True)
     assert res
+
+
+@pytest.mark.level0
+@pytest.mark.platform_x86_gpu_training
+@pytest.mark.env_onecard
+def test_gelu_gpu():
+    context.set_context(mode=context.GRAPH_MODE, enable_graph_kernel=True, device_target="GPU")
+    test_gelu()
+
+
+def test_gelu_ascend():
+    context.set_context(mode=context.GRAPH_MODE, enable_graph_kernel=True, device_target="Ascend")
+    test_gelu()
+
+
+@pytest.mark.level0
+@pytest.mark.platform_x86_gpu_training
+@pytest.mark.env_onecard
+def test_gelu_grad_gpu():
+    context.set_context(mode=context.GRAPH_MODE, enable_graph_kernel=True, device_target="GPU")
+    test_gelu_grad()
+
+
+def test_gelu_grad_ascend():
+    context.set_context(mode=context.GRAPH_MODE, enable_graph_kernel=True, device_target="Ascend")
+    test_gelu_grad()

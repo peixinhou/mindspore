@@ -14,13 +14,11 @@
  * limitations under the License.
  */
 #include "src/runtime/kernel/arm/base/split_base.h"
-#include <vector>
-#include "src/runtime/kernel/arm/fp32/split_fp32.h"
 #include "schema/model_generated.h"
 #include "src/kernel_registry.h"
-#include "include/errorcode.h"
-#include "include/context.h"
+#include "src/runtime/runtime_api.h"
 
+using mindspore::kernel::KERNEL_ARCH::kCPU;
 using mindspore::lite::KernelRegistrar;
 using mindspore::lite::RET_ERROR;
 using mindspore::lite::RET_OK;
@@ -30,7 +28,16 @@ namespace mindspore::kernel {
 int SplitBaseCPUKernel::Init() {
   auto split_dim = param->split_dim_;
   param->split_dim_ = split_dim >= 0 ? split_dim : in_tensors_.front()->shape().size() + split_dim;
-  return RET_OK;
+
+  output_ptr_.resize(param->num_split_);
+  for (size_t i = 0; i < output_ptr_.size(); i++) {
+    output_ptr_.at(i) = nullptr;
+  }
+  if (!InferShapeDone()) {
+    return RET_OK;
+  }
+
+  return ReSize();
 }
 
 int SplitBaseCPUKernel::ReSize() {
@@ -38,7 +45,7 @@ int SplitBaseCPUKernel::ReSize() {
   auto input_shape = in_tensor->shape();
 
   MS_ASSERT(param);
-  MS_ASSERT(input_shape.size() >= 2 && input_shape.size() <= SPLIT_STRIDES_SIZE);
+  MS_ASSERT(input_shape.size() >= 1 && input_shape.size() <= SPLIT_STRIDES_SIZE);
   param->strides_[input_shape.size() - 1] = 1;
   for (int i = input_shape.size() - 2; i >= 0; i--) {
     param->strides_[i] = param->strides_[i + 1] * input_shape.at(i + 1);
@@ -50,8 +57,8 @@ int SplitBaseCPUKernel::ReSize() {
   param->n_dims_ = input_shape.size();
 
   if (param->split_sizes_[0] == 0) {
-    MS_ASSERT(param->num_split_ > 0 && static_cast<int>(param->num_split_) < input_shape.size());
-    if (input_shape.at(param->split_dim_) % param->num_split_ != 0) {
+    MS_ASSERT(param->num_split_ > 0 && static_cast<int>(param->num_split_) <= input_shape[param->split_dim_]);
+    if (input_shape[param->split_dim_] % param->num_split_ != 0) {
       MS_LOG(ERROR) << "Default split size is not usable.";
       return RET_ERROR;
     }
@@ -61,7 +68,6 @@ int SplitBaseCPUKernel::ReSize() {
     }
   }
 
-  MS_ASSERT(param->num_split_ >= 1 && param->num_split_ <= SPLIT_STRIDES_SIZE);
   if (param->split_sizes_[param->num_split_ - 1] == -1) {
     int split_shape_end = input_shape.at(param->split_dim_);
     for (int i = 0; i < param->num_split_ - 1; i++) {
@@ -71,62 +77,55 @@ int SplitBaseCPUKernel::ReSize() {
   }
 
   num_unit_ = param->split_count_ * param->num_split_;
-  thread_n_num_ = MSMIN(thread_count_, num_unit_);
-  MS_ASSERT(thread_n_num_);
-  thread_n_stride_ = UP_DIV(num_unit_, thread_n_num_);
+  thread_n_num_ = MSMIN(op_parameter_->thread_num_, num_unit_);
+  if (thread_n_num_ != 0) {
+    thread_n_stride_ = UP_DIV(num_unit_, thread_n_num_);
+  }
   return RET_OK;
 }
 
-kernel::LiteKernel *CpuSplitInt32KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                               const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter,
-                                               const InnerContext *ctx, const kernel::KernelKey &desc,
-                                               const mindspore::lite::PrimitiveC *primitive) {
-  if (opParameter == nullptr) {
-    MS_LOG(ERROR) << "Input opParameter is nullptr!";
-    return nullptr;
+int SplitBaseCPUKernel::Split(int task_id) {
+  int num_unit_thread = MSMIN(thread_n_stride_, num_unit_ - task_id * thread_n_stride_);
+  if (num_unit_thread <= 0) {
+    return RET_OK;
   }
-  MS_ASSERT(desc.type == schema::PrimitiveType_Split);
-  auto *kernel = new (std::nothrow) SplitCPUKernel(opParameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "new SplitCPUKernel fail!";
-    free(opParameter);
-    return nullptr;
-  }
-  auto ret = kernel->Init();
+  int thread_offset = task_id * thread_n_stride_;
+  auto ret = DoSplit(input_ptr_, output_ptr_.data(), in_tensors_.front()->shape().data(), thread_offset,
+                     num_unit_thread, param, lite::DataTypeSize(in_tensors_.front()->data_type()));
   if (ret != RET_OK) {
-    delete kernel;
-    MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
-    return nullptr;
+    MS_LOG(ERROR) << "Split error task_id[" << task_id << "] error_code[" << ret << "]";
+    return RET_ERROR;
   }
-  return kernel;
+  return RET_OK;
 }
 
-kernel::LiteKernel *CpuSplitFp32KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                              const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter,
-                                              const InnerContext *ctx, const kernel::KernelKey &desc,
-                                              const mindspore::lite::PrimitiveC *primitive) {
-  if (opParameter == nullptr) {
-    MS_LOG(ERROR) << "Input opParameter is nullptr!";
-    return nullptr;
-  }
-  MS_ASSERT(desc.type == schema::PrimitiveType_Split);
-  auto *kernel = new (std::nothrow) SplitCPUKernel(opParameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "new SplitCPUKernel fail!";
-    free(opParameter);
-    return nullptr;
-  }
-  auto ret = kernel->Init();
+static int SplitRun(void *cdata, int task_id) {
+  auto g_kernel = reinterpret_cast<SplitBaseCPUKernel *>(cdata);
+  auto ret = g_kernel->Split(task_id);
   if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
-    delete kernel;
-    return nullptr;
+    MS_LOG(ERROR) << "SplitRun error task_id[" << task_id << "] error_code[" << ret << "]";
+    return RET_ERROR;
   }
-  return kernel;
+  return RET_OK;
 }
 
-REG_KERNEL(kCPU, kNumberTypeInt32, PrimitiveType_Split, CpuSplitInt32KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Split, CpuSplitFp32KernelCreator)
+int SplitBaseCPUKernel::Run() {
+  auto input_tensor = in_tensors_.at(0);
+  input_ptr_ = input_tensor->data_c();
+
+  for (int i = 0; i < param->num_split_; i++) {
+    auto output_tensor = out_tensors_.at(i);
+    output_ptr_.at(i) = output_tensor->data_c();
+  }
+
+  auto ret = ParallelLaunch(this->context_->thread_pool_, SplitRun, this, thread_n_num_);
+  if (ret != RET_OK) {
+    MS_LOG(ERROR) << "split error error_code[" << ret << "]";
+  }
+  return ret;
+}
+
+REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_Split, LiteKernelCreator<SplitBaseCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt32, PrimitiveType_Split, LiteKernelCreator<SplitBaseCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Split, LiteKernelCreator<SplitBaseCPUKernel>)
 }  // namespace mindspore::kernel

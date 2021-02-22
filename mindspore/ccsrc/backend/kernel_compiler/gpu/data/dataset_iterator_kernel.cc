@@ -19,6 +19,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <algorithm>
 #include "backend/kernel_compiler/gpu/data/dataset_utils.h"
 #include "profiler/device/gpu/gpu_profiling.h"
 #include "runtime/device/gpu/gpu_buffer_mgr.h"
@@ -43,8 +44,17 @@ const std::vector<size_t> &DatasetIteratorKernel::GetOutputSizeList() const { re
 const std::vector<size_t> &DatasetIteratorKernel::GetWorkspaceSizeList() const { return workspace_size_list_; }
 
 bool DatasetIteratorKernel::Init(const CNodePtr &kernel_node) {
+  kernel_node_ = kernel_node;
   queue_name_ = GetAttr<std::string>(kernel_node, "shared_name");
-  auto shapes = GetAttr<const std::vector<std::vector<int>>>(kernel_node, "shapes");
+  std::vector<std::vector<int>> shapes;
+  std::vector<std::vector<int64_t>> shapes_me = GetAttr<const std::vector<std::vector<int64_t>>>(kernel_node, "shapes");
+  (void)std::transform(shapes_me.begin(), shapes_me.end(), std::back_inserter(shapes),
+                       [](const std::vector<int64_t> &values) {
+                         std::vector<int> shape;
+                         (void)std::transform(values.begin(), values.end(), std::back_inserter(shape),
+                                              [](const int64_t &value) { return static_cast<int>(value); });
+                         return shape;
+                       });
   auto types = GetAttr<const std::vector<TypePtr>>(kernel_node, "types");
   if (shapes.size() != types.size()) {
     MS_LOG(EXCEPTION) << "Invalid shapes: " << shapes << ", types: " << types;
@@ -76,10 +86,7 @@ bool DatasetIteratorKernel::Init(const CNodePtr &kernel_node) {
 
 void DatasetIteratorKernel::InitSizeLists() { return; }
 
-bool DatasetIteratorKernel::Launch(const std::vector<AddressPtr> &, const std::vector<AddressPtr> &,
-                                   const std::vector<AddressPtr> &outputs, void *stream) {
-  void *addr = nullptr;
-  size_t len = 0;
+bool DatasetIteratorKernel::ReadDevice(void **addr, size_t *len) {
   uint64_t start_time_stamp = 0;
   uint32_t queue_size = 0;
 
@@ -89,7 +96,7 @@ bool DatasetIteratorKernel::Launch(const std::vector<AddressPtr> &, const std::v
       start_time_stamp = profiling_op_->GetTimeStamp();
       queue_size = GpuBufferMgr::GetInstance().Size(handle_);
     }
-    auto ret = GpuBufferMgr::GetInstance().Front(handle_, &addr, &len);
+    auto ret = GpuBufferMgr::GetInstance().Front(handle_, addr, len);
     if (ret == device::SUCCESS) {
       if (profiling_enable_) {
         uint64_t end_time_stamp = profiling_op_->GetTimeStamp();
@@ -120,7 +127,16 @@ bool DatasetIteratorKernel::Launch(const std::vector<AddressPtr> &, const std::v
     MS_LOG(ERROR) << "Get data failed, errcode " << ret;
     return false;
   }
+  return true;
+}
 
+bool DatasetIteratorKernel::Launch(const std::vector<AddressPtr> &, const std::vector<AddressPtr> &,
+                                   const std::vector<AddressPtr> &outputs, void *stream) {
+  void *addr = nullptr;
+  size_t len = 0;
+  if (!ReadDevice(&addr, &len)) {
+    return false;
+  }
   if (total_bytes_ != len) {
     MS_LOG(ERROR) << "Dataset front error. read: " << len << ", expect: " << total_bytes_ << ", ";
     return false;
@@ -128,13 +144,14 @@ bool DatasetIteratorKernel::Launch(const std::vector<AddressPtr> &, const std::v
 
   for (size_t i = 0; i < output_size_list_.size(); i++) {
     void *output_addr = GetDeviceAddress<void>(outputs, i);
-    CHECK_CUDA_RET_WITH_EXCEPT(cudaMemcpyAsync(output_addr, addr, output_size_list_[i], cudaMemcpyDeviceToDevice,
+    CHECK_CUDA_RET_WITH_EXCEPT(kernel_node_,
+                               cudaMemcpyAsync(output_addr, addr, output_size_list_[i], cudaMemcpyDeviceToDevice,
                                                reinterpret_cast<cudaStream_t>(stream)),
                                "Cuda Memcpy Failed");
     addr = reinterpret_cast<unsigned char *>(addr) + output_size_list_[i];
   }
 
-  CHECK_CUDA_RET_WITH_EXCEPT(cudaStreamSynchronize(reinterpret_cast<cudaStream_t>(stream)),
+  CHECK_CUDA_RET_WITH_EXCEPT(kernel_node_, cudaStreamSynchronize(reinterpret_cast<cudaStream_t>(stream)),
                              "cudaStreamSynchronize failed");
   (void)GpuBufferMgr::GetInstance().Pop(handle_);
   return true;

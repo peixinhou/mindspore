@@ -1,4 +1,4 @@
-# Copyright 2020 Huawei Technologies Co., Ltd
+# Copyright 2020-2021 Huawei Technologies Co., Ltd
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -27,7 +27,7 @@ from mindspore import log as logger
 from mindspore import context
 from mindspore.common.tensor import Tensor
 from mindspore.common.parameter import Parameter
-from mindspore.train.summary.summary_record import SummaryRecord
+from mindspore.train.summary.summary_record import SummaryRecord, process_export_options
 from mindspore.train.summary.enums import PluginEnum, ModeEnum
 from mindspore.train.callback import Callback, ModelCheckpoint
 from mindspore.train import lineage_pb2
@@ -89,21 +89,23 @@ class SummaryCollector(Callback):
             For example, you can set {'collect_metric': False} to control not collecting metrics.
             The data that supports control is shown below.
 
-            - collect_metric: Whether to collect training metrics, currently only the loss is collected.
+            - collect_metric (bool): Whether to collect training metrics, currently only the loss is collected.
               The first output will be treated as the loss and it will be averaged.
               Optional: True/False. Default: True.
-            - collect_graph: Whether to collect the computational graph. Currently, only
+            - collect_graph (bool): Whether to collect the computational graph. Currently, only
               training computational graph is collected. Optional: True/False. Default: True.
-            - collect_train_lineage: Whether to collect lineage data for the training phase,
+            - collect_train_lineage (bool): Whether to collect lineage data for the training phase,
               this field will be displayed on the lineage page of Mindinsight. Optional: True/False. Default: True.
-            - collect_eval_lineage: Whether to collect lineage data for the evaluation phase,
+            - collect_eval_lineage (bool): Whether to collect lineage data for the evaluation phase,
               this field will be displayed on the lineage page of Mindinsight. Optional: True/False. Default: True.
-            - collect_input_data: Whether to collect dataset for each training. Currently only image data is supported.
+            - collect_input_data (bool): Whether to collect dataset for each training.
+              Currently only image data is supported.
+              If there are multiple columns of data in the dataset, the first column should be image data.
               Optional: True/False. Default: True.
-            - collect_dataset_graph: Whether to collect dataset graph for the training phase.
+            - collect_dataset_graph (bool): Whether to collect dataset graph for the training phase.
               Optional: True/False. Default: True.
-            - histogram_regular: Collect weight and bias for parameter distribution page and displayed in MindInsight.
-              This field allows regular strings to control which parameters to collect.
+            - histogram_regular (Union[str, None]): Collect weight and bias for parameter distribution page
+              and displayed in MindInsight. This field allows regular strings to control which parameters to collect.
               Default: None, it means only the first five parameters are collected.
               It is not recommended to collect too many parameters at once, as it can affect performance.
               Note that if you collect too many parameters and run out of memory, the training will fail.
@@ -122,11 +124,21 @@ class SummaryCollector(Callback):
             Default: None, which means to follow the behavior as described above. For example, given `collect_freq=10`,
             when the total steps is 600, TensorSummary will be collected 20 steps, while other summary data 61 steps,
             but when the total steps is 20, both TensorSummary and other summary will be collected 3 steps.
-            Also note that when in parallel mode, the total steps will be splitted evenly, which will
+            Also note that when in parallel mode, the total steps will be split evenly, which will
             affect the number of steps TensorSummary will be collected.
         max_file_size (Optional[int]): The maximum size in bytes of each file that can be written to the disk.
             Default: None, which means no limit. For example, to write not larger than 4GB,
             specify `max_file_size=4 * 1024**3`.
+        export_options (Union[None, dict]): Perform custom operations on the export data.
+            Default: None, it means that the data is not exported.
+            Note that the size of export files is not limited by the max_file_size.
+            You can customize the export data with a dictionary. For example, you can set {'tensor_format': 'npy'}
+            to export tensor as npy file. The data that supports control is shown below.
+
+            - tensor_format (Union[str, None]): Customize the export tensor format. Supports ["npy", None].
+              Default: None, it means that the tensor is not exported.
+
+                - npy: export tensor as npy file.
 
     Raises:
         ValueError: If the parameter value is not expected.
@@ -135,13 +147,17 @@ class SummaryCollector(Callback):
 
     Examples:
         >>> # Simple usage:
+        >>> from mindspore.train import Model
         >>> summary_collector = SummaryCollector(summary_dir='./summary_dir')
-        >>> model.train(epoch, dataset, callbacks=summary_collector)
+        >>> dataset = get_dataset('/path/to/MNIST')
+        >>> network = LeNet5()
+        >>> model = Model(network)
+        >>> model.train(epoch=1, dataset=dataset, callbacks=summary_collector)
         >>>
         >>> # Do not collect metric and collect the first layer parameter, others are collected by default
         >>> specified={'collect_metric': False, 'histogram_regular': '^conv1.*'}
         >>> summary_collector = SummaryCollector(summary_dir='./summary_dir', collect_specified_data=specified)
-        >>> model.train(epoch, dataset, callbacks=summary_collector)
+        >>> model.train(epoch=1, dataset=dataset, callbacks=summary_collector)
         >>>
         >>> # Only collect metric, custom lineage data and record data that collected by the summary operator,
         >>> # others are not collected
@@ -151,7 +167,7 @@ class SummaryCollector(Callback):
         >>>                                      keep_default_action=False,
         >>>                                      custom_lineage_data={'version': 'resnet50_v1'}
         >>>                                      )
-        >>> model.train(epoch, dataset, callbacks=summary_collector)
+        >>> model.train(epoch=1, dataset=dataset, callbacks=summary_collector)
     """
 
     _DEFAULT_SPECIFIED_DATA = {
@@ -171,7 +187,8 @@ class SummaryCollector(Callback):
                  keep_default_action=True,
                  custom_lineage_data=None,
                  collect_tensor_freq=None,
-                 max_file_size=None):
+                 max_file_size=None,
+                 export_options=None):
         super(SummaryCollector, self).__init__()
 
         self._summary_dir = self._process_summary_dir(summary_dir)
@@ -186,6 +203,8 @@ class SummaryCollector(Callback):
 
         self._check_positive('max_file_size', max_file_size, allow_none=True)
         self._max_file_size = max_file_size
+
+        self._export_options = process_export_options(export_options)
 
         self._check_action(keep_default_action)
 
@@ -203,7 +222,10 @@ class SummaryCollector(Callback):
         self._dataset_sink_mode = True
 
     def __enter__(self):
-        self._record = SummaryRecord(log_dir=self._summary_dir, max_file_size=self._max_file_size)
+        self._record = SummaryRecord(log_dir=self._summary_dir,
+                                     max_file_size=self._max_file_size,
+                                     raise_exception=False,
+                                     export_options=self._export_options)
         self._first_step, self._dataset_sink_mode = True, True
         return self
 
@@ -315,7 +337,14 @@ class SummaryCollector(Callback):
                              f'expect the follow keys: {list(self._DEFAULT_SPECIFIED_DATA.keys())}')
 
         if 'histogram_regular' in specified_data:
-            check_value_type('histogram_regular', specified_data.get('histogram_regular'), (str, type(None)))
+            regular = specified_data.get('histogram_regular')
+            check_value_type('histogram_regular', regular, (str, type(None)))
+            if isinstance(regular, str):
+                try:
+                    re.match(regular, '')
+                except re.error as exc:
+                    raise ValueError(f'For `collect_specified_data`, the value of `histogram_regular` '
+                                     f'is not a valid regular expression. Detail: {str(exc)}.')
 
         bool_items = set(self._DEFAULT_SPECIFIED_DATA) - {'histogram_regular'}
         for item in bool_items:
@@ -454,17 +483,21 @@ class SummaryCollector(Callback):
         if not self._collect_specified_data.get('collect_input_data'):
             return
 
-        if self._dataset_sink_mode and context.get_context('device_target') == 'Ascend':
+        input_data = getattr(cb_params, 'train_dataset_element', None)
+        if not isinstance(input_data, (Tensor, list, tuple)):
             self._collect_specified_data['collect_input_data'] = False
-            logger.warning('On Ascend device, SummaryCollector is not supported to record input data '
-                           'in dataset sink mode.')
+            logger.warning("The type of input data is not Tensor/list/tuple, "
+                           "so SummaryCollector will not collect input data.")
             return
 
-        input_data = getattr(cb_params, 'train_dataset_element', None)
-        if input_data is None:
+        if not isinstance(input_data, Tensor) and not input_data:
             self._collect_specified_data['collect_input_data'] = False
-            logger.info("The 'train_dataset_element' in cb_params is None, "
-                        "so 'SummaryCollector' will not record the input data.")
+            logger.warning("The 'train_dataset_element' in cb_params is empty, "
+                           "so SummaryCollector will not record the input data.")
+
+            if self._dataset_sink_mode and context.get_context('device_target') == 'Ascend':
+                logger.warning('On Ascend device, SummaryCollector is not supported to record input data '
+                               'in dataset sink mode.')
             return
 
         if isinstance(input_data, (list, tuple)) and input_data:
@@ -487,6 +520,8 @@ class SummaryCollector(Callback):
             train_dataset = cb_params.train_dataset
             dataset_graph = DatasetGraph()
             graph_bytes = dataset_graph.package_dataset_graph(train_dataset)
+            if graph_bytes is None:
+                return
             self._record.add_value('dataset_graph', 'train_dataset', graph_bytes)
 
     def _collect_graphs(self, cb_params):
@@ -497,6 +532,8 @@ class SummaryCollector(Callback):
         network = cb_params.train_network if cb_params.mode == ModeEnum.TRAIN.value else cb_params.eval_network
         graph_proto = network.get_func_graph_proto()
         if graph_proto is None:
+            logger.warning("Can not get graph proto, it may not be 'GRAPH_MODE' in context currently, "
+                           "so SummaryCollector will not collect graph.")
             return
 
         self._record.add_value(PluginEnum.GRAPH.value, 'train_network/auto', graph_proto)
@@ -513,7 +550,7 @@ class SummaryCollector(Callback):
         try:
             self._record.add_value(PluginEnum.SCALAR.value, 'loss/auto', loss)
         except ValueError:
-            logger.warning("The output of network is not a scalar, so will not collect loss in SummaryCollector.")
+            logger.warning("The output of network is not a scalar, so SummaryCollector will not collect loss.")
             self._collect_specified_data['collect_metric'] = False
 
     def _get_loss(self, cb_params):
@@ -532,7 +569,7 @@ class SummaryCollector(Callback):
 
         output = cb_params.net_outputs
         if output is None:
-            logger.warning("Can not find any output by this network, so will not collect loss in SummaryCollector.")
+            logger.warning("Can not find any output by this network, so SummaryCollector will not collect loss.")
             self._is_parse_loss_success = False
             return None
 

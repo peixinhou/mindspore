@@ -19,43 +19,70 @@
 #include <fstream>
 #include <unordered_set>
 #include <utility>
+
+#include "minddata/dataset/engine/runtime_context.h"
 #include "minddata/dataset/include/samplers.h"
 #include "minddata/dataset/include/transforms.h"
+#include "minddata/dataset/util/path.h"
+#include "minddata/dataset/util/status.h"
+
+#include "minddata/dataset/core/client.h"
+#include "minddata/dataset/engine/consumers/tree_consumer.h"
+
+#include "minddata/dataset/kernels/c_func_op.h"
+#include "minddata/dataset/kernels/tensor_op.h"
 
 #ifndef ENABLE_ANDROID
-
 #include "minddata/dataset/engine/ir/cache/dataset_cache_impl.h"
 #endif
 
+#ifndef ENABLE_ANDROID
+#include "minddata/dataset/text/sentence_piece_vocab.h"
+#include "minddata/dataset/text/vocab.h"
+#endif
+
 // Sampler headers (in alphabetical order)
-#include "minddata/dataset/engine/datasetops/source/sampler/sampler.h"
+#include "minddata/dataset/engine/ir/datasetops/source/samplers/samplers_ir.h"
+
+#include "minddata/dataset/engine/ir/datasetops/dataset_node.h"
 
 // IR non-leaf nodes
 #include "minddata/dataset/engine/ir/datasetops/batch_node.h"
-#include "minddata/dataset/engine/ir/datasetops/concat_node.h"
-#include "minddata/dataset/engine/ir/datasetops/map_node.h"
-#include "minddata/dataset/engine/ir/datasetops/project_node.h"
-#include "minddata/dataset/engine/ir/datasetops/rename_node.h"
-#include "minddata/dataset/engine/ir/datasetops/repeat_node.h"
-#include "minddata/dataset/engine/ir/datasetops/shuffle_node.h"
-#include "minddata/dataset/engine/ir/datasetops/skip_node.h"
-#include "minddata/dataset/engine/ir/datasetops/take_node.h"
-#include "minddata/dataset/engine/ir/datasetops/transfer_node.h"
-#include "minddata/dataset/engine/ir/datasetops/zip_node.h"
-
 #ifndef ENABLE_ANDROID
 #include "minddata/dataset/engine/ir/datasetops/bucket_batch_by_length_node.h"
 #include "minddata/dataset/engine/ir/datasetops/build_sentence_piece_vocab_node.h"
 #include "minddata/dataset/engine/ir/datasetops/build_vocab_node.h"
+#include "minddata/dataset/engine/ir/datasetops/concat_node.h"
+#include "minddata/dataset/engine/ir/datasetops/filter_node.h"
+#endif
+
+#include "minddata/dataset/engine/ir/datasetops/map_node.h"
+#include "minddata/dataset/engine/ir/datasetops/project_node.h"
+
+#ifndef ENABLE_ANDROID
+#include "minddata/dataset/engine/ir/datasetops/rename_node.h"
+#endif
+
+#include "minddata/dataset/engine/ir/datasetops/repeat_node.h"
+#include "minddata/dataset/engine/ir/datasetops/shuffle_node.h"
+
+#ifndef ENABLE_ANDROID
+#include "minddata/dataset/engine/ir/datasetops/skip_node.h"
+#include "minddata/dataset/engine/ir/datasetops/take_node.h"
+#include "minddata/dataset/engine/ir/datasetops/transfer_node.h"
+#include "minddata/dataset/engine/ir/datasetops/zip_node.h"
 #endif
 
 #include "minddata/dataset/core/config_manager.h"
-#include "minddata/dataset/util/path.h"
 #include "minddata/dataset/util/random.h"
 #include "minddata/dataset/util/services.h"
 
 // IR leaf nodes
 #include "minddata/dataset/engine/ir/datasetops/source/album_node.h"
+#include "minddata/dataset/engine/ir/datasetops/source/mnist_node.h"
+
+// IR leaf nodes disabled for android
+#ifndef ENABLE_ANDROID
 #include "minddata/dataset/engine/ir/datasetops/source/celeba_node.h"
 #include "minddata/dataset/engine/ir/datasetops/source/cifar100_node.h"
 #include "minddata/dataset/engine/ir/datasetops/source/cifar10_node.h"
@@ -63,12 +90,8 @@
 #include "minddata/dataset/engine/ir/datasetops/source/coco_node.h"
 #include "minddata/dataset/engine/ir/datasetops/source/csv_node.h"
 #include "minddata/dataset/engine/ir/datasetops/source/image_folder_node.h"
-#include "minddata/dataset/engine/ir/datasetops/source/mnist_node.h"
 #include "minddata/dataset/engine/ir/datasetops/source/random_node.h"
 #include "minddata/dataset/engine/ir/datasetops/source/text_file_node.h"
-
-// IR leaf nodes disabled for android
-#ifndef ENABLE_ANDROID
 #include "minddata/dataset/engine/ir/datasetops/source/manifest_node.h"
 #include "minddata/dataset/engine/ir/datasetops/source/minddata_node.h"
 #include "minddata/dataset/engine/ir/datasetops/source/tf_record_node.h"
@@ -79,7 +102,7 @@ namespace mindspore {
 namespace dataset {
 
 // Function to create the iterator, which will build and launch the execution tree.
-std::shared_ptr<Iterator> Dataset::CreateIterator(std::vector<std::string> columns) {
+std::shared_ptr<Iterator> Dataset::CreateIterator(std::vector<std::string> columns, int32_t num_epochs) {
   std::shared_ptr<Iterator> iter;
   try {
     auto ds = shared_from_this();
@@ -91,7 +114,7 @@ std::shared_ptr<Iterator> Dataset::CreateIterator(std::vector<std::string> colum
     }
 
     iter = std::make_shared<Iterator>();
-    Status rc = iter->BuildAndLaunchTree(ds);
+    Status rc = iter->BuildAndLaunchTree(ds, num_epochs);
     if (rc.IsError()) {
       MS_LOG(ERROR) << "CreateIterator failed." << rc;
       return nullptr;
@@ -106,8 +129,10 @@ std::shared_ptr<Iterator> Dataset::CreateIterator(std::vector<std::string> colum
   return iter;
 }
 
+#ifndef ENABLE_ANDROID
 // Function to return a transferred Node that transfers data through a device.
-bool Dataset::DeviceQueue(bool send_epoch_end) {
+bool Dataset::DeviceQueue(std::string queue_name, std::string device_type, int32_t num_epochs, bool send_epoch_end,
+                          int32_t total_batches, bool create_data_info_queue) {
   Status rc;
 
   // Build and launch tree
@@ -118,11 +143,12 @@ bool Dataset::DeviceQueue(bool send_epoch_end) {
     return false;
   }
 
-  // Add TransferNode IR on top of dataset d
-  auto ds = std::make_shared<TransferNode>(shared_from_this()->IRNode(), send_epoch_end);
+  // Add TransferNode IR on top of dataset
+  auto ds = std::make_shared<TransferNode>(shared_from_this()->IRNode(), queue_name, device_type, send_epoch_end,
+                                           total_batches, create_data_info_queue);
 
   // Get ToDevice consumer
-  auto consumer = std::make_unique<ToDevice>(send_epoch_end, -1);
+  auto consumer = std::make_unique<ToDevice>(num_epochs);
   ToDevice *consumer_ = consumer.get();
   rc = consumer->Init(ds);
   if (rc.IsError()) {
@@ -141,7 +167,6 @@ bool Dataset::DeviceQueue(bool send_epoch_end) {
   return true;
 }
 
-#ifndef ENABLE_ANDROID
 // Function to create the saver, which will build and launch the execution tree and save data
 bool Dataset::Save(std::string dataset_path, int32_t num_files, std::string dataset_type) {
   Status rc;
@@ -190,99 +215,59 @@ bool Dataset::Save(std::string dataset_path, int32_t num_files, std::string data
 // Constructor
 Dataset::Dataset() { tree_getters_ = std::make_shared<TreeGetters>(); }
 
-int64_t Dataset::GetDatasetSize() {
+int64_t Dataset::GetDatasetSize(bool estimate) {
   int64_t dataset_size;
-  Status rc;
   std::unique_ptr<NativeRuntimeContext> runtime_context = std::make_unique<NativeRuntimeContext>();
-  rc = runtime_context->Init();
-  if (rc.IsError()) {
-    MS_LOG(ERROR) << "GetDatasetSize: Initializing RuntimeContext failed.";
-    return -1;
-  }
-  if (!tree_getters_->isInitialized()) {
-    rc = tree_getters_->Init(this->IRNode());
-    if (rc.IsError()) {
-      MS_LOG(ERROR) << "GetDatasetSize: Initializing TreeGetters failed.";
-      return -1;
-    }
-  }
-  rc = tree_getters_->GetDatasetSize(&dataset_size);
-  return rc.IsError() ? -1 : dataset_size;
+  RETURN_SECOND_IF_ERROR(runtime_context->Init(), -1);
+  std::shared_ptr<DatasetSizeGetter> size_getter = std::make_shared<DatasetSizeGetter>();
+  RETURN_SECOND_IF_ERROR(size_getter->Init(this->IRNode()), -1);
+  RETURN_SECOND_IF_ERROR(size_getter->GetDatasetSize(&dataset_size, estimate), -1);
+  return dataset_size;
 }
 
 std::vector<DataType> Dataset::GetOutputTypes() {
   std::vector<DataType> types;
-  Status rc;
   std::unique_ptr<NativeRuntimeContext> runtime_context = std::make_unique<NativeRuntimeContext>();
-  rc = runtime_context->Init();
-  if (rc.IsError()) {
-    MS_LOG(ERROR) << "GetOutputTypes: Initializing RuntimeContext failed.";
-    types.clear();
-    return types;
-  }
-  if (!tree_getters_->isInitialized()) {
-    rc = tree_getters_->Init(this->IRNode());
-    if (rc.IsError()) {
-      MS_LOG(ERROR) << "GetOutputTypes: Initializing TreeGetters failed.";
-      types.clear();
-      return types;
-    }
-  }
-  rc = tree_getters_->GetOutputTypes(&types);
-  if (rc.IsError()) {
-    MS_LOG(ERROR) << "GetOutputTypes: Get Output Types failed.";
-    types.clear();
-    return types;
-  }
+  RETURN_SECOND_IF_ERROR(runtime_context->Init(), {});
+  RETURN_SECOND_IF_ERROR(tree_getters_->Init(this->IRNode()), {});
+  RETURN_SECOND_IF_ERROR(tree_getters_->GetOutputTypes(&types), {});
   return types;
 }
 
 std::vector<TensorShape> Dataset::GetOutputShapes() {
   std::vector<TensorShape> shapes;
-  Status rc;
   std::unique_ptr<NativeRuntimeContext> runtime_context = std::make_unique<NativeRuntimeContext>();
-  rc = runtime_context->Init();
-  if (rc.IsError()) {
-    MS_LOG(ERROR) << "GetOutputShapes: Initializing RuntimeContext failed.";
-    shapes.clear();
-    return shapes;
-  }
-  if (!tree_getters_->isInitialized()) {
-    rc = tree_getters_->Init(this->IRNode());
-    if (rc.IsError()) {
-      MS_LOG(ERROR) << "GetOutputShapes: Initializing TreeGetters failed.";
-      shapes.clear();
-      return shapes;
-    }
-  }
-  rc = tree_getters_->GetOutputShapes(&shapes);
-  if (rc.IsError()) {
-    MS_LOG(ERROR) << "GetOutputShapes: Get Output Shapes failed.";
-    shapes.clear();
-    return shapes;
-  }
+  RETURN_SECOND_IF_ERROR(runtime_context->Init(), {});
+  RETURN_SECOND_IF_ERROR(tree_getters_->Init(this->IRNode()), {});
+  RETURN_SECOND_IF_ERROR(tree_getters_->GetOutputShapes(&shapes), {});
   return shapes;
 }
 
 int64_t Dataset::GetNumClasses() {
   int64_t num_classes;
-  auto ds = shared_from_this();
-  Status rc;
   std::unique_ptr<NativeRuntimeContext> runtime_context = std::make_unique<NativeRuntimeContext>();
-  rc = runtime_context->Init();
-  if (rc.IsError()) {
-    MS_LOG(ERROR) << "GetNumClasses: Initializing RuntimeContext failed.";
-    return -1;
-  }
-  if (!tree_getters_->isInitialized()) {
-    rc = tree_getters_->Init(ds->IRNode());
-    if (rc.IsError()) {
-      MS_LOG(ERROR) << "GetNumClasses: Initializing TreeGetters failed.";
-      return -1;
-    }
-  }
-  rc = tree_getters_->GetNumClasses(&num_classes);
-  return rc.IsError() ? -1 : num_classes;
+  RETURN_SECOND_IF_ERROR(runtime_context->Init(), -1);
+  RETURN_SECOND_IF_ERROR(tree_getters_->Init(this->IRNode()), -1);
+  RETURN_SECOND_IF_ERROR(tree_getters_->GetNumClasses(&num_classes), -1);
+  return num_classes;
+}
+
+std::vector<std::string> Dataset::GetColumnNames() {
+  std::vector<std::string> col_names;
+  std::unique_ptr<NativeRuntimeContext> runtime_context = std::make_unique<NativeRuntimeContext>();
+  RETURN_SECOND_IF_ERROR(runtime_context->Init(), {});
+  RETURN_SECOND_IF_ERROR(tree_getters_->Init(this->IRNode()), {});
+  RETURN_SECOND_IF_ERROR(tree_getters_->GetColumnNames(&col_names), {});
+  return col_names;
+}
+
+std::vector<std::pair<std::string, std::vector<int32_t>>> Dataset::GetClassIndexing() {
+  std::vector<std::pair<std::string, std::vector<int32_t>>> output_class_indexing;
+  std::unique_ptr<NativeRuntimeContext> runtime_context = std::make_unique<NativeRuntimeContext>();
+  RETURN_SECOND_IF_ERROR(runtime_context->Init(), {});
+  RETURN_SECOND_IF_ERROR(tree_getters_->Init(this->IRNode()), {});
+  RETURN_SECOND_IF_ERROR(tree_getters_->GetClassIndexing(&output_class_indexing), {});
+  return output_class_indexing;
 }
 
 /// \brief Function to create a SchemaObj
@@ -291,7 +276,7 @@ int64_t Dataset::GetNumClasses() {
 std::shared_ptr<SchemaObj> Schema(const std::string &schema_file) {
   auto schema = std::make_shared<SchemaObj>(schema_file);
 
-  return schema->init() ? schema : nullptr;
+  return schema->Init() ? schema : nullptr;
 }
 
 // FUNCTIONS TO CREATE DATASETS FOR LEAF CLASSES
@@ -307,6 +292,7 @@ std::shared_ptr<AlbumDataset> Album(const std::string &dataset_dir, const std::s
   return ds;
 }
 
+#ifndef ENABLE_ANDROID
 // Function to create a CelebADataset.
 std::shared_ptr<CelebADataset> CelebA(const std::string &dataset_dir, const std::string &usage,
                                       const std::shared_ptr<SamplerObj> &sampler, bool decode,
@@ -376,7 +362,6 @@ std::shared_ptr<ImageFolderDataset> ImageFolder(const std::string &dataset_dir, 
   return ds;
 }
 
-#ifndef ENABLE_ANDROID
 // Function to create a ManifestDataset.
 std::shared_ptr<ManifestDataset> Manifest(const std::string &dataset_file, const std::string &usage,
                                           const std::shared_ptr<SamplerObj> &sampler,
@@ -406,7 +391,6 @@ std::shared_ptr<MindDataDataset> MindData(const std::vector<std::string> &datase
   return ds;
 }
 #endif
-
 // Function to create a MnistDataset.
 std::shared_ptr<MnistDataset> Mnist(const std::string &dataset_dir, const std::string &usage,
                                     const std::shared_ptr<SamplerObj> &sampler,
@@ -416,10 +400,11 @@ std::shared_ptr<MnistDataset> Mnist(const std::string &dataset_dir, const std::s
   return ds;
 }
 
+#ifndef ENABLE_ANDROID
 // Function to overload "+" operator to concat two datasets
 std::shared_ptr<ConcatDataset> operator+(const std::shared_ptr<Dataset> &datasets1,
                                          const std::shared_ptr<Dataset> &datasets2) {
-  return std::make_shared<ConcatDataset>(std::vector({datasets2, datasets1}));
+  return std::make_shared<ConcatDataset>(std::vector({datasets1, datasets2}));
 }
 
 // Function to create a TextFileDataset.
@@ -431,7 +416,6 @@ std::shared_ptr<TextFileDataset> TextFile(const std::vector<std::string> &datase
   return ds;
 }
 
-#ifndef ENABLE_ANDROID
 // Function to create a VOCDataset.
 std::shared_ptr<VOCDataset> VOC(const std::string &dataset_dir, const std::string &task, const std::string &usage,
                                 const std::map<std::string, int32_t> &class_indexing, bool decode,
@@ -441,14 +425,13 @@ std::shared_ptr<VOCDataset> VOC(const std::string &dataset_dir, const std::strin
 
   return ds;
 }
-#endif
 
 // Function to create a ZipDatset.
 std::shared_ptr<ZipDataset> Zip(const std::vector<std::shared_ptr<Dataset>> &datasets) {
   auto ds = std::make_shared<ZipDataset>(datasets);
   return ds;
 }
-
+#endif
 // FUNCTIONS TO CREATE DATASETS FOR DATASET OPS
 // (In alphabetical order)
 
@@ -467,31 +450,46 @@ BucketBatchByLengthDataset::BucketBatchByLengthDataset(
   std::function<TensorRow(TensorRow)> element_length_function,
   const std::map<std::string, std::pair<TensorShape, std::shared_ptr<Tensor>>> &pad_info, bool pad_to_bucket_boundary,
   bool drop_remainder) {
-  auto ds = std::make_shared<BucketBatchByLengthNode>(input->IRNode(), column_names, bucket_boundaries,
-                                                      bucket_batch_sizes, element_length_function, pad_info,
-                                                      pad_to_bucket_boundary, drop_remainder);
+  std::shared_ptr<TensorOp> c_func = nullptr;
+  if (element_length_function != nullptr) {
+    c_func = std::make_shared<CFuncOp>(element_length_function);
+  }
+  auto ds =
+    std::make_shared<BucketBatchByLengthNode>(input->IRNode(), column_names, bucket_boundaries, bucket_batch_sizes,
+                                              c_func, pad_info, pad_to_bucket_boundary, drop_remainder);
 
   ir_node_ = std::static_pointer_cast<DatasetNode>(ds);
 }
 
-#endif
-
 ConcatDataset::ConcatDataset(const std::vector<std::shared_ptr<Dataset>> &datasets) {
   std::vector<std::shared_ptr<DatasetNode>> all_datasets;
-  (void)std::transform(
-    datasets.begin(), datasets.end(), std::back_inserter(all_datasets),
-    [](std::shared_ptr<Dataset> dataset) -> std::shared_ptr<DatasetNode> { return dataset->IRNode(); });
+  (void)std::transform(datasets.begin(), datasets.end(), std::back_inserter(all_datasets),
+                       [](std::shared_ptr<Dataset> dataset) -> std::shared_ptr<DatasetNode> {
+                         return (dataset != nullptr) ? dataset->IRNode() : nullptr;
+                       });
 
   auto ds = std::make_shared<ConcatNode>(all_datasets);
 
   ir_node_ = std::static_pointer_cast<DatasetNode>(ds);
 }
 
+FilterDataset::FilterDataset(std::shared_ptr<Dataset> input, std::function<TensorRow(TensorRow)> predicate,
+                             const std::vector<std::string> &input_columns) {
+  std::shared_ptr<TensorOp> c_func = nullptr;
+  if (predicate) c_func = std::make_shared<CFuncOp>(predicate);
+  auto ds = std::make_shared<FilterNode>(input->IRNode(), c_func, input_columns);
+
+  ir_node_ = std::static_pointer_cast<DatasetNode>(ds);
+}
+#endif
+
+// FIXME - Should be removed once all Tensor op API class has been added
 MapDataset::MapDataset(std::shared_ptr<Dataset> input, std::vector<std::shared_ptr<TensorOperation>> operations,
-                       std::vector<std::string> input_columns, std::vector<std::string> output_columns,
-                       const std::vector<std::string> &project_columns, const std::shared_ptr<DatasetCache> &cache) {
-  auto ds =
-    std::make_shared<MapNode>(input->IRNode(), operations, input_columns, output_columns, project_columns, cache);
+                       const std::vector<std::string> &input_columns, const std::vector<std::string> &output_columns,
+                       const std::vector<std::string> &project_columns, const std::shared_ptr<DatasetCache> &cache,
+                       std::vector<std::shared_ptr<DSCallback>> callbacks) {
+  auto ds = std::make_shared<MapNode>(input->IRNode(), operations, input_columns, output_columns, project_columns,
+                                      cache, callbacks);
 
   ir_node_ = std::static_pointer_cast<DatasetNode>(ds);
 }
@@ -501,21 +499,16 @@ ProjectDataset::ProjectDataset(std::shared_ptr<Dataset> input, const std::vector
 
   ir_node_ = std::static_pointer_cast<DatasetNode>(ds);
 }
-
+#ifndef ENABLE_ANDROID
 RenameDataset::RenameDataset(std::shared_ptr<Dataset> input, const std::vector<std::string> &input_columns,
                              const std::vector<std::string> &output_columns) {
   auto ds = std::make_shared<RenameNode>(input->IRNode(), input_columns, output_columns);
 
   ir_node_ = std::static_pointer_cast<DatasetNode>(ds);
 }
+#endif
 
 RepeatDataset::RepeatDataset(std::shared_ptr<Dataset> input, int32_t count) {
-  // Workaround for repeat == 1, do not inject repeat.
-  if (count == 1) {
-    ir_node_ = input->IRNode();
-    return;
-  }
-
   auto ds = std::make_shared<RepeatNode>(input->IRNode(), count);
 
   ir_node_ = std::static_pointer_cast<DatasetNode>(ds);
@@ -528,6 +521,7 @@ ShuffleDataset::ShuffleDataset(std::shared_ptr<Dataset> input, int32_t buffer_si
   ir_node_ = std::static_pointer_cast<DatasetNode>(ds);
 }
 
+#ifndef ENABLE_ANDROID
 SkipDataset::SkipDataset(std::shared_ptr<Dataset> input, int32_t count) {
   auto ds = std::make_shared<SkipNode>(input->IRNode(), count);
 
@@ -535,13 +529,6 @@ SkipDataset::SkipDataset(std::shared_ptr<Dataset> input, int32_t count) {
 }
 
 TakeDataset::TakeDataset(std::shared_ptr<Dataset> input, int32_t count) {
-  // If count is greater than the number of element in dataset or equal to -1,
-  // all the element in dataset will be taken
-  if (count == -1) {
-    ir_node_ = input->IRNode();
-    return;
-  }
-
   auto ds = std::make_shared<TakeNode>(input->IRNode(), count);
 
   ir_node_ = std::static_pointer_cast<DatasetNode>(ds);
@@ -557,57 +544,35 @@ ZipDataset::ZipDataset(const std::vector<std::shared_ptr<Dataset>> &datasets) {
 
   ir_node_ = std::static_pointer_cast<DatasetNode>(ds);
 }
-
+#endif
 int64_t Dataset::GetBatchSize() {
-  int64_t batch_size;
-  auto ds = shared_from_this();
-  Status rc;
+  int64_t batch_size = -1;
   std::unique_ptr<NativeRuntimeContext> runtime_context = std::make_unique<NativeRuntimeContext>();
-  rc = runtime_context->Init();
-  if (rc.IsError()) {
-    MS_LOG(ERROR) << "GetBatchSize: Initializing RuntimeContext failed.";
-    return -1;
-  }
-  if (!tree_getters_->isInitialized()) {
-    rc = tree_getters_->Init(ds->IRNode());
-    if (rc.IsError()) {
-      MS_LOG(ERROR) << "GetBatchSize: Initializing TreeGetters failed.";
-      return -1;
-    }
-  }
-  rc = tree_getters_->GetBatchSize(&batch_size);
-  return rc.IsError() ? -1 : batch_size;
+  RETURN_SECOND_IF_ERROR(runtime_context->Init(), -1);
+  RETURN_SECOND_IF_ERROR(tree_getters_->Init(this->IRNode()), -1);
+  RETURN_SECOND_IF_ERROR(tree_getters_->GetBatchSize(&batch_size), -1);
+  return batch_size;
 }
 
 int64_t Dataset::GetRepeatCount() {
-  int64_t repeat_count;
-  auto ds = shared_from_this();
-  Status rc;
+  int64_t repeat_count = 0;
   std::unique_ptr<NativeRuntimeContext> runtime_context = std::make_unique<NativeRuntimeContext>();
-  rc = runtime_context->Init();
-  if (rc.IsError()) {
-    MS_LOG(ERROR) << "GetRepeatCount: Initializing RuntimeContext failed.";
-    return -1;
-  }
-  if (!tree_getters_->isInitialized()) {
-    rc = tree_getters_->Init(ds->IRNode());
-    if (rc.IsError()) {
-      MS_LOG(ERROR) << "GetRepeatCount: Initializing TreeGetters failed.";
-      return -1;
-    }
-  }
-  rc = tree_getters_->GetRepeatCount(&repeat_count);
-  return rc.IsError() ? 0 : repeat_count;
+  RETURN_SECOND_IF_ERROR(runtime_context->Init(), -1);
+  RETURN_SECOND_IF_ERROR(tree_getters_->Init(this->IRNode()), 0);
+  RETURN_SECOND_IF_ERROR(tree_getters_->GetRepeatCount(&repeat_count), 0);
+  return repeat_count;
 }
+
 std::shared_ptr<Dataset> Dataset::SetNumWorkers(int32_t num_workers) {
   if (ir_node_ == nullptr || ir_node_->SetNumWorkers(num_workers) == nullptr) {
     return nullptr;
   }
   return shared_from_this();
 }
+
 #ifndef ENABLE_ANDROID
 std::shared_ptr<SentencePieceVocab> Dataset::BuildSentencePieceVocab(
-  const std::vector<std::string> &col_names, uint32_t vocab_size, float character_coverage,
+  const std::vector<std::string> &col_names, int32_t vocab_size, float character_coverage,
   SentencePieceModel model_type, const std::unordered_map<std::string, std::string> &params) {
   auto vocab = std::make_shared<SentencePieceVocab>();
   auto ds = std::make_shared<BuildSentenceVocabNode>(IRNode(), vocab, col_names, vocab_size, character_coverage,
@@ -669,69 +634,75 @@ std::shared_ptr<Vocab> Dataset::BuildVocab(const std::vector<std::string> &colum
   }
   return vocab;
 }
+#endif
+
 std::shared_ptr<BatchDataset> Dataset::Batch(int32_t batch_size, bool drop_remainder) {
   return std::make_shared<BatchDataset>(shared_from_this(), batch_size, drop_remainder);
 }
-#endif
+
 SchemaObj::SchemaObj(const std::string &schema_file) : schema_file_(schema_file), num_rows_(0), dataset_type_("") {}
 
-// SchemaObj init function
-bool SchemaObj::init() {
-  if (schema_file_ != "") {
+// SchemaObj Init function
+Status SchemaObj::Init() {
+  if (!schema_file_.empty()) {
     Path schema_file(schema_file_);
-    if (!schema_file.Exists()) {
-      MS_LOG(ERROR) << "The file " << schema_file << " does not exist or permission denied!";
-      return false;
-    }
+    CHECK_FAIL_RETURN_UNEXPECTED(schema_file.Exists(),
+                                 "The file " + schema_file_ + " does not exist or permission denied!");
 
     nlohmann::json js;
     try {
       std::ifstream in(schema_file_);
       in >> js;
-      if (js.find("columns") == js.end()) {
-        MS_LOG(ERROR) << "\"columns\" node is required in the schema json file.";
-        return false;
-      }
+      CHECK_FAIL_RETURN_UNEXPECTED(js.find("columns") != js.end(),
+                                   "\"columns\" node is required in the schema json file.");
     } catch (const std::exception &err) {
-      MS_LOG(ERROR) << "Schema file failed to load";
-      return false;
+      std::string err_msg = "Schema file failed to load: ";
+      RETURN_STATUS_SYNTAX_ERROR(err_msg);
     }
     return from_json(js);
   }
-  return true;
+  return Status::OK();
 }
 
-// Function to add a column to schema with a mstype de_type
-bool SchemaObj::add_column(std::string name, TypeId de_type, std::vector<int32_t> shape) {
-  nlohmann::json new_column;
-  new_column["name"] = name;
-  // if de_type is mstype
+// Function to add a column to schema with a mstype de_type and known shape
+Status SchemaObj::add_column(const std::string &name, TypeId de_type, const std::vector<int32_t> &shape) {
   DataType data_type = dataset::MSTypeToDEType(de_type);
-  new_column["type"] = data_type.ToString();
-  if (shape.size() > 0) {
-    new_column["shape"] = shape;
-    new_column["rank"] = shape.size();
-  } else {
-    new_column["rank"] = 1;
-  }
-  columns_.push_back(new_column);
-  return true;
+  return add_column(name, data_type.ToString(), shape);
 }
 
-// Function to add a column to schema with a string de_type
-bool SchemaObj::add_column(std::string name, std::string de_type, std::vector<int32_t> shape) {
+// Function to add a column to schema with a string de_type and known shape
+Status SchemaObj::add_column(const std::string &name, const std::string &de_type, const std::vector<int32_t> &shape) {
+  DataType data_type(de_type);
+  CHECK_FAIL_RETURN_UNEXPECTED(data_type != DataType::DE_UNKNOWN, "Type is unknown.");
+
   nlohmann::json new_column;
   new_column["name"] = name;
-  DataType data_type(de_type);
   new_column["type"] = data_type.ToString();
-  if (shape.size() > 0) {
-    new_column["shape"] = shape;
-    new_column["rank"] = shape.size();
-  } else {
-    new_column["rank"] = 1;
-  }
+  new_column["shape"] = shape;
+  new_column["rank"] = shape.size();
+
   columns_.push_back(new_column);
-  return true;
+  return Status::OK();
+}
+
+// Function to add a column to schema with a mstype de_type and without shape
+Status SchemaObj::add_column(const std::string &name, TypeId de_type) {
+  DataType data_type = dataset::MSTypeToDEType(de_type);
+  return add_column(name, data_type.ToString());
+}
+
+// Function to add a column to schema with a string de_type and without shape
+Status SchemaObj::add_column(const std::string &name, const std::string &de_type) {
+  DataType data_type(de_type);
+  CHECK_FAIL_RETURN_UNEXPECTED(data_type != DataType::DE_UNKNOWN, "Type is unknown.");
+
+  nlohmann::json new_column;
+  new_column["name"] = name;
+  new_column["type"] = data_type.ToString();
+  new_column["rank"] = 1;
+
+  columns_.push_back(new_column);
+  return Status::OK();
 }
 
 std::string SchemaObj::to_json() {
@@ -748,7 +719,7 @@ std::string SchemaObj::to_json() {
   return json_file.dump(2);
 }
 
-bool SchemaObj::parse_column(nlohmann::json columns) {
+Status SchemaObj::parse_column(nlohmann::json columns) {
   std::string name, de_type;
   std::vector<int32_t> shape;
 
@@ -758,15 +729,13 @@ bool SchemaObj::parse_column(nlohmann::json columns) {
     for (auto column : columns) {
       auto key_name = column.find("name");
       if (key_name == column.end()) {
-        MS_LOG(ERROR) << "Column's name is missing";
-        return false;
+        RETURN_STATUS_SYNTAX_ERROR("Column's name is missing");
       }
       name = *key_name;
 
       auto key_type = column.find("type");
       if (key_type == column.end()) {
-        MS_LOG(ERROR) << "Column's type is missing";
-        return false;
+        RETURN_STATUS_SYNTAX_ERROR("Column's type is missing");
       }
       de_type = *key_type;
 
@@ -775,17 +744,14 @@ bool SchemaObj::parse_column(nlohmann::json columns) {
       if (key_shape != column.end()) {
         shape.insert(shape.end(), (*key_shape).begin(), (*key_shape).end());
       }
-      if (!add_column(name, de_type, shape)) {
-        return false;
-      }
+      RETURN_IF_NOT_OK(add_column(name, de_type, shape));
     }
   } else if (columns.type() == nlohmann::json::value_t::object) {
     for (const auto &it_child : columns.items()) {
       name = it_child.key();
       auto key_type = it_child.value().find("type");
       if (key_type == it_child.value().end()) {
-        MS_LOG(ERROR) << "Column's type is missing";
-        return false;
+        RETURN_STATUS_SYNTAX_ERROR("Column's type is missing");
       }
       de_type = *key_type;
 
@@ -795,43 +761,60 @@ bool SchemaObj::parse_column(nlohmann::json columns) {
         shape.insert(shape.end(), (*key_shape).begin(), (*key_shape).end());
       }
 
-      if (!add_column(name, de_type, shape)) {
-        return false;
-      }
+      RETURN_IF_NOT_OK(add_column(name, de_type, shape));
     }
   } else {
-    MS_LOG(ERROR) << "columns must be dict or list, columns contain name, type, shape(optional).";
-    return false;
+    RETURN_STATUS_SYNTAX_ERROR("columns must be dict or list, columns contain name, type, shape(optional).");
   }
-  return true;
+  return Status::OK();
 }
 
-bool SchemaObj::from_json(nlohmann::json json_obj) {
+Status SchemaObj::from_json(nlohmann::json json_obj) {
   for (const auto &it_child : json_obj.items()) {
     if (it_child.key() == "datasetType") {
       dataset_type_ = it_child.value();
     } else if (it_child.key() == "numRows") {
       num_rows_ = it_child.value();
     } else if (it_child.key() == "columns") {
-      if (!parse_column(it_child.value())) {
-        MS_LOG(ERROR) << "parse columns failed";
-        return false;
-      }
+      RETURN_IF_NOT_OK(parse_column(it_child.value()));
     } else {
-      MS_LOG(ERROR) << "Unknown field " << it_child.key();
-      return false;
+      RETURN_STATUS_SYNTAX_ERROR("Unknown field " + it_child.key());
     }
   }
   if (columns_.empty()) {
-    MS_LOG(ERROR) << "Columns are missing.";
-    return false;
+    RETURN_STATUS_SYNTAX_ERROR("Columns are missing.");
   }
-  if (num_rows_ <= 0) {
-    MS_LOG(ERROR) << "numRows must be greater than 0";
-    return false;
+  if (num_rows_ < 0) {
+    RETURN_STATUS_SYNTAX_ERROR("numRows must be greater than or equal to 0");
   }
 
-  return true;
+  return Status::OK();
+}
+
+Status SchemaObj::FromJSONString(const std::string &json_string) {
+  try {
+    nlohmann::json js = nlohmann::json::parse(json_string);
+    CHECK_FAIL_RETURN_UNEXPECTED(js.find("columns") != js.end(),
+                                 "\"columns\" node is required in the schema json JSON.");
+    RETURN_IF_NOT_OK(from_json(js));
+  } catch (const std::exception &err) {
+    std::string err_msg = "FromJSONString: JSON string failed to parse: ";
+    err_msg += err.what();
+    RETURN_STATUS_SYNTAX_ERROR(err_msg);
+  }
+  return Status::OK();
+}
+
+Status SchemaObj::ParseColumnString(const std::string &json_string) {
+  try {
+    nlohmann::json js = nlohmann::json::parse(json_string);
+    RETURN_IF_NOT_OK(parse_column(js));
+  } catch (const std::exception &err) {
+    std::string err_msg = "ParseColumnString: JSON string failed to parse: ";
+    err_msg += err.what();
+    RETURN_STATUS_SYNTAX_ERROR(err_msg);
+  }
+  return Status::OK();
 }
 
 // OTHER FUNCTIONS
@@ -853,6 +836,8 @@ AlbumDataset::AlbumDataset(const std::string &dataset_dir, const std::string &da
   auto ds = std::make_shared<AlbumNode>(dataset_dir, data_schema, column_names, decode, sampler, cache);
   ir_node_ = std::static_pointer_cast<DatasetNode>(ds);
 }
+
+#ifndef ENABLE_ANDROID
 CelebADataset::CelebADataset(const std::string &dataset_dir, const std::string &usage,
                              const std::shared_ptr<SamplerObj> &sampler, bool decode,
                              const std::set<std::string> &extensions, const std::shared_ptr<DatasetCache> &cache) {
@@ -904,7 +889,6 @@ ImageFolderDataset::ImageFolderDataset(const std::string &dataset_dir, bool deco
   ir_node_ = std::static_pointer_cast<DatasetNode>(ds);
 }
 
-#ifndef ENABLE_ANDROID
 ManifestDataset::ManifestDataset(const std::string &dataset_file, const std::string &usage,
                                  const std::shared_ptr<SamplerObj> &sampler,
                                  const std::map<std::string, int32_t> &class_indexing, bool decode,
@@ -926,40 +910,41 @@ MindDataDataset::MindDataDataset(const std::vector<std::string> &dataset_files,
   ir_node_ = std::static_pointer_cast<DatasetNode>(ds);
 }
 #endif
+
 MnistDataset::MnistDataset(const std::string &dataset_dir, const std::string &usage,
                            const std::shared_ptr<SamplerObj> &sampler, const std::shared_ptr<DatasetCache> &cache) {
   auto ds = std::make_shared<MnistNode>(dataset_dir, usage, sampler, cache);
   ir_node_ = std::static_pointer_cast<DatasetNode>(ds);
 }
+
+#ifndef ENABLE_ANDROID
 TextFileDataset::TextFileDataset(const std::vector<std::string> &dataset_files, int64_t num_samples,
                                  ShuffleMode shuffle, int32_t num_shards, int32_t shard_id,
                                  const std::shared_ptr<DatasetCache> &cache) {
   auto ds = std::make_shared<TextFileNode>(dataset_files, num_samples, shuffle, num_shards, shard_id, cache);
   ir_node_ = std::static_pointer_cast<DatasetNode>(ds);
 }
-#ifndef ENABLE_ANDROID
+
 VOCDataset::VOCDataset(const std::string &dataset_dir, const std::string &task, const std::string &usage,
                        const std::map<std::string, int32_t> &class_indexing, bool decode,
                        const std::shared_ptr<SamplerObj> &sampler, const std::shared_ptr<DatasetCache> &cache) {
   auto ds = std::make_shared<VOCNode>(dataset_dir, task, usage, class_indexing, decode, sampler, cache);
   ir_node_ = std::static_pointer_cast<DatasetNode>(ds);
 }
-#endif
+
 RandomDataDataset::RandomDataDataset(const int32_t &total_rows, std::shared_ptr<SchemaObj> schema,
                                      const std::vector<std::string> &columns_list,
-                                     const std::shared_ptr<SamplerObj> &sampler, std::shared_ptr<DatasetCache> cache) {
-  auto ds =
-    std::make_shared<RandomNode>(total_rows, std::move(schema), std::move(columns_list), std::move(sampler), cache);
+                                     std::shared_ptr<DatasetCache> cache) {
+  auto ds = std::make_shared<RandomNode>(total_rows, std::move(schema), std::move(columns_list), cache);
   ir_node_ = std::static_pointer_cast<DatasetNode>(ds);
 }
 RandomDataDataset::RandomDataDataset(const int32_t &total_rows, std::string schema_path,
                                      const std::vector<std::string> &columns_list,
-                                     const std::shared_ptr<SamplerObj> &sampler, std::shared_ptr<DatasetCache> cache) {
-  auto ds = std::make_shared<RandomNode>(total_rows, std::move(schema_path), std::move(columns_list),
-                                         std::move(sampler), cache);
+                                     std::shared_ptr<DatasetCache> cache) {
+  auto ds = std::make_shared<RandomNode>(total_rows, std::move(schema_path), std::move(columns_list), cache);
   ir_node_ = std::static_pointer_cast<DatasetNode>(ds);
 }
-#ifndef ENABLE_ANDROID
+
 TFRecordDataset::TFRecordDataset(const std::vector<std::string> &dataset_files, std::string schema,
                                  const std::vector<std::string> &columns_list, int64_t num_samples, ShuffleMode shuffle,
                                  int32_t num_shards, int32_t shard_id, bool shard_equal_rows,
@@ -976,6 +961,7 @@ TFRecordDataset::TFRecordDataset(const std::vector<std::string> &dataset_files, 
                                            shard_id, shard_equal_rows, cache);
   ir_node_ = std::static_pointer_cast<DatasetNode>(ds);
 }
+
 #endif
 }  // namespace dataset
 }  // namespace mindspore

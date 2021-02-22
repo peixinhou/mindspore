@@ -28,18 +28,18 @@ DefaultAllocator::DefaultAllocator() = default;
 DefaultAllocator::~DefaultAllocator() { Clear(); }
 
 void DefaultAllocator::SetContext(const AllocatorContext &ctx) {
-  lock_flag_ = ctx.lockFlag;
-  shift_factor_ = ctx.shiftFactor;
+  lockFlag_ = ctx.lockFlag;
+  shiftFactor_ = ctx.shiftFactor;
 }
 
 void DefaultAllocator::Lock() {
-  if (lock_flag_) {
+  if (lockFlag_) {
     lock_.lock();
   }
 }
 
 void DefaultAllocator::UnLock() {
-  if (lock_flag_) {
+  if (lockFlag_) {
     lock_.unlock();
   }
 }
@@ -49,12 +49,16 @@ void *DefaultAllocator::Malloc(size_t size) {
     MS_LOG(ERROR) << "MallocData out of max_size, size: " << size;
     return nullptr;
   }
+  if (this->total_size_ >= MAX_THREAD_POOL_SIZE) {
+    MS_LOG(ERROR) << "Memory pool is exhausted";
+    return nullptr;
+  }
   Lock();
-  auto iter = free_list_.lower_bound(size);
-  if (iter != free_list_.end() && (iter->second->size >= size) && (iter->second->size < (size << shift_factor_))) {
+  auto iter = freeList_.lower_bound(size);
+  if (iter != freeList_.end() && (iter->second->size >= size) && (iter->second->size < (size << shiftFactor_))) {
     auto membuf = iter->second;
-    free_list_.erase(iter);
-    allocated_list_[membuf->buf] = membuf;
+    freeList_.erase(iter);
+    allocatedList_[membuf->buf] = membuf;
     UnLock();
     return membuf->buf;
   }
@@ -65,10 +69,11 @@ void *DefaultAllocator::Malloc(size_t size) {
     UnLock();
     return nullptr;
   }
+  this->total_size_ += size;
   membuf->size = size;
   membuf->buf = reinterpret_cast<char *>(membuf.get()) + sizeof(MemBuf);
   auto bufPtr = membuf->buf;
-  allocated_list_[bufPtr] = membuf.release();
+  allocatedList_[bufPtr] = membuf.release();
   UnLock();
   return bufPtr;
 }
@@ -78,11 +83,11 @@ void DefaultAllocator::Free(void *buf) {
     return;
   }
   Lock();
-  auto iter = allocated_list_.find(buf);
-  if (iter != allocated_list_.end()) {
+  auto iter = allocatedList_.find(buf);
+  if (iter != allocatedList_.end()) {
     auto membuf = iter->second;
-    allocated_list_.erase(iter);
-    free_list_.insert(std::make_pair(membuf->size, membuf));
+    allocatedList_.erase(iter);
+    freeList_.insert(std::make_pair(membuf->size, membuf));
     UnLock();
     return;
   }
@@ -91,35 +96,18 @@ void DefaultAllocator::Free(void *buf) {
   buf = nullptr;
 }
 
-size_t DefaultAllocator::GetTotalSize() {
-  Lock();
-  size_t totalSize = 0;
-
-  for (auto &it : allocated_list_) {
-    auto membuf = it.second;
-    totalSize += membuf->size;
-  }
-
-  for (auto &it : free_list_) {
-    auto membuf = it.second;
-    totalSize += membuf->size;
-  }
-  UnLock();
-  return totalSize;
-}
-
 void DefaultAllocator::Clear() {
   Lock();
 
-  for (auto &it : allocated_list_) {
+  for (auto &it : allocatedList_) {
     free(it.second);
   }
-  allocated_list_.clear();
+  allocatedList_.clear();
 
-  for (auto &it : free_list_) {
+  for (auto &it : freeList_) {
     free(it.second);
   }
-  free_list_.clear();
+  freeList_.clear();
   UnLock();
 }
 }  // namespace mindspore::lite

@@ -26,27 +26,29 @@ namespace mindspore::kernel {
 
 class FullConnectionOpenCLKernel : public OpenCLKernel {
  public:
-  FullConnectionOpenCLKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
-                             const std::vector<lite::Tensor *> &outputs)
-      : OpenCLKernel(parameter, inputs, outputs) {}
+  using OpenCLKernel::OpenCLKernel;
   ~FullConnectionOpenCLKernel() override = default;
 
-  int Init() override;
   int Run() override;
+  int Prepare() override;
+  int CheckSpecs() override;
+  int InitWeights() override;
+  void SetConstArgs() override;
+  void SetGlobalLocal() override;
+  int Tune() override { return lite::RET_OK; }
 
  private:
-  void PadWeight();
-
-  cl::Kernel kernel_;
+  int InitFilter();
+  int InitBias();
   void *padWeight_{nullptr};
   void *bias_{nullptr};
   bool enable_fp16_{false};
   bool transposeA{false};
   bool transposeB{true};
-  float activation_min_{-FLT_MAX};
-  float activation_max_{FLT_MAX};
-  Image2DInfo inShape = Image2DInfo(nullptr);
-  Image2DInfo outShape = Image2DInfo(nullptr);
+  bool weight_var_{false};
+  int N_{1};
+  int CI_remainder_{1};
+  int CO_{1};
 };
 }  // namespace mindspore::kernel
 

@@ -1,5 +1,5 @@
 /**
- * Copyright 2019 Huawei Technologies Co., Ltd
+ * Copyright 2019-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -75,7 +75,7 @@ class ProjectOp : public PipelineOp {
   // However, the ProjectOp is defined as a inlined operator, so it is invalid to launch the
   // functor since this op runs inlined inside another operator. The function is overloaded to
   // ensure that it is not called by mistake (it will generate an error).
-  // @return Status - The error code returned.
+  // @return Status The status code returned
   Status operator()() override;
 
   // Gets a buffer from the child node and projects that buffer. The caller is typically our parent node.
@@ -93,19 +93,13 @@ class ProjectOp : public PipelineOp {
 
   // Base-class override for special eoe handler.
   // Inline operators must override this because there is no connector to push eoe onto.
-  // @return Status - The error code returned.
+  // @return Status The status code returned
   Status EoeReceived(int32_t worker_id) override;
 
   // Base-class override for special eof handler.
   // Inline operators must override this because there is no connector to push eof onto.
-  // @return Status - The error code returned.
+  // @return Status The status code returned
   Status EofReceived(int32_t worker_id) override;
-
-  // Base-class override for NodePass visitor acceptor.
-  // @param p - Pointer to the NodePass to be accepted.
-  // @param modified - Whether this node visit modified the pipeline.
-  // @return - Status of the node visit.
-  Status Accept(NodePass *p, bool *modified) override;
 
   // Op name getter
   // @return Name of the current Op

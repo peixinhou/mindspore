@@ -26,6 +26,8 @@ from mindspore.parallel._utils import _get_device_num, _get_parallel_mode, _get_
 from mindspore.context import ParallelMode
 from mindspore.nn.wrap.grad_reducer import DistributedGradReducer
 
+from src.lr_schedule import dynamic_lr
+
 class DenseLayer(nn.Cell):
     """
     Dense layer definition
@@ -43,18 +45,18 @@ class DenseLayer(nn.Cell):
         self.has_bias = validator.check_bool(has_bias)
 
         if isinstance(weight_init, Tensor):
-            if weight_init.dim() != 2 or weight_init.shape()[0] != out_channels or \
+            if weight_init.ndim != 2 or weight_init.shape()[0] != out_channels or \
                     weight_init.shape()[1] != in_channels:
                 raise ValueError("weight_init shape error")
 
-        self.weight = Parameter(initializer(weight_init, [out_channels, in_channels]), name="weight")
+        self.weight = Parameter(initializer(weight_init, [out_channels, in_channels]))
 
         if self.has_bias:
             if isinstance(bias_init, Tensor):
-                if bias_init.dim() != 1 or bias_init.shape()[0] != out_channels:
+                if bias_init.ndim != 1 or bias_init.shape()[0] != out_channels:
                     raise ValueError("bias_init shape error")
 
-            self.bias = Parameter(initializer(bias_init, [out_channels]), name="bias")
+            self.bias = Parameter(initializer(bias_init, [out_channels]))
 
         self.matmul = P.MatMul(transpose_b=True)
         self.bias_add = P.BiasAdd()
@@ -199,7 +201,7 @@ class NetWithLossClass(nn.Cell):
     """
     def __init__(self, network):
         super(NetWithLossClass, self).__init__(auto_prefix=False)
-        #self.loss = nn.SoftmaxCrossEntropyWithLogits(is_grad=False, sparse=True)
+        #self.loss = nn.SoftmaxCrossEntropyWithLogits(sparse=True)
         self.loss = nn.SoftmaxCrossEntropyWithLogits(sparse=True)
         self.network = network
         self.reducesum = P.ReduceSum(keep_dims=False)
@@ -223,14 +225,16 @@ class TrainStepWrap(nn.Cell):
     """
     TrainStepWrap definition
     """
-    def __init__(self, network, sens=16384.0):
+    def __init__(self, network, total_steps=1, sens=16384.0):
         super(TrainStepWrap, self).__init__(auto_prefix=False)
         self.network = network
         self.network.set_train()
         self.network.add_flags(defer_inline=True)
         self.weights = ParameterTuple(network.trainable_params())
+
+        lr = dynamic_lr(0.01, total_steps, 5000)
         self.optimizer = nn.Adam(self.weights,
-                                 learning_rate=0.00382059,
+                                 learning_rate=lr,
                                  beta1=0.9,
                                  beta2=0.999,
                                  eps=1e-8,
@@ -273,7 +277,7 @@ class PredictWithSigmoid(nn.Cell):
         self.squeeze = P.Squeeze()
         self.k = k
         self.num_eval_neg = num_eval_neg
-        self.gather = P.GatherV2()
+        self.gather = P.Gather()
         self.reshape = P.Reshape()
         self.reducesum = P.ReduceSum(keep_dims=False)
         self.notequal = P.NotEqual()

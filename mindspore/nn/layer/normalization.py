@@ -1,4 +1,4 @@
-# Copyright 2020 Huawei Technologies Co., Ltd
+# Copyright 2020-2021 Huawei Technologies Co., Ltd
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -26,7 +26,7 @@ from mindspore.communication import management
 from mindspore.ops import _selected_ops
 from ..cell import Cell
 
-__all__ = ['BatchNorm1d', 'BatchNorm2d', 'LayerNorm', 'GroupNorm', 'GlobalBatchNorm']
+__all__ = ['BatchNorm1d', 'BatchNorm2d', 'LayerNorm', 'GroupNorm', 'GlobalBatchNorm', 'InstanceNorm2d']
 
 
 class _BatchNorm(Cell):
@@ -47,6 +47,7 @@ class _BatchNorm(Cell):
                  input_dims='2d',
                  data_format='NCHW'):
         super(_BatchNorm, self).__init__()
+        validator.check_value_type('num_features', num_features, [int], self.cls_name)
         if num_features < 1:
             raise ValueError("num_features must be at least 1")
 
@@ -87,8 +88,7 @@ class _BatchNorm(Cell):
         self.cast = P.Cast()
         self.dtype = P.DType()
         self.reshape = P.Reshape()
-        self.is_ascend = context.get_context("device_target") == "Ascend"
-        self.is_gpu = context.get_context("device_target") == "GPU"
+        self._target = context.get_context("device_target")
         self.is_graph_mode = context.get_context("mode") == context.GRAPH_MODE
         self.momentum = 1.0 - momentum
         if context.get_context("enable_ge"):
@@ -96,22 +96,22 @@ class _BatchNorm(Cell):
         else:
             self.is_ge_backend = False
 
-        if self.is_graph_mode and (self.is_ge_backend or self.is_ascend):
+        if self._target == "Ascend":
             self.bn_train = P.BatchNorm(is_training=True,
-                                        epsilon=self.eps)
-        elif self.is_gpu:
+                                        epsilon=self.eps,
+                                        momentum=self.momentum)
+        if self._target == "GPU":
             self.bn_train = P.FusedBatchNormEx(mode=1,
                                                epsilon=self.eps,
                                                momentum=self.momentum,
                                                data_format=self.format)
-        else:
+        if self._target == "CPU":
             self.bn_train = P.FusedBatchNorm(mode=1,
                                              epsilon=self.eps,
                                              momentum=self.momentum)
         self.bn_infer = P.BatchNorm(is_training=False, epsilon=self.eps, data_format=self.format)
-        self.enable_global_sync = self.is_global and (self.is_ge_backend or (self.is_graph_mode and self.is_ascend))
-        self.enable_default_train = self.is_graph_mode and not self.is_global and \
-                                    (self.is_ge_backend or self.is_ascend)
+        self.enable_global_sync = self.is_global and (self.is_ge_backend or\
+            (self.is_graph_mode and self._target == "Ascend"))
 
         data_parallel_strategy = ((1,), (1,))
         data_parallel_strategy_one = ((1,), ())
@@ -167,21 +167,6 @@ class _BatchNorm(Cell):
             if self.enable_global_sync:
                 axes, re_shape = _shape_infer(F.shape(x), self.num_features)
                 return self._global_sync(x, axes, re_shape)
-
-            if self.enable_default_train:
-                y, batch_mean, batch_var, _, _ = self.bn_train(x,
-                                                               self.gamma,
-                                                               self.beta,
-                                                               None,
-                                                               None)
-
-                mean_sub = self.sub_mean(self.moving_mean, batch_mean)
-                temp_mean = self.mul_mean(mean_sub, self.momentum)
-                mean_sub2 = self.sub_var(self.moving_variance, batch_var)
-                temp_variance = self.mul_var(mean_sub2, self.momentum)
-                y = F.depend(y, self.assign_sub_mean(self.moving_mean, temp_mean))
-                y = F.depend(y, self.assign_sub_var(self.moving_variance, temp_variance))
-                return y
 
             return self.bn_train(x,
                                  self.gamma,
@@ -252,7 +237,7 @@ class BatchNorm1d(_BatchNorm):
 
     Note:
         The implementation of BatchNorm is different in graph mode and pynative mode, therefore the mode is not
-        recommended to be changed after net was initilized.
+        recommended to be changed after net was initialized.
 
     Args:
         num_features (int): `C` from an expected input of size (N, C).
@@ -283,10 +268,23 @@ class BatchNorm1d(_BatchNorm):
     Outputs:
         Tensor, the normalized, scaled, offset tensor, of shape :math:`(N, C_{out})`.
 
+    Supported Platforms:
+        ``Ascend``
+
+    Raises:
+        TypeError: If `num_features` is not an int.
+        TypeError: If `eps` is not a float.
+        ValueError: If `num_features` is less than 1.
+        ValueError: If `momentum` is not in range [0, 1].
+
     Examples:
-        >>> net = nn.BatchNorm1d(num_features=16)
-        >>> input = Tensor(np.random.randint(0, 255, [3, 16]), mindspore.float32)
-        >>> net(input)
+        >>> net = nn.BatchNorm1d(num_features=4)
+        >>> np.random.seed(0)
+        >>> input = Tensor(np.random.randint(0, 255, [2, 4]), mindspore.float32)
+        >>> output = net(input)
+        >>> print(output)
+        [[171.99915   46.999763  116.99941  191.99904 ]
+         [ 66.999664 250.99875   194.99902  102.99948 ]]
     """
 
     def __init__(self,
@@ -311,7 +309,7 @@ class BatchNorm1d(_BatchNorm):
                                           input_dims='1d')
 
     def _check_data_dim(self, x):
-        if x.dim() != 2:
+        if x.ndim != 2:
             pass
 
 
@@ -332,7 +330,10 @@ class BatchNorm2d(_BatchNorm):
 
     Note:
         The implementation of BatchNorm is different in graph mode and pynative mode, therefore that mode can not be
-        changed after net was initilized.
+        changed after net was initialized.
+        Note that the formula for updating the running_mean and running_var is
+        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \times x_t + \text{momentum} \times \hat{x}`,
+        where :math:`\hat{x}` is the estimated statistic and :math:`x_t` is the new observed value.
 
     Args:
         num_features (int): `C` from an expected input of size (N, C, H, W).
@@ -365,10 +366,28 @@ class BatchNorm2d(_BatchNorm):
     Outputs:
         Tensor, the normalized, scaled, offset tensor, of shape :math:`(N, C_{out}, H_{out}, W_{out})`.
 
+    Raises:
+        TypeError: If `num_features` is not an int.
+        TypeError: If `eps` is not a float.
+        ValueError: If `num_features` is less than 1.
+        ValueError: If `momentum` is not in range [0, 1].
+        ValueError: If `data_format` is neither 'NHWC' not 'NCHW'.
+
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> net = nn.BatchNorm2d(num_features=3)
-        >>> input = Tensor(np.random.randint(0, 255, [1, 3, 224, 224]), mindspore.float32)
-        >>> net(input)
+        >>> np.random.seed(0)
+        >>> input = Tensor(np.random.randint(0, 255, [1, 3, 2, 2]), mindspore.float32)
+        >>> output = net(input)
+        >>> print(output)
+        [[[[171.99915   46.999763 ]
+           [116.99941  191.99904  ]]
+          [[ 66.999664 250.99875  ]
+           [194.99902  102.99948  ]]
+          [[  8.999955 210.99895  ]
+           [ 20.999895 241.9988   ]]]]
     """
 
     def __init__(self,
@@ -395,8 +414,104 @@ class BatchNorm2d(_BatchNorm):
                                           data_format=data_format)
 
     def _check_data_dim(self, x):
-        if x.dim() != 4:
+        if x.ndim != 4:
             pass
+
+
+@constexpr
+def _check_3d_shape(input_shape):
+    if len(input_shape) != 5:
+        raise ValueError("For BatchNorm3d, input data must be 5-dimensional.")
+
+
+class BatchNorm3d(Cell):
+    r"""
+    Batch normalization layer over a 5D input.
+
+    Batch Normalization is widely used in convolutional networks. This layer
+    applies Batch Normalization over a 5D input (a mini-batch of 3D inputs with
+    additional channel dimension) to avoid internal covariate shift.
+
+    .. math::
+        y = \frac{x - \mathrm{E}[x]}{\sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
+
+    Note:
+        The implementation of BatchNorm is different in graph mode and pynative mode, therefore that mode can not be
+        changed after net was initialized.
+        Note that the formula for updating the running_mean and running_var is
+        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \times x_t + \text{momentum} \times \hat{x}`,
+        where :math:`\hat{x}` is the estimated statistic and :math:`x_t` is the new observed value.
+
+    Args:
+        num_features (int): `C` from an expected input of size (N, C, D, H, W).
+        eps (float): A value added to the denominator for numerical stability. Default: 1e-5.
+        momentum (float): A floating hyperparameter of the momentum for the
+            running_mean and running_var computation. Default: 0.9.
+        affine (bool): A bool value. When set to True, gamma and beta can be learned. Default: True.
+        gamma_init (Union[Tensor, str, Initializer, numbers.Number]): Initializer for the gamma weight.
+            The values of str refer to the function `initializer` including 'zeros', 'ones', etc. Default: 'ones'.
+        beta_init (Union[Tensor, str, Initializer, numbers.Number]): Initializer for the beta weight.
+            The values of str refer to the function `initializer` including 'zeros', 'ones', etc. Default: 'zeros'.
+        moving_mean_init (Union[Tensor, str, Initializer, numbers.Number]): Initializer for the moving mean.
+            The values of str refer to the function `initializer` including 'zeros', 'ones', etc. Default: 'zeros'.
+        moving_var_init (Union[Tensor, str, Initializer, numbers.Number]): Initializer for the moving variance.
+            The values of str refer to the function `initializer` including 'zeros', 'ones', etc. Default: 'ones'.
+        use_batch_statistics (bool): If true, use the mean value and variance value of current batch data. If false,
+            use the mean value and variance value of specified value. If None, the training process will use the mean
+            and variance of current batch data and track the running mean and variance, the evaluation process will use
+            the running mean and variance. Default: None.
+        data_format (str): The optional value for data format is 'NCDHW'. Default: 'NCDHW'.
+
+    Inputs:
+        - **input** (Tensor) - Tensor of shape :math:`(N, C_{in}, D_{in}, H_{in}, W_{in})`.
+
+    Outputs:
+        Tensor, the normalized, scaled, offset tensor, of shape :math:`(N, C_{out}, D_{out},H_{out}, W_{out})`.
+
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
+    Examples:
+        >>> net = nn.BatchNorm3d(num_features=3)
+        >>> np.random.seed(0)
+        >>> input = Tensor(np.random.randint(0, 255, [16, 3, 10, 32, 32]), mindspore.float32)
+        >>> output = net(input)
+        >>> print(output.shape)
+        (16, 3, 10, 32, 32)
+    """
+
+    def __init__(self,
+                 num_features,
+                 eps=1e-5,
+                 momentum=0.9,
+                 affine=True,
+                 gamma_init='ones',
+                 beta_init='zeros',
+                 moving_mean_init='zeros',
+                 moving_var_init='ones',
+                 use_batch_statistics=None,
+                 data_format='NCDHW'):
+        super(BatchNorm3d, self).__init__()
+        self.format = validator.check_string(data_format, ['NCDHW'], 'format', self.cls_name)
+        self.reshape = P.Reshape()
+        self.bn2d = BatchNorm2d(num_features=num_features,
+                                eps=eps,
+                                momentum=momentum,
+                                affine=affine,
+                                gamma_init=gamma_init,
+                                beta_init=beta_init,
+                                moving_mean_init=moving_mean_init,
+                                moving_var_init=moving_var_init,
+                                use_batch_statistics=use_batch_statistics,
+                                data_format="NCHW")
+
+    def construct(self, input_x):
+        x_shape = F.shape(input_x)
+        _check_3d_shape(x_shape)
+        input_x = self.reshape(input_x, (x_shape[0], x_shape[1], x_shape[2]*x_shape[3], x_shape[4]))
+        bn2d_out = self.bn2d(input_x)
+        bn3d_out = self.reshape(bn2d_out, x_shape)
+        return bn3d_out
 
 
 class GlobalBatchNorm(_BatchNorm):
@@ -421,6 +536,7 @@ class GlobalBatchNorm(_BatchNorm):
         eps (float): A value added to the denominator for numerical stability. Default: 1e-5.
         momentum (float): A floating hyperparameter of the momentum for the
             running_mean and running_var computation. Default: 0.9.
+        affine (bool): A bool value. When set to True, gamma and beta can be learned. Default: True.
         gamma_init (Union[Tensor, str, Initializer, numbers.Number]): Initializer for the gamma weight.
             The values of str refer to the function `initializer` including 'zeros', 'ones', 'xavier_uniform',
             'he_uniform', etc. Default: 'ones'.
@@ -444,10 +560,41 @@ class GlobalBatchNorm(_BatchNorm):
     Outputs:
         Tensor, the normalized, scaled, offset tensor, of shape :math:`(N, C_{out}, H_{out}, W_{out})`.
 
+    Raises:
+        TypeError: If `num_features` or `device_num_each_group` is not an int.
+        TypeError: If `eps` is not a float.
+        ValueError: If `num_features` is less than 1.
+        ValueError: If `momentum` is not in range [0, 1].
+        ValueError: If `device_num_each_group` is less than 2.
+
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
-        >>> global_bn_op = nn.GlobalBatchNorm(num_features=3, device_num_each_group=4)
-        >>> input = Tensor(np.random.randint(0, 255, [1, 3, 224, 224]), mindspore.float32)
-        >>> global_bn_op(input)
+        >>> # This example should be run with multiple processes.
+        >>> # Please refer to the tutorial > Distributed Training on mindspore.cn.
+        >>> import numpy as np
+        >>> from mindspore.communication import init
+        >>> from mindspore import context
+        >>> from mindspore.context import ParallelMode
+        >>> from mindspore import nn, Tensor
+        >>> from mindspore.common import dtype as mstype
+        >>>
+        >>> context.set_context(mode=context.GRAPH_MODE)
+        >>> init()
+        >>> context.reset_auto_parallel_context()
+        >>> context.set_auto_parallel_context(parallel_mode=ParallelMode.DATA_PARALLEL)
+        >>> np.random.seed(0)
+        >>> global_bn_op = nn.GlobalBatchNorm(num_features=3, device_num_each_group=2)
+        >>> input = Tensor(np.random.randint(0, 255, [1, 3, 2, 2]), mstype.float32)
+        >>> output = global_bn_op(input)
+        >>> print(output)
+        [[[[171.99915    46.999763]
+           [116.99941   191.99904 ]]
+          [[ 66.999664  250.99875 ]
+           [194.99902   102.99948 ]]
+          [[  8.999955  210.99895 ]
+           [ 20.9999895 241.9988  ]]]]
     """
 
     def __init__(self,
@@ -518,11 +665,20 @@ class LayerNorm(Cell):
     Outputs:
         Tensor, the normalized and scaled offset tensor, has the same shape and data type as the `input_x`.
 
+    Raises:
+        TypeError: If `normalized_shape` is neither a list nor tuple.
+        TypeError: If `begin_norm_axis` or `begin_params_axis` is not an int.
+        TypeError: If `epsilon` is not a float.
+
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> x = Tensor(np.ones([20, 5, 10, 10]), mindspore.float32)
         >>> shape1 = x.shape[1:]
         >>> m = nn.LayerNorm(shape1,  begin_norm_axis=1, begin_params_axis=1)
-        >>> m(x).shape
+        >>> output = m(x).shape
+        >>> print(output)
         (20, 5, 10, 10)
     """
 
@@ -547,7 +703,8 @@ class LayerNorm(Cell):
         self.beta = Parameter(initializer(
             beta_init, normalized_shape), name="beta")
         self.layer_norm = _selected_ops.LayerNorm(begin_norm_axis=self.begin_norm_axis,
-                                                  begin_params_axis=self.begin_params_axis)
+                                                  begin_params_axis=self.begin_params_axis,
+                                                  epsilon=self.epsilon)
 
     def construct(self, input_x):
         y, _, _ = self.layer_norm(input_x, self.gamma, self.beta)
@@ -557,6 +714,119 @@ class LayerNorm(Cell):
         """Display instance object as string."""
         return 'normalized_shape={}, begin_norm_axis={}, begin_params_axis={}, gamma{}, beta={}'.format(
             self.normalized_shape, self.begin_norm_axis, self.begin_params_axis, self.gamma, self.beta)
+
+
+class InstanceNorm2d(Cell):
+    r"""
+    Instance normalization layer over a 4D input.
+
+    This layer applies Instance Normalization over a 4D input (a mini-batch of 2D inputs with
+    additional channel dimension) as described in the paper `Instance Normalization: The Missing Ingredient for
+    Fast Stylization <https://arxiv.org/abs/1607.08022>`_. It rescales and recenters the feature using a mini-batch
+    of data and the learned parameters which can be described in the following formula.
+
+    .. math::
+        y = \frac{x - \mathrm{E}[x]}{\sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
+
+    Note:
+        Note that the formula for updating the running_mean and running_var is
+        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \times x_t + \text{momentum} \times \hat{x}`,
+        where :math:`\hat{x}` is the estimated statistic and :math:`x_t` is the new observed value.
+
+    Args:
+        num_features (int): `C` from an expected input of size (N, C, H, W).
+        eps (float): A value added to the denominator for numerical stability. Default: 1e-5.
+        momentum (float): A floating hyperparameter of the momentum for the
+            running_mean and running_var computation. Default: 0.1.
+        affine (bool): A bool value. When set to True, gamma and beta can be learned. Default: True.
+        gamma_init (Union[Tensor, str, Initializer, numbers.Number]): Initializer for the gamma weight.
+            The values of str refer to the function `initializer` including 'zeros', 'ones', 'xavier_uniform',
+            'he_uniform', etc. Default: 'ones'.
+        beta_init (Union[Tensor, str, Initializer, numbers.Number]): Initializer for the beta weight.
+            The values of str refer to the function `initializer` including 'zeros', 'ones', 'xavier_uniform',
+            'he_uniform', etc. Default: 'zeros'.
+        moving_mean_init (Union[Tensor, str, Initializer, numbers.Number]): Initializer for the moving mean.
+            The values of str refer to the function `initializer` including 'zeros', 'ones', 'xavier_uniform',
+            'he_uniform', etc. Default: 'zeros'.
+        moving_var_init (Union[Tensor, str, Initializer, numbers.Number]): Initializer for the moving variance.
+            The values of str refer to the function `initializer` including 'zeros', 'ones', 'xavier_uniform',
+            'he_uniform', etc. Default: 'ones'.
+        use_batch_statistics (bool): If true, use the mean value and variance value of current batch data. If false,
+            use the mean value and variance value of specified value. Default: True.
+
+    Inputs:
+        - **input** (Tensor) - Tensor of shape :math:`(N, C, H, W)`. Data type: float16 or float32.
+
+    Outputs:
+        Tensor, the normalized, scaled, offset tensor, of shape :math:`(N, C, H, W)`. Same type and
+        shape as the `input_x`.
+
+    Supported Platforms:
+        ``GPU``
+
+    Raise:
+        ValueError: If num_features is less than 1 or momentum not in (0, 1).
+
+    Examples:
+        >>> net = nn.InstanceNorm2d(3)
+        >>> np.random.seed(0)
+        >>> input = Tensor(np.random.randint(0, 255, [2, 3, 2, 2]), mindspore.float32)
+        >>> output = net(input)
+        >>> print(output.shape)
+        (2, 3, 2, 2)
+    """
+
+    @cell_attr_register
+    def __init__(self,
+                 num_features,
+                 eps=1e-5,
+                 momentum=0.1,
+                 affine=True,
+                 gamma_init='ones',
+                 beta_init='zeros',
+                 moving_mean_init='zeros',
+                 moving_var_init='ones',
+                 use_batch_statistics=True,
+                 input_dims='2d'):
+        super(InstanceNorm2d, self).__init__()
+        if num_features < 1:
+            raise ValueError("num_features must be at least 1")
+
+        if momentum < 0 or momentum > 1:
+            raise ValueError("momentum should be a number in range [0, 1], but got {}".format(momentum))
+        self.use_batch_statistics = use_batch_statistics
+        self.num_features = num_features
+        self.eps = eps
+        self.input_dims = input_dims
+        self.moving_mean = Parameter(initializer(
+            moving_mean_init, num_features), name="mean", requires_grad=False)
+        self.moving_variance = Parameter(initializer(
+            moving_var_init, num_features), name="variance", requires_grad=False)
+        self.gamma = Parameter(initializer(
+            gamma_init, num_features), name="gamma", requires_grad=affine)
+        self.beta = Parameter(initializer(
+            beta_init, num_features), name="beta", requires_grad=affine)
+
+        self.shape = P.Shape()
+        self.momentum = momentum
+        self.instance_bn = P.InstanceNorm(is_training=self.use_batch_statistics,
+                                          epsilon=self.eps,
+                                          momentum=self.momentum)
+
+    def _check_data_dim(self, x):
+        raise NotImplementedError
+
+    def construct(self, x):
+        _shape_check_bn(self.shape(x), self.input_dims)
+        return self.instance_bn(x,
+                                self.gamma,
+                                self.beta,
+                                self.moving_mean,
+                                self.moving_variance)[0]
+
+    def extend_repr(self):
+        return 'num_features={}, eps={}, momentum={}, gamma={}, beta={}, moving_mean={}, moving_variance={}'.format(
+            self.num_features, self.eps, self.momentum, self.gamma, self.beta, self.moving_mean, self.moving_variance)
 
 
 class GroupNorm(Cell):
@@ -590,15 +860,25 @@ class GroupNorm(Cell):
     Outputs:
         Tensor, the normalized and scaled offset tensor, has the same shape and data type as the `input_x`.
 
+    Raises:
+        TypeError: If `num_groups` or `num_channels` is not an int.
+        TypeError: If `eps` is not a float.
+        TypeError: If `affine` is not a bool.
+        ValueError: If `num_groups` or `num_channels` is less than 1.
+        ValueError: If `num_channels` is not divided by `num_groups`.
+
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> goup_norm_op = nn.GroupNorm(2, 2)
         >>> x = Tensor(np.ones([1, 2, 4, 4], np.float32))
-        >>> goup_norm_op(x)
+        >>> output = goup_norm_op(x)
+        >>> print(output)
         [[[[0. 0. 0. 0.]
            [0. 0. 0. 0.]
            [0. 0. 0. 0.]
            [0. 0. 0. 0.]]
-
           [[0. 0. 0. 0.]
            [0. 0. 0. 0.]
            [0. 0. 0. 0.]

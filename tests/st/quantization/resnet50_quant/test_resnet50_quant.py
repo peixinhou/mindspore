@@ -43,7 +43,7 @@ config_quant = ed({
     "buffer_size": 1000,
     "image_height": 224,
     "image_width": 224,
-    "data_load_mode": "mindata",
+    "data_load_mode": "original",
     "save_checkpoint": True,
     "save_checkpoint_epochs": 1,
     "keep_checkpoint_max": 50,
@@ -120,7 +120,7 @@ def test_resnet50_quant():
                 dataset_sink_mode=False)
     print("============== End Training ==============")
 
-    expect_avg_step_loss = 2.50
+    expect_avg_step_loss = 2.60
     avg_step_loss = np.mean(np.array(monitor.losses))
 
     print("average step loss:{}".format(avg_step_loss))

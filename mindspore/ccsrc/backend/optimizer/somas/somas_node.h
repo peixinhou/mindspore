@@ -19,8 +19,10 @@
 
 #include "backend/optimizer/somas/somas_stream.h"
 #include "backend/optimizer/somas/somas_tensor.h"
+#include "backend/optimizer/somas/somas_parameter.h"
 
 #include <memory>
+#include <map>
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -42,13 +44,14 @@ class SomasNode {
   // Public attributes (mutated in code)
   std::string scope_full_name_;
 
-  std::set<SomasNodePtr>
-    ancestor_nodes_;  // keeping only distance *one* ancestor nodes; enough to ComputeAncestorNodes()
+  // node's dependency including data dependency and time dependency
+  std::set<SomasNodePtr> ancestor_nodes_;
   std::set<SomasTensorPtr> tensors_;
 
   std::vector<SomasTensorPtr> input_tensors_;
   std::vector<SomasTensorPtr> output_tensors_;
   std::vector<SomasTensorPtr> workspace_tensors_;
+  std::map<size_t, SomasParameterPtr> input_parameters_map_;
 
   std::unordered_map<int64_t, size_t> anc_stream_max_order_;
 

@@ -16,7 +16,7 @@
 
 #include "nnacl/int8/conv_depthwise_int8.h"
 #include <string.h>
-#include "nnacl/quantization/fixed_point.h"
+#include "nnacl/int8/fixed_point.h"
 #include "nnacl/int8/common_func_int8.h"
 
 /*conv depthwise int8 begin*/
@@ -139,27 +139,8 @@ void ConvDwInt8(int8_t *output_data, int32_t *row_buffer, const int8_t *input_da
 /*conv depthwise int8 end*/
 
 /*conv depthwise 3x3 int8 begin*/
-bool CheckIfUse3X3(const ConvParameter *conv_param) {
-  bool use_3x3 = conv_param->kernel_h_ == 3 && conv_param->kernel_w_ == 3 &&
-                 (conv_param->stride_h_ == 1 || conv_param->stride_h_ == 2) &&
-                 (conv_param->stride_w_ == 1 || conv_param->stride_w_ == 2) &&
-                 conv_param->stride_h_ == conv_param->stride_w_ &&
-                 (conv_param->pad_u_ == 0 || conv_param->pad_u_ == 1) &&
-                 (conv_param->pad_l_ == 0 || conv_param->pad_l_ == 1) && conv_param->pad_u_ == conv_param->pad_l_ &&
-                 conv_param->dilation_h_ == 1 && conv_param->dilation_w_ == 1 && (conv_param->input_channel_ % 8 == 0);
-  if (!use_3x3) {
-    return false;
-  }
-  const int out_w = conv_param->output_w_ - 1;
-  const int out_h = conv_param->output_h_ - 1;
-  const int in_w = out_w * conv_param->stride_w_ - conv_param->pad_l_ + conv_param->kernel_w_;
-  const int in_h = out_h * conv_param->stride_h_ - conv_param->pad_u_ + conv_param->kernel_h_;
-  use_3x3 = in_w <= (conv_param->input_w_ + conv_param->pad_l_) && in_h <= (conv_param->input_h_ + conv_param->pad_u_);
-  return use_3x3;
-}
-
-void InitInputBuffer(int8_t *buffer, const int8_t *input, const ConvParameter *conv_param, int block_input_h,
-                     int block_input_w) {
+void ConvDw3x3Int8InitBuffer(int8_t *buffer, const int8_t *input, const ConvParameter *conv_param, int block_input_h,
+                             int block_input_w) {
   for (int h = 0; h < block_input_h; h++) {
     const int8_t *src = input;
     for (int w = 0; w < block_input_w; w++) {
@@ -173,8 +154,8 @@ void InitInputBuffer(int8_t *buffer, const int8_t *input, const ConvParameter *c
 
 void ConvDw3x3Int8Window(int8_t *output, const int8_t *buffer, const int16_t *weight, const int32_t *bias, int col_size,
                          int row_size, int channel, int output_h, int output_w, int8_t in_zp, int32_t out_zp,
-                         int out_multiplier, int left_shift, int right_shift, int32_t acc_min, int32_t acc_max,
-                         int stride) {
+                         int32_t *out_multiplier, int32_t *left_shift, int32_t *right_shift, int32_t acc_min,
+                         int32_t acc_max, int stride, bool per_channel) {
   for (int w = 0; w < output_w; w++) {
     int tmp_buffer[C8NUM];
     for (int i = 0; i < C8NUM; i++) {
@@ -196,15 +177,28 @@ void ConvDw3x3Int8Window(int8_t *output, const int8_t *buffer, const int16_t *we
       src_kh += row_size;
       weight_kh += 3 * channel;
     }
-    for (int c = 0; c < C8NUM; c++) {
-      tmp_buffer[c] += bias[c];
-      tmp_buffer[c] = RoundingDivideByPOT(
-        SaturatingRoundingDoublingHighMul(tmp_buffer[c] * (1 << (unsigned int)left_shift), out_multiplier),
-        -right_shift);
-      tmp_buffer[c] += out_zp;
-      tmp_buffer[c] = MSMAX(tmp_buffer[c], acc_min);
-      tmp_buffer[c] = MSMIN(tmp_buffer[c], acc_max);
-      *output_tmp++ = (tmp_buffer[c]);
+    if (per_channel) {
+      for (int c = 0; c < C8NUM; c++) {
+        tmp_buffer[c] += bias[c];
+        tmp_buffer[c] = RoundingDivideByPOT(
+          SaturatingRoundingDoublingHighMul(tmp_buffer[c] * (1 << (unsigned int)left_shift[c]), out_multiplier[c]),
+          -right_shift[c]);
+        tmp_buffer[c] += out_zp;
+        tmp_buffer[c] = MSMAX(tmp_buffer[c], acc_min);
+        tmp_buffer[c] = MSMIN(tmp_buffer[c], acc_max);
+        *output_tmp++ = (tmp_buffer[c]);
+      }
+    } else {
+      for (int c = 0; c < C8NUM; c++) {
+        tmp_buffer[c] += bias[c];
+        tmp_buffer[c] = RoundingDivideByPOT(
+          SaturatingRoundingDoublingHighMul(tmp_buffer[c] * (1 << (unsigned int)left_shift[0]), out_multiplier[0]),
+          -right_shift[0]);
+        tmp_buffer[c] += out_zp;
+        tmp_buffer[c] = MSMAX(tmp_buffer[c], acc_min);
+        tmp_buffer[c] = MSMIN(tmp_buffer[c], acc_max);
+        *output_tmp++ = (tmp_buffer[c]);
+      }
     }
     output += channel;
     buffer += col_size * stride;
@@ -213,35 +207,41 @@ void ConvDw3x3Int8Window(int8_t *output, const int8_t *buffer, const int16_t *we
 
 void ConvDw3x3Int8Block(int8_t *output, const int8_t *buffer, const int16_t *weight, const int32_t *bias, int start_c,
                         int end_c, int col_size, int row_size, int channel, int output_h, int output_w, int8_t in_zp,
-                        int32_t out_zp, int out_multiplier, int left_shift, int right_shift, int32_t acc_min,
-                        int32_t acc_max, int stride) {
+                        int32_t out_zp, int32_t *out_multiplier, int32_t *left_shift, int32_t *right_shift,
+                        int32_t acc_min, int32_t acc_max, int stride, bool per_channel) {
   for (; start_c <= end_c - 8; start_c += 8) {
 #ifdef ENABLE_ARM64
     if (stride == 1) {
       ConvDw3x3Int8Neon64(output, buffer, weight, bias, col_size, row_size, channel, output_h, output_w, in_zp, out_zp,
-                          out_multiplier, left_shift, right_shift, acc_min, acc_max);
+                          out_multiplier, left_shift, right_shift, acc_min, acc_max, per_channel);
     } else {
       ConvDw3x3Int8Stride2(output, buffer, weight, bias, col_size, row_size, channel, output_h, output_w, in_zp, out_zp,
-                           out_multiplier, left_shift, right_shift, acc_min, acc_max);
+                           out_multiplier, left_shift, right_shift, acc_min, acc_max, per_channel);
     }
 
 #else
     ConvDw3x3Int8Window(output, buffer, weight, bias, col_size, row_size, channel, output_h, output_w, in_zp, out_zp,
-                        out_multiplier, left_shift, right_shift, acc_min, acc_max, stride);
+                        out_multiplier, left_shift, right_shift, acc_min, acc_max, stride, per_channel);
 #endif
     output += 8;
     buffer += 8;
     weight += 8;
     bias += 8;
+    if (per_channel) {
+      out_multiplier += 8;
+      left_shift += 8;
+      right_shift += 8;
+    }
   }
 }
 
 void ConvDw3x3Int8Row(int8_t *output, int8_t *buffer, const int8_t *input, const int16_t *weight, const int32_t *bias,
                       const ConvParameter *conv_param, int start_w, int end_w, int block_output_h, int block_output_w,
                       int block_input_h, int block_input_w) {
-  int out_multiplier = conv_param->conv_quant_arg_.quant_multiplier_[0];
-  int left_shift = conv_param->conv_quant_arg_.left_shift_[0];
-  int right_shift = conv_param->conv_quant_arg_.right_shift_[0];
+  bool filter_per_channel = conv_param->conv_quant_arg_.per_channel_ & FILTER_PER_CHANNEL;
+  int *out_multiplier = conv_param->conv_quant_arg_.quant_multiplier_;
+  int *left_shift = conv_param->conv_quant_arg_.left_shift_;
+  int *right_shift = conv_param->conv_quant_arg_.right_shift_;
   int in_zp = conv_param->conv_quant_arg_.input_quant_args_[0].zp_;
   int out_zp = conv_param->conv_quant_arg_.output_quant_args_[0].zp_;
   int acc_min = conv_param->conv_quant_arg_.out_act_min_[0];
@@ -255,22 +255,30 @@ void ConvDw3x3Int8Row(int8_t *output, int8_t *buffer, const int8_t *input, const
       const int8_t *input_ptr = input;
       const int16_t *weight_ptr = weight;
       const int32_t *bias_ptr = bias;
+      int32_t *out_multiplier_ptr = out_multiplier;
+      int32_t *left_shift_ptr = left_shift;
+      int32_t *right_shift_ptr = right_shift;
       int c = 0;
       for (; c <= conv_param->output_channel_ - 64; c += 64) {
-        InitInputBuffer(buffer, input_ptr, conv_param, block_input_h, block_input_w);
+        ConvDw3x3Int8InitBuffer(buffer, input_ptr, conv_param, block_input_h, block_input_w);
         ConvDw3x3Int8Block(output_ptr, buffer, weight_ptr, bias_ptr, 0, 64, 64, ih_offset, conv_param->input_channel_,
-                           block_output_h, block_output_w, in_zp, out_zp, out_multiplier, left_shift, right_shift,
-                           acc_min, acc_max, conv_param->stride_h_);
+                           block_output_h, block_output_w, in_zp, out_zp, out_multiplier_ptr, left_shift_ptr,
+                           right_shift_ptr, acc_min, acc_max, conv_param->stride_h_, filter_per_channel);
         output_ptr += 64;
         input_ptr += 64;
         weight_ptr += 64;
         bias_ptr += 64;
+        if (filter_per_channel) {
+          out_multiplier_ptr += 64;
+          left_shift_ptr += 64;
+          right_shift_ptr += 64;
+        }
       }
       // left channel
       ConvDw3x3Int8Block(output_ptr, input_ptr, weight_ptr, bias_ptr, c, conv_param->input_channel_,
                          conv_param->input_channel_, conv_param->input_w_ * conv_param->input_channel_,
-                         conv_param->input_channel_, block_output_h, block_output_w, in_zp, out_zp, out_multiplier,
-                         left_shift, right_shift, acc_min, acc_max, conv_param->stride_h_);
+                         conv_param->input_channel_, block_output_h, block_output_w, in_zp, out_zp, out_multiplier_ptr,
+                         left_shift_ptr, right_shift_ptr, acc_min, acc_max, conv_param->stride_h_, filter_per_channel);
       output += block_output_w * conv_param->input_channel_;
       input += conv_param->stride_w_ * block_output_w * conv_param->input_channel_;
     }
@@ -281,7 +289,7 @@ void ConvDw3x3Int8Row(int8_t *output, int8_t *buffer, const int8_t *input, const
     ConvDw3x3Int8Block(output, input, weight, bias, 0, conv_param->input_channel_, conv_param->input_channel_,
                        conv_param->input_w_ * conv_param->input_channel_, conv_param->input_channel_, block_output_h,
                        left_width, in_zp, out_zp, out_multiplier, left_shift, right_shift, acc_min, acc_max,
-                       conv_param->stride_h_);
+                       conv_param->stride_h_, filter_per_channel);
   }
 }
 
@@ -322,7 +330,8 @@ void ConvDw3x3Int8(int8_t *output_data, int8_t *buffer, const int8_t *input_data
 #ifndef ENABLE_ARM32
 void ConvDw3x3Int8BorderPixel(int8_t *dst, const int8_t *src, const int16_t *weight, const int32_t *bias, int height,
                               int width, int in_kh_step, int in_kw_step, int channel, int8_t in_zp, int32_t out_zp,
-                              int out_multiplier, int left_shift, int right_shift, int32_t acc_min, int32_t acc_max) {
+                              int *out_multiplier, int *left_shift, int *right_shift, int32_t acc_min, int32_t acc_max,
+                              bool per_channel) {
   for (int c = 0; c < channel; c += 8) {
     int tmp_buffer[8];
     for (int i = 0; i < 8; i++) {
@@ -343,80 +352,66 @@ void ConvDw3x3Int8BorderPixel(int8_t *dst, const int8_t *src, const int16_t *wei
       src_kh += in_kh_step;
       weight_kh += 3 * channel;
     }  // kernel_h loop
-
-    for (int i = 0; i < 8; i++) {
-      tmp_buffer[i] += bias[c + i];
-      tmp_buffer[i] = RoundingDivideByPOT(
-        SaturatingRoundingDoublingHighMul(tmp_buffer[i] * (1 << (unsigned int)left_shift), out_multiplier),
-        -right_shift);
-      tmp_buffer[i] += out_zp;
-      tmp_buffer[i] = MSMAX(tmp_buffer[i], acc_min);
-      tmp_buffer[i] = MSMIN(tmp_buffer[i], acc_max);
-      dst[c + i] = (tmp_buffer[i]);
+    if (per_channel) {
+      for (int i = 0; i < 8; i++) {
+        tmp_buffer[i] += bias[c + i];
+        tmp_buffer[i] = RoundingDivideByPOT(
+          SaturatingRoundingDoublingHighMul(tmp_buffer[i] * (1 << (unsigned int)left_shift[i]), out_multiplier[i]),
+          -right_shift[i]);
+        tmp_buffer[i] += out_zp;
+        tmp_buffer[i] = MSMAX(tmp_buffer[i], acc_min);
+        tmp_buffer[i] = MSMIN(tmp_buffer[i], acc_max);
+        dst[i] = (tmp_buffer[i]);
+      }
+      left_shift += 8;
+      right_shift += 8;
+      out_multiplier += 8;
+    } else {
+      for (int i = 0; i < 8; i++) {
+        tmp_buffer[i] += bias[c + i];
+        tmp_buffer[i] = RoundingDivideByPOT(
+          SaturatingRoundingDoublingHighMul(tmp_buffer[i] * (1 << (unsigned int)left_shift[0]), out_multiplier[0]),
+          -right_shift[0]);
+        tmp_buffer[i] += out_zp;
+        tmp_buffer[i] = MSMAX(tmp_buffer[i], acc_min);
+        tmp_buffer[i] = MSMIN(tmp_buffer[i], acc_max);
+        dst[i] = (tmp_buffer[i]);
+      }
     }
+    dst += 8;
   }
 }
 #endif
 
 #ifndef ENABLE_ARM64
 void ConvDw3x3Int8Corner(int8_t *dst, const int8_t *src, const int16_t *weight, const int32_t *bias, int in_kh_step,
-                         int in_kw_step, int channel, int8_t in_zp, int32_t out_zp, int out_multiplier, int left_shift,
-                         int right_shift, int32_t acc_min, int32_t acc_max) {
+                         int in_kw_step, int channel, int8_t in_zp, int32_t out_zp, int *out_multiplier,
+                         int *left_shift, int *right_shift, int32_t acc_min, int32_t acc_max, bool per_channel) {
   ConvDw3x3Int8BorderPixel(dst, src, weight, bias, 2, 2, in_kh_step, in_kw_step, channel, in_zp, out_zp, out_multiplier,
-                           left_shift, right_shift, acc_min, acc_max);
+                           left_shift, right_shift, acc_min, acc_max, per_channel);
 }
 
 void ConvDw3x3Int8Vertical(int8_t *dst, const int8_t *src, const int16_t *weight, const int32_t *bias, int in_kh_step,
-                           int in_kw_step, int channel, int8_t in_zp, int32_t out_zp, int out_multiplier,
-                           int left_shift, int right_shift, int32_t acc_min, int32_t acc_max) {
+                           int in_kw_step, int channel, int8_t in_zp, int32_t out_zp, int *out_multiplier,
+                           int *left_shift, int *right_shift, int32_t acc_min, int32_t acc_max, bool per_channel) {
   ConvDw3x3Int8BorderPixel(dst, src, weight, bias, 2, 3, in_kh_step, in_kw_step, channel, in_zp, out_zp, out_multiplier,
-                           left_shift, right_shift, acc_min, acc_max);
+                           left_shift, right_shift, acc_min, acc_max, per_channel);
 }
+
 void ConvDw3x3Int8Horizontal(int8_t *dst, const int8_t *src, const int16_t *weight, const int32_t *bias, int in_kh_step,
-                             int in_kw_step, int channel, int8_t in_zp, int32_t out_zp, int out_multiplier,
-                             int left_shift, int right_shift, int32_t acc_min, int32_t acc_max) {
+                             int in_kw_step, int channel, int8_t in_zp, int32_t out_zp, int *out_multiplier,
+                             int *left_shift, int *right_shift, int32_t acc_min, int32_t acc_max, bool per_channel) {
   ConvDw3x3Int8BorderPixel(dst, src, weight, bias, 3, 2, in_kh_step, in_kw_step, channel, in_zp, out_zp, out_multiplier,
-                           left_shift, right_shift, acc_min, acc_max);
+                           left_shift, right_shift, acc_min, acc_max, per_channel);
 }
 #endif
 
-void ConvDw3x3Int8Border(int8_t *dst, const int8_t *src, const int16_t *weight, const int32_t *bias, int top,
-                         int bottom, int left, int right, const ConvParameter *conv_param,
-                         const SlidingWindowParam *sliding, int8_t in_zp, int32_t out_zp, int out_multiplier,
-                         int left_shift, int right_shift, int32_t acc_min, int32_t acc_max) {
-  int8_t *dst_h = dst + top * sliding->out_h_step_;
-  for (int oh = top; oh < bottom; oh++) {
-    int ih = oh * conv_param->stride_h_ - conv_param->pad_u_;
-    int start_kh = MSMAX(0, UP_DIV(-ih, conv_param->dilation_h_));
-    int end_kh = MSMIN(conv_param->kernel_h_, UP_DIV(conv_param->input_h_ - ih, conv_param->dilation_h_));
-    const int8_t *src_h = src + ih * sliding->in_h_step_;
-
-    int8_t *dst_kernel = dst_h + left * sliding->block_channel_;
-    for (int ow = left; ow < right; ow++) {
-      int iw = ow * conv_param->stride_w_ - conv_param->pad_l_;
-      int start_kw = MSMAX(0, UP_DIV(-iw, conv_param->dilation_w_));
-      int end_kw = MSMIN(conv_param->kernel_w_, UP_DIV(conv_param->input_w_ - iw, conv_param->dilation_w_));
-      const int8_t *src_w = src_h + iw * sliding->block_channel_;
-
-      const int8_t *src_kernel = src_w + start_kh * sliding->in_kh_step_ + start_kw * sliding->in_kw_step_;
-      const int16_t *weight_kernel =
-        weight + (start_kh * conv_param->kernel_w_ + start_kw) * conv_param->input_channel_;
-
-      ConvDw3x3Int8BorderPixel(dst_kernel, src_kernel, weight_kernel, bias, end_kh - start_kh, end_kw - start_kw,
-                               sliding->in_kh_step_, sliding->in_kw_step_, conv_param->input_channel_, in_zp, out_zp,
-                               out_multiplier, left_shift, right_shift, acc_min, acc_max);
-
-      dst_kernel += sliding->block_channel_;
-    }  // width loop
-    dst_h += sliding->out_h_step_;
-  }  // height loop
-}
-
 void ConvDw3x3Int8Pad(int8_t *output_data, const int8_t *input_data, const int16_t *weight_data,
                       const int32_t *bias_data, const ConvParameter *conv_param, const SlidingWindowParam *sliding) {
-  int out_multiplier = conv_param->conv_quant_arg_.quant_multiplier_[0];
-  int left_shift = conv_param->conv_quant_arg_.left_shift_[0];
-  int right_shift = conv_param->conv_quant_arg_.right_shift_[0];
+  bool filter_per_channel = conv_param->conv_quant_arg_.per_channel_ & FILTER_PER_CHANNEL;
+  int *out_multiplier = conv_param->conv_quant_arg_.quant_multiplier_;
+  int *left_shift = conv_param->conv_quant_arg_.left_shift_;
+  int *right_shift = conv_param->conv_quant_arg_.right_shift_;
   int in_zp = conv_param->conv_quant_arg_.input_quant_args_[0].zp_;
   int out_zp = conv_param->conv_quant_arg_.output_quant_args_[0].zp_;
   int acc_min = conv_param->conv_quant_arg_.out_act_min_[0];
@@ -428,71 +423,80 @@ void ConvDw3x3Int8Pad(int8_t *output_data, const int8_t *input_data, const int16
   int in_kw_step = sliding->in_kw_step_;
 
   // top
-  const int8_t *input = input_data;
-  const int16_t *weight = weight_data + weight_row_size + conv_param->input_channel_;
-  int8_t *output = output_data;
-  ConvDw3x3Int8Corner(output, input, weight, bias_data, in_kh_step, in_kw_step, conv_param->input_channel_, in_zp,
-                      out_zp, out_multiplier, left_shift, right_shift, acc_min, acc_max);
-  input += (conv_param->stride_w_ - 1) * conv_param->input_channel_;
-  weight = weight_data + weight_row_size;
-  output += conv_param->output_channel_;
-  for (int out_w = sliding->left_; out_w < sliding->right_; out_w++) {
-    ConvDw3x3Int8Vertical(output, input, weight, bias_data, in_kh_step, in_kw_step, conv_param->input_channel_, in_zp,
-                          out_zp, out_multiplier, left_shift, right_shift, acc_min, acc_max);
-    input += conv_param->stride_w_ * conv_param->input_channel_;
+  for (int b = 0; b < conv_param->output_batch_; b++) {
+    const int8_t *input_batch =
+      input_data + b * conv_param->input_h_ * conv_param->input_w_ * conv_param->input_channel_;
+    int8_t *output_batch =
+      output_data + b * conv_param->output_h_ * conv_param->output_w_ * conv_param->output_channel_;
+
+    const int8_t *input = input_batch;
+    const int16_t *weight = weight_data + weight_row_size + conv_param->input_channel_;
+    int8_t *output = output_batch;
+    ConvDw3x3Int8Corner(output, input, weight, bias_data, in_kh_step, in_kw_step, conv_param->input_channel_, in_zp,
+                        out_zp, out_multiplier, left_shift, right_shift, acc_min, acc_max, filter_per_channel);
+    input += (conv_param->stride_w_ - 1) * conv_param->input_channel_;
+    weight = weight_data + weight_row_size;
     output += conv_param->output_channel_;
-  }
-  ConvDw3x3Int8Corner(output, input, weight, bias_data, in_kh_step, in_kw_step, conv_param->input_channel_, in_zp,
-                      out_zp, out_multiplier, left_shift, right_shift, acc_min, acc_max);
+    for (int out_w = sliding->left_; out_w < sliding->right_; out_w++) {
+      ConvDw3x3Int8Vertical(output, input, weight, bias_data, in_kh_step, in_kw_step, conv_param->input_channel_, in_zp,
+                            out_zp, out_multiplier, left_shift, right_shift, acc_min, acc_max, filter_per_channel);
+      input += conv_param->stride_w_ * conv_param->input_channel_;
+      output += conv_param->output_channel_;
+    }
+    ConvDw3x3Int8Corner(output, input, weight, bias_data, in_kh_step, in_kw_step, conv_param->input_channel_, in_zp,
+                        out_zp, out_multiplier, left_shift, right_shift, acc_min, acc_max, filter_per_channel);
 
-  // left
-  input = input_data + (conv_param->stride_h_ - 1) * input_row_size;
-  weight = weight_data + conv_param->input_channel_;
-  output = output_data + output_row_size;
-  for (int out_h = sliding->top_; out_h < sliding->bottom_; out_h++) {
-    ConvDw3x3Int8Horizontal(output, input, weight, bias_data, in_kh_step, in_kw_step, conv_param->input_channel_, in_zp,
-                            out_zp, out_multiplier, left_shift, right_shift, acc_min, acc_max);
-    input += conv_param->stride_h_ * input_row_size;
-    output += output_row_size;
-  }
+    // left
+    input = input_batch + (conv_param->stride_h_ - 1) * input_row_size;
+    weight = weight_data + conv_param->input_channel_;
+    output = output_batch + output_row_size;
+    for (int out_h = sliding->top_; out_h < sliding->bottom_; out_h++) {
+      ConvDw3x3Int8Horizontal(output, input, weight, bias_data, in_kh_step, in_kw_step, conv_param->input_channel_,
+                              in_zp, out_zp, out_multiplier, left_shift, right_shift, acc_min, acc_max,
+                              filter_per_channel);
+      input += conv_param->stride_h_ * input_row_size;
+      output += output_row_size;
+    }
 
-  // right
-  input =
-    input_data + (conv_param->input_w_ - 2) * conv_param->input_channel_ + (conv_param->stride_h_ - 1) * input_row_size;
-  weight = weight_data;
-  output = output_data + output_row_size + (conv_param->output_w_ - 1) * conv_param->output_channel_;
-  for (int out_h = sliding->top_; out_h < sliding->bottom_; out_h++) {
-    ConvDw3x3Int8Horizontal(output, input, weight, bias_data, in_kh_step, in_kw_step, conv_param->input_channel_, in_zp,
-                            out_zp, out_multiplier, left_shift, right_shift, acc_min, acc_max);
-    input += conv_param->stride_h_ * input_row_size;
-    output += output_row_size;
-  }
+    // right
+    input = input_batch + (conv_param->input_w_ - 2) * conv_param->input_channel_ +
+            (conv_param->stride_h_ - 1) * input_row_size;
+    weight = weight_data;
+    output = output_batch + output_row_size + (conv_param->output_w_ - 1) * conv_param->output_channel_;
+    for (int out_h = sliding->top_; out_h < sliding->bottom_; out_h++) {
+      ConvDw3x3Int8Horizontal(output, input, weight, bias_data, in_kh_step, in_kw_step, conv_param->input_channel_,
+                              in_zp, out_zp, out_multiplier, left_shift, right_shift, acc_min, acc_max,
+                              filter_per_channel);
+      input += conv_param->stride_h_ * input_row_size;
+      output += output_row_size;
+    }
 
-  // bottom
-  input = input_data + (conv_param->input_h_ - 2) * input_row_size;
-  weight = weight_data + conv_param->input_channel_;
-  output = output_data + (conv_param->output_h_ - 1) * output_row_size;
-  ConvDw3x3Int8Corner(output, input, weight, bias_data, in_kh_step, in_kw_step, conv_param->input_channel_, in_zp,
-                      out_zp, out_multiplier, left_shift, right_shift, acc_min, acc_max);
-  input += conv_param->stride_w_ == 1 ? 0 : conv_param->input_channel_;
-  weight = weight_data;
-  output += conv_param->output_channel_;
-  for (int out_w = sliding->left_; out_w < sliding->right_; out_w++) {
-    ConvDw3x3Int8Vertical(output, input, weight, bias_data, in_kh_step, in_kw_step, conv_param->input_channel_, in_zp,
-                          out_zp, out_multiplier, left_shift, right_shift, acc_min, acc_max);
-    input += conv_param->stride_w_ * conv_param->input_channel_;
+    // bottom
+    input = input_batch + (conv_param->input_h_ - 2) * input_row_size;
+    weight = weight_data + conv_param->input_channel_;
+    output = output_batch + (conv_param->output_h_ - 1) * output_row_size;
+    ConvDw3x3Int8Corner(output, input, weight, bias_data, in_kh_step, in_kw_step, conv_param->input_channel_, in_zp,
+                        out_zp, out_multiplier, left_shift, right_shift, acc_min, acc_max, filter_per_channel);
+    input += conv_param->stride_w_ == 1 ? 0 : conv_param->input_channel_;
+    weight = weight_data;
     output += conv_param->output_channel_;
+    for (int out_w = sliding->left_; out_w < sliding->right_; out_w++) {
+      ConvDw3x3Int8Vertical(output, input, weight, bias_data, in_kh_step, in_kw_step, conv_param->input_channel_, in_zp,
+                            out_zp, out_multiplier, left_shift, right_shift, acc_min, acc_max, filter_per_channel);
+      input += conv_param->stride_w_ * conv_param->input_channel_;
+      output += conv_param->output_channel_;
+    }
+    ConvDw3x3Int8Corner(output, input, weight, bias_data, in_kh_step, in_kw_step, conv_param->input_channel_, in_zp,
+                        out_zp, out_multiplier, left_shift, right_shift, acc_min, acc_max, filter_per_channel);
   }
-  ConvDw3x3Int8Corner(output, input, weight, bias_data, in_kh_step, in_kw_step, conv_param->input_channel_, in_zp,
-                      out_zp, out_multiplier, left_shift, right_shift, acc_min, acc_max);
 }
 /*conv depthwise 3x3 int8 end*/
 
 /*conv depthwise sliding window perchannel int8 begin*/
-void DepthwiseBorderPixelInt8(int8_t *dst, const int8_t *src, const int16_t *weight, const int32_t *bias, int height,
-                              int width, int in_kh_step, int in_kw_step, int kernel_w, int8_t *input_zp,
-                              int32_t *out_zp, const int *out_multiplier, const int *left_shift, const int *right_shift,
-                              int32_t *acc_min, int32_t *acc_max) {
+void ConvDwInt8BorderPixel(int8_t *dst, const int8_t *src, const int16_t *weight, const int32_t *bias, int height,
+                           int width, int in_kh_step, int in_kw_step, int kernel_w, int8_t *input_zp, int32_t *out_zp,
+                           const int *out_multiplier, const int *left_shift, const int *right_shift, int32_t *acc_min,
+                           int32_t *acc_max) {
   int tmp_buffer[C8NUM];
   for (int i = 0; i < C8NUM; i++) {
     tmp_buffer[i] = 0;
@@ -525,10 +529,10 @@ void DepthwiseBorderPixelInt8(int8_t *dst, const int8_t *src, const int16_t *wei
   }
 }
 
-void DepthwiseBorderInt8(int8_t *dst, const int8_t *src, const int16_t *weight, const int32_t *bias, int top,
-                         int bottom, int left, int right, const ConvParameter *conv_param,
-                         const SlidingWindowParam *sliding, int8_t *in_zp, int32_t *out_zp, const int *out_multiplier,
-                         const int *left_shift, const int *right_shift, int32_t *acc_min, int32_t *acc_max) {
+void ConvDwInt8Border(int8_t *dst, const int8_t *src, const int16_t *weight, const int32_t *bias, int top, int bottom,
+                      int left, int right, const ConvParameter *conv_param, const SlidingWindowParam *sliding,
+                      int8_t *in_zp, int32_t *out_zp, const int *out_multiplier, const int *left_shift,
+                      const int *right_shift, int32_t *acc_min, int32_t *acc_max) {
   int8_t *dst_h = dst + top * sliding->out_h_step_;
   for (int oh = top; oh < bottom; oh++) {
     int ih = oh * conv_param->stride_h_ - conv_param->pad_u_;
@@ -546,9 +550,9 @@ void DepthwiseBorderInt8(int8_t *dst, const int8_t *src, const int16_t *weight, 
       const int8_t *src_kernel = src_w + start_kh * sliding->in_kh_step_ + start_kw * sliding->in_kw_step_;
       const int16_t *weight_kernel = weight + (start_kh * conv_param->kernel_w_ + start_kw) * C8NUM;
 
-      DepthwiseBorderPixelInt8(dst_kernel, src_kernel, weight_kernel, bias, end_kh - start_kh, end_kw - start_kw,
-                               sliding->in_kh_step_, sliding->in_kw_step_, conv_param->kernel_w_, in_zp, out_zp,
-                               out_multiplier, left_shift, right_shift, acc_min, acc_max);
+      ConvDwInt8BorderPixel(dst_kernel, src_kernel, weight_kernel, bias, end_kh - start_kh, end_kw - start_kw,
+                            sliding->in_kh_step_, sliding->in_kw_step_, conv_param->kernel_w_, in_zp, out_zp,
+                            out_multiplier, left_shift, right_shift, acc_min, acc_max);
 
       dst_kernel += sliding->block_channel_;
     }  // width loop
@@ -556,12 +560,11 @@ void DepthwiseBorderInt8(int8_t *dst, const int8_t *src, const int16_t *weight, 
   }  // height loop
 }
 
-#ifndef ENABLE_ARM64
-void DepthwiseCenterInt8(int8_t *dst, const int8_t *src, const int16_t *weight, const int32_t *bias, int height,
-                         int width, int kernel_h, int kernel_w, int out_h_step, int block_channel, int in_sh_step,
-                         int in_sw_step, int in_kh_step, int in_kw_step, int8_t *in_zp, int32_t *out_zp,
-                         int32_t *out_multiplier, int32_t *left_shift, int32_t *right_shift, int32_t *acc_min,
-                         int32_t *acc_max) {
+#ifndef ENABLE_ARM
+void ConvDwInt8Center(int8_t *dst, const int8_t *src, const int16_t *weight, const int32_t *bias, int height, int width,
+                      int kernel_h, int kernel_w, int out_h_step, int block_channel, int in_sh_step, int in_sw_step,
+                      int in_kh_step, int in_kw_step, int8_t *in_zp, int32_t *out_zp, int32_t *out_multiplier,
+                      int32_t *left_shift, int32_t *right_shift, int32_t *acc_min, int32_t *acc_max) {
   int tmp_buffer[C8NUM];
   int8_t *dst_h = dst;
   const int8_t *src_h = src;
@@ -608,7 +611,7 @@ void DepthwiseCenterInt8(int8_t *dst, const int8_t *src, const int16_t *weight, 
 }
 #endif
 
-void ConvDwSWInt8(int8_t *output_data, const int8_t *input_data, const int16_t *weight_data, const int32_t *bias_data,
+void ConvDwInt8SW(int8_t *output_data, const int8_t *input_data, const int16_t *weight_data, const int32_t *bias_data,
                   int8_t *input_zp, int32_t *output_zp, const ConvParameter *conv_param,
                   const SlidingWindowParam *sliding, int task_id) {
   const int8_t *src = input_data;
@@ -628,37 +631,26 @@ void ConvDwSWInt8(int8_t *output_data, const int8_t *input_data, const int16_t *
       int8_t *in_zp = input_zp + oc * C8NUM;
       int32_t *out_zp = output_zp + oc * C8NUM;
 
-      DepthwiseBorderInt8(dst_data, src_data, weight, bias, 0, sliding->top_, 0, conv_param->output_w_, conv_param,
-                          sliding, in_zp, out_zp, out_multiplier, left_shift, right_shift, acc_min, acc_max);
-      DepthwiseBorderInt8(dst_data, src_data, weight, bias, sliding->bottom_, conv_param->output_h_, 0,
-                          conv_param->output_w_, conv_param, sliding, in_zp, out_zp, out_multiplier, left_shift,
-                          right_shift, acc_min, acc_max);
-      DepthwiseBorderInt8(dst_data, src_data, weight, bias, sliding->top_, sliding->bottom_, 0, sliding->left_,
-                          conv_param, sliding, in_zp, out_zp, out_multiplier, left_shift, right_shift, acc_min,
-                          acc_max);
-      DepthwiseBorderInt8(dst_data, src_data, weight, bias, sliding->top_, sliding->bottom_, sliding->right_,
-                          conv_param->output_w_, conv_param, sliding, in_zp, out_zp, out_multiplier, left_shift,
-                          right_shift, acc_min, acc_max);
+      ConvDwInt8Border(dst_data, src_data, weight, bias, 0, sliding->top_, 0, conv_param->output_w_, conv_param,
+                       sliding, in_zp, out_zp, out_multiplier, left_shift, right_shift, acc_min, acc_max);
+      ConvDwInt8Border(dst_data, src_data, weight, bias, sliding->bottom_, conv_param->output_h_, 0,
+                       conv_param->output_w_, conv_param, sliding, in_zp, out_zp, out_multiplier, left_shift,
+                       right_shift, acc_min, acc_max);
+      ConvDwInt8Border(dst_data, src_data, weight, bias, sliding->top_, sliding->bottom_, 0, sliding->left_, conv_param,
+                       sliding, in_zp, out_zp, out_multiplier, left_shift, right_shift, acc_min, acc_max);
+      ConvDwInt8Border(dst_data, src_data, weight, bias, sliding->top_, sliding->bottom_, sliding->right_,
+                       conv_param->output_w_, conv_param, sliding, in_zp, out_zp, out_multiplier, left_shift,
+                       right_shift, acc_min, acc_max);
 
       if (sliding->right_ > sliding->left_ && sliding->bottom_ > sliding->top_) {
         int in_h_start = sliding->top_ * conv_param->stride_h_ - conv_param->pad_u_;
         int in_w_start = sliding->left_ * conv_param->stride_w_ - conv_param->pad_l_;
         const int8_t *in_t = src_data + in_h_start * sliding->in_h_step_ + in_w_start * sliding->block_channel_;
         int8_t *out_t = dst_data + sliding->top_ * sliding->out_h_step_ + sliding->left_ * sliding->block_channel_;
-#ifdef ENABLE_ARM
         ConvDwInt8Center(out_t, in_t, weight, bias, sliding->bottom_ - sliding->top_, sliding->right_ - sliding->left_,
-                         conv_param->kernel_h_, conv_param->kernel_w_, sliding->out_h_step_ * sizeof(int8_t),
-                         sliding->block_channel_ * sizeof(int8_t), sliding->in_sh_step_ * sizeof(int8_t),
-                         sliding->in_sw_step_ * sizeof(int8_t), sliding->in_kh_step_ * sizeof(int8_t),
-                         sliding->in_kw_step_ * sizeof(int8_t), in_zp, out_zp, out_multiplier, left_shift, right_shift,
-                         acc_min, acc_max);
-#else
-        DepthwiseCenterInt8(out_t, in_t, weight, bias, sliding->bottom_ - sliding->top_,
-                            sliding->right_ - sliding->left_, conv_param->kernel_h_, conv_param->kernel_w_,
-                            sliding->out_h_step_, sliding->block_channel_, sliding->in_sh_step_, sliding->in_sw_step_,
-                            sliding->in_kh_step_, sliding->in_kw_step_, in_zp, out_zp, out_multiplier, left_shift,
-                            right_shift, acc_min, acc_max);
-#endif
+                         conv_param->kernel_h_, conv_param->kernel_w_, sliding->out_h_step_, sliding->block_channel_,
+                         sliding->in_sh_step_, sliding->in_sw_step_, sliding->in_kh_step_, sliding->in_kw_step_, in_zp,
+                         out_zp, out_multiplier, left_shift, right_shift, acc_min, acc_max);
       }
     }  // output C8 loop
     src += sliding->in_step_;
@@ -669,8 +661,8 @@ void ConvDwSWInt8(int8_t *output_data, const int8_t *input_data, const int16_t *
 /*conv depthwise sliding window perchannel int8 end*/
 
 /*deconv depthwise int8 begin*/
-void DeconvDepthwiseBorderPixelInt8(int32_t *dst, const int16_t *src, const int16_t *weight, int height, int width,
-                                    int in_kh_step, int in_kw_step, int kernel_w) {
+void DeconvDwInt8BorderPixel(int32_t *dst, const int16_t *src, const int16_t *weight, int height, int width,
+                             int in_kh_step, int in_kw_step, int kernel_w) {
   int32_t *dst_kh = dst;
   const int16_t *weight_kh = weight;
   for (int kh = 0; kh < height; kh++) {
@@ -688,8 +680,8 @@ void DeconvDepthwiseBorderPixelInt8(int32_t *dst, const int16_t *src, const int1
   }  // kernel_h loop
 }
 
-void DeconvDepthwiseBorderInt8(int32_t *dst, const int16_t *src, const int16_t *weight, int top, int bottom, int left,
-                               int right, const ConvParameter *conv_param, const SlidingWindowParam *sliding) {
+void DeconvDwInt8Border(int32_t *dst, const int16_t *src, const int16_t *weight, int top, int bottom, int left,
+                        int right, const ConvParameter *conv_param, const SlidingWindowParam *sliding) {
   const int16_t *src_h = src + top * sliding->out_h_step_;
   for (int ih = top; ih < bottom; ih++) {
     int oh = ih * conv_param->stride_h_ - conv_param->pad_u_;
@@ -707,18 +699,18 @@ void DeconvDepthwiseBorderInt8(int32_t *dst, const int16_t *src, const int16_t *
       const int16_t *weight_kernel = weight + (start_kh * conv_param->kernel_w_ + start_kw) * C4NUM;
       int32_t *dst_kernel = dst_w + start_kh * sliding->in_kh_step_ + start_kw * sliding->in_kw_step_;
 
-      DeconvDepthwiseBorderPixelInt8(dst_kernel, src_kernel, weight_kernel, end_kh - start_kh, end_kw - start_kw,
-                                     sliding->in_kh_step_, sliding->in_kw_step_, conv_param->kernel_w_);
+      DeconvDwInt8BorderPixel(dst_kernel, src_kernel, weight_kernel, end_kh - start_kh, end_kw - start_kw,
+                              sliding->in_kh_step_, sliding->in_kw_step_, conv_param->kernel_w_);
       src_kernel += sliding->block_channel_;
     }  // width loop
     src_h += sliding->out_h_step_;
   }  // height loop
 }
 
-#ifndef ENABLE_ARM64
-void DeconvDepthwiseCenterInt8(int32_t *dst, const int16_t *src, const int16_t *weight, int height, int width,
-                               int kernel_h, int kernel_w, int out_h_step, int block_channel, int in_sh_step,
-                               int in_sw_step, int in_kh_step, int in_kw_step) {
+#ifndef ENABLE_ARM
+void DeconvDwInt8Center(int32_t *dst, const int16_t *src, const int16_t *weight, int height, int width, int kernel_h,
+                        int kernel_w, int out_h_step, int block_channel, int in_sh_step, int in_sw_step, int in_kh_step,
+                        int in_kw_step) {
   int32_t *dst_h = dst;
   const int16_t *src_h = src;
   for (int oh = 0; oh < height; oh++) {
@@ -784,14 +776,14 @@ void DeconvDwInt8(int8_t *output_data, int32_t *output_buffer, const int16_t *in
       const int16_t *weight = weight_data + oc * sliding->kernel_step_;
       const int32_t *bias = bias_data + oc * C4NUM;
       int8_t *dst_data = dst + oc * C4NUM;
-      DeconvDepthwiseBorderInt8(output_buffer, src_data, weight, 0, sliding->top_, 0, conv_param->input_w_, conv_param,
-                                sliding);
-      DeconvDepthwiseBorderInt8(output_buffer, src_data, weight, sliding->bottom_, conv_param->input_h_, 0,
-                                conv_param->input_w_, conv_param, sliding);
-      DeconvDepthwiseBorderInt8(output_buffer, src_data, weight, sliding->top_, sliding->bottom_, 0, sliding->left_,
-                                conv_param, sliding);
-      DeconvDepthwiseBorderInt8(output_buffer, src_data, weight, sliding->top_, sliding->bottom_, sliding->right_,
-                                conv_param->input_w_, conv_param, sliding);
+      DeconvDwInt8Border(output_buffer, src_data, weight, 0, sliding->top_, 0, conv_param->input_w_, conv_param,
+                         sliding);
+      DeconvDwInt8Border(output_buffer, src_data, weight, sliding->bottom_, conv_param->input_h_, 0,
+                         conv_param->input_w_, conv_param, sliding);
+      DeconvDwInt8Border(output_buffer, src_data, weight, sliding->top_, sliding->bottom_, 0, sliding->left_,
+                         conv_param, sliding);
+      DeconvDwInt8Border(output_buffer, src_data, weight, sliding->top_, sliding->bottom_, sliding->right_,
+                         conv_param->input_w_, conv_param, sliding);
 
       if (sliding->right_ > sliding->left_ && sliding->bottom_ > sliding->top_) {
         int oh_h_start = sliding->top_ * conv_param->stride_h_ - conv_param->pad_u_;
@@ -799,17 +791,16 @@ void DeconvDwInt8(int8_t *output_data, int32_t *output_buffer, const int16_t *in
         int32_t *out_t = output_buffer + oh_h_start * sliding->in_h_step_ + oh_w_start * sliding->block_channel_;
         const int16_t *in_t =
           src_data + sliding->top_ * sliding->out_h_step_ + sliding->left_ * sliding->block_channel_;
-#ifdef ENABLE_ARM64
+#ifdef ENABLE_ARM
         DeconvDwInt8Center(out_t, in_t, weight, sliding->bottom_ - sliding->top_, sliding->right_ - sliding->left_,
                            conv_param->kernel_h_, conv_param->kernel_w_, sliding->out_h_step_ * sizeof(int16_t),
                            sliding->block_channel_ * sizeof(int16_t), sliding->in_sh_step_ * sizeof(int32_t),
                            sliding->in_sw_step_ * sizeof(int32_t), sliding->in_kh_step_ * sizeof(int32_t),
                            sliding->in_kw_step_ * sizeof(int32_t));
 #else
-        DeconvDepthwiseCenterInt8(out_t, in_t, weight, sliding->bottom_ - sliding->top_,
-                                  sliding->right_ - sliding->left_, conv_param->kernel_h_, conv_param->kernel_w_,
-                                  sliding->out_h_step_, sliding->block_channel_, sliding->in_sh_step_,
-                                  sliding->in_sw_step_, sliding->in_kh_step_, sliding->in_kw_step_);
+        DeconvDwInt8Center(out_t, in_t, weight, sliding->bottom_ - sliding->top_, sliding->right_ - sliding->left_,
+                           conv_param->kernel_h_, conv_param->kernel_w_, sliding->out_h_step_, sliding->block_channel_,
+                           sliding->in_sh_step_, sliding->in_sw_step_, sliding->in_kh_step_, sliding->in_kw_step_);
 #endif
       }
       DeconvDwInt8Post(dst_data, output_buffer, bias, sliding->block_channel_,
@@ -818,8 +809,8 @@ void DeconvDwInt8(int8_t *output_data, int32_t *output_buffer, const int16_t *in
                        conv_param->conv_quant_arg_.output_quant_args_[0].zp_,
                        conv_param->conv_quant_arg_.out_act_min_[0], conv_param->conv_quant_arg_.out_act_max_[0]);
     }  // output C4 loop
-    src += sliding->in_step_;
-    dst += sliding->out_step_;
+    src += sliding->out_step_;
+    dst += sliding->in_step_;
   }  // batch loop
   // output nhwc4
 }

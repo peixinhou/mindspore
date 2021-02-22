@@ -1,5 +1,5 @@
 /**
- * Copyright 2020 Huawei Technologies Co., Ltd
+ * Copyright 2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,9 +22,10 @@
 
 namespace mindspore {
 namespace kernel {
+template <typename T>
 class ConcatCPUKernel : public CPUKernel {
  public:
-  ConcatCPUKernel() : axis_(0) {}
+  ConcatCPUKernel() = default;
   ~ConcatCPUKernel() override = default;
 
   void InitKernel(const CNodePtr &kernel_node) override;
@@ -34,16 +35,40 @@ class ConcatCPUKernel : public CPUKernel {
 
  private:
   void CheckParam(const CNodePtr &kernel_node);
-  void CopyDataToOutput(const std::vector<kernel::AddressPtr> &inputs, size_t dim0, size_t dim1, size_t dim2,
-                        float **output_addr, size_t *buff_size);
-  int axis_;
-  std::vector<std::vector<size_t>> input_shape_list_;
-  std::vector<size_t> output_shape_;
+  int axis_ = 0;
+  CNodePtr node_ = nullptr;
 };
 
-MS_REG_CPU_KERNEL(Concat,
-                  KernelAttr().SetAllSameAttr(true).AddInputAttr(kNumberTypeFloat32).AddOutputAttr(kNumberTypeFloat32),
-                  ConcatCPUKernel);
+MS_REG_CPU_KERNEL_T(
+  Concat, KernelAttr().SetAllSameAttr(true).AddInputAttr(kNumberTypeFloat32).AddOutputAttr(kNumberTypeFloat32),
+  ConcatCPUKernel, float);
+MS_REG_CPU_KERNEL_T(Concat,
+                    KernelAttr().SetAllSameAttr(true).AddInputAttr(kNumberTypeInt8).AddOutputAttr(kNumberTypeInt8),
+                    ConcatCPUKernel, int8_t)
+MS_REG_CPU_KERNEL_T(Concat,
+                    KernelAttr().SetAllSameAttr(true).AddInputAttr(kNumberTypeInt16).AddOutputAttr(kNumberTypeInt16),
+                    ConcatCPUKernel, int16_t)
+MS_REG_CPU_KERNEL_T(Concat,
+                    KernelAttr().SetAllSameAttr(true).AddInputAttr(kNumberTypeInt32).AddOutputAttr(kNumberTypeInt32),
+                    ConcatCPUKernel, int)
+MS_REG_CPU_KERNEL_T(Concat,
+                    KernelAttr().SetAllSameAttr(true).AddInputAttr(kNumberTypeInt64).AddOutputAttr(kNumberTypeInt64),
+                    ConcatCPUKernel, int64_t)
+MS_REG_CPU_KERNEL_T(Concat,
+                    KernelAttr().SetAllSameAttr(true).AddInputAttr(kNumberTypeUInt8).AddOutputAttr(kNumberTypeUInt8),
+                    ConcatCPUKernel, uint8_t)
+MS_REG_CPU_KERNEL_T(Concat,
+                    KernelAttr().SetAllSameAttr(true).AddInputAttr(kNumberTypeUInt16).AddOutputAttr(kNumberTypeUInt16),
+                    ConcatCPUKernel, uint16_t)
+MS_REG_CPU_KERNEL_T(Concat,
+                    KernelAttr().SetAllSameAttr(true).AddInputAttr(kNumberTypeUInt32).AddOutputAttr(kNumberTypeUInt32),
+                    ConcatCPUKernel, uint32_t)
+MS_REG_CPU_KERNEL_T(Concat,
+                    KernelAttr().SetAllSameAttr(true).AddInputAttr(kNumberTypeUInt64).AddOutputAttr(kNumberTypeUInt64),
+                    ConcatCPUKernel, uint64_t)
+MS_REG_CPU_KERNEL_T(Concat,
+                    KernelAttr().SetAllSameAttr(true).AddInputAttr(kNumberTypeBool).AddOutputAttr(kNumberTypeBool),
+                    ConcatCPUKernel, bool)
 }  // namespace kernel
 }  // namespace mindspore
 

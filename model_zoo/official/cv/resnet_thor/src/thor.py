@@ -55,7 +55,7 @@ class THOR_GPU(Optimizer):
         Validator.check_value_type("momentum", momentum, [float], self.cls_name)
         if isinstance(momentum, float) and momentum < 0.0:
             raise ValueError("momentum should be at least 0.0, but got momentum {}".format(momentum))
-        self.momentum = Parameter(Tensor(momentum, mstype.float32), name="momentum")
+        self.momentum = Parameter(Tensor(momentum, mstype.float32))
         self.params = self.parameters
         self.use_nesterov = Validator.check_bool(use_nesterov)
         self.moments = self.params.clone(prefix="moments", init='zeros')
@@ -136,8 +136,6 @@ class THOR_GPU(Optimizer):
                 g = self.reshape(g, (g_shape[0], -1))
                 matrix_A = self.matrix_A[i]
                 matrix_G = self.matrix_G[i]
-                matrix_A = F.depend(matrix_A, g)
-                matrix_G = F.depend(matrix_G, g)
                 g = self.update_gradient(matrix_G, g, matrix_A)
                 if i == 53:
                     new_grads = new_grads + (g,)
@@ -160,7 +158,7 @@ class THOR(Optimizer):
         super(THOR, self).__init__(learning_rate, params, weight_decay, loss_scale)
         if isinstance(momentum, float) and momentum < 0.0:
             raise ValueError("momentum should be at least 0.0, but got momentum {}".format(momentum))
-        self.momentum = Parameter(Tensor(momentum, mstype.float32), name="momentum")
+        self.momentum = Parameter(Tensor(momentum, mstype.float32))
         self.params = self.parameters
         self.moments = self.params.clone(prefix="moments", init='zeros')
         self.hyper_map = C.HyperMap()
@@ -284,9 +282,6 @@ class THOR(Optimizer):
                 matrix_A = self.matrix_A[i]
                 matrix_G = self.matrix_G[i]
                 matrix_max = self.matrix_max_inv[i]
-                matrix_A = F.depend(matrix_A, g)
-                matrix_G = F.depend(matrix_G, g)
-                matrix_max = F.depend(matrix_max, g)
                 if i == 53:
                     g = self.cube_matmul_left_fc(matrix_G, g)
                     g = self.cube_matmul_right_fc(g, matrix_A, matrix_max)

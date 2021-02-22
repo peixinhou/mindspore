@@ -30,7 +30,7 @@
 
 namespace mindspore {
 namespace parallel {
-Status GatherV2Info::GetAttrs() {
+Status GatherInfo::GetAttrs() {
   if (inputs_shape_.size() != GATHER_V2_INPUTS_SIZE) {
     MS_LOG(ERROR) << name_ << ": inputs shape size must be 2, but is " << inputs_shape_.size();
     return FAILED;
@@ -55,13 +55,13 @@ Status GatherV2Info::GetAttrs() {
     MS_LOG(ERROR) << name_ << ": input can not be a scalar!";
     return FAILED;
   }
-  int axis = GetValue<int>(input_value_.at(2));
-  if (axis >= SizeToInt(inputs_shape_.at(0).size()) || axis < 0 - SizeToInt(inputs_shape_.at(0).size())) {
+  int64_t axis = GetValue<int64_t>(input_value_.at(2));
+  if (axis >= SizeToLong(inputs_shape_.at(0).size()) || axis < 0 - SizeToLong(inputs_shape_.at(0).size())) {
     MS_LOG(ERROR) << "Axis is " << axis << ", not in [-" << inputs_shape_.at(0).size() << ", "
                   << inputs_shape_.at(0).size() << ").";
   }
   if (axis < 0) {
-    axis += SizeToInt(inputs_shape_[0].size());
+    axis += SizeToLong(inputs_shape_[0].size());
   }
   axis_ = axis;
 
@@ -70,7 +70,7 @@ Status GatherV2Info::GetAttrs() {
   return SUCCESS;
 }
 
-Status GatherV2Info::CheckStrategy(const StrategyPtr &strategy) {
+Status GatherInfo::CheckStrategy(const StrategyPtr &strategy) {
   if (inputs_shape_.size() != GATHER_V2_INPUTS_SIZE) {
     MS_LOG(ERROR) << name_ << ": inputs shape size must be " << GATHER_V2_INPUTS_SIZE << ", but is "
                   << inputs_shape_.size();
@@ -104,7 +104,7 @@ Status GatherV2Info::CheckStrategy(const StrategyPtr &strategy) {
   return SUCCESS;
 }
 
-Status GatherV2Info::InferDevMatrixShape() {
+Status GatherInfo::InferDevMatrixShape() {
   Strategys stra = strategy_->GetInputDim();
   dev_matrix_shape_ = stra.at(0);
   return SUCCESS;
@@ -114,7 +114,7 @@ Status GatherV2Info::InferDevMatrixShape() {
 // If index is a n dimension tensor, output dimension is input dimension plus (n - 1).
 // Tensor map dimension is equal to the corresponding input and output dimension.
 // If index's dimension is more than 1, we insert -1 for the output tensor map.
-Status GatherV2Info::InferTensorMap() {
+Status GatherInfo::InferTensorMap() {
   if (inputs_shape_.size() != GATHER_V2_INPUTS_SIZE) {
     MS_LOG(ERROR) << name_ << ": inputs shape size must be " << GATHER_V2_INPUTS_SIZE << ", but is "
                   << inputs_shape_.size();
@@ -130,8 +130,8 @@ Status GatherV2Info::InferTensorMap() {
   size_t size = inputs_shape_.at(0).size();
   // such as 4: tensor_map_index [3,2,1,0]
   for (size_t i = 0; i < size; ++i) {
-    tensor_map_in.push_back(SizeToInt(size - i - 1));
-    tensor_map_out.push_back(SizeToInt(size - i - 1));
+    tensor_map_in.push_back(SizeToLong(size - i - 1));
+    tensor_map_out.push_back(SizeToLong(size - i - 1));
   }
 
   if (index_size_ == 0) {
@@ -147,7 +147,7 @@ Status GatherV2Info::InferTensorMap() {
 
   Shape tensor_map_in_index;
   if (index_size_ >= 1) {
-    tensor_map_in_index.push_back(SizeToInt(size - axis_ - 1));
+    tensor_map_in_index.push_back(SizeToLong(size - axis_ - 1));
   }
   for (size_t i = 1; i < index_size_; ++i) {
     tensor_map_in_index.push_back(-1);
@@ -158,7 +158,7 @@ Status GatherV2Info::InferTensorMap() {
   return SUCCESS;
 }
 
-Status GatherV2Info::InferTensorInfo() {
+Status GatherInfo::InferTensorInfo() {
   if (inputs_shape_.size() != GATHER_V2_INPUTS_SIZE) {
     MS_LOG(ERROR) << name_ << ": inputs shape size must be " << GATHER_V2_INPUTS_SIZE << ", but is "
                   << inputs_shape_.size();
@@ -201,7 +201,7 @@ Status GatherV2Info::InferTensorInfo() {
   return SUCCESS;
 }
 
-OperatorVector CreateSubOp(int32_t sub_value) {
+OperatorVector CreateSubOp(int64_t sub_value) {
   OperatorVector ops;
   OperatorName operator_name = SUB;
   OperatorAttrs operator_attrs;
@@ -219,31 +219,31 @@ OperatorVector CreateSubOp(int32_t sub_value) {
   return ops;
 }
 
-Status GatherV2Info::InferTensorSubOps() {
+Status GatherInfo::InferTensorSubOps() {
   sub_ops_.clear();
   if ((index_size_ == 0) || (axis_strategy_ == 1)) {
     return SUCCESS;
   }
-  int32_t mod_n = 1;
-  for (size_t i = IntToSize(axis_) + 1; i < dev_matrix_shape_.size(); i++) {
+  int64_t mod_n = 1;
+  for (size_t i = LongToSize(axis_) + 1; i < dev_matrix_shape_.size(); i++) {
     mod_n *= dev_matrix_shape_.at(i);
   }
-  if ((axis_ >= SizeToInt(dev_matrix_shape_.size())) || axis_ < 0) {
+  if ((axis_ >= SizeToLong(dev_matrix_shape_.size())) || axis_ < 0) {
     MS_LOG(ERROR) << "Axis is " << axis_ << ", not in [0, " << dev_matrix_shape_.size() << ").";
   }
-  int32_t mod_p = mod_n * dev_matrix_shape_.at(axis_);
-  int32_t rank = g_device_manager->global_rank();
-  int32_t mod_rank = rank % mod_p;
-  mod_rank = static_cast<int32_t>(mod_rank / mod_n);
+  int64_t mod_p = mod_n * dev_matrix_shape_.at(axis_);
+  int64_t rank = g_device_manager->rank_index_in_stage();
+  int64_t mod_rank = rank % mod_p;
+  mod_rank = static_cast<int64_t>(mod_rank / mod_n);
   if (inputs_shape_.size() != GATHER_V2_INPUTS_SIZE) {
     MS_LOG(ERROR) << name_ << ": inputs shape size must be " << GATHER_V2_INPUTS_SIZE << ", but is "
                   << inputs_shape_.size();
     return FAILED;
   }
-  if ((axis_ >= SizeToInt(inputs_shape_.at(0).size())) || axis_ < 0) {
+  if ((axis_ >= SizeToLong(inputs_shape_.at(0).size())) || axis_ < 0) {
     MS_LOG(ERROR) << "Axis is " << axis_ << ", not in [0, " << inputs_shape_.at(0).size() << ").";
   }
-  int32_t sub_value = static_cast<int32_t>(inputs_shape_.at(0).at(axis_) / dev_matrix_shape_.at(axis_)) * mod_rank;
+  int64_t sub_value = static_cast<int64_t>(inputs_shape_.at(0).at(axis_) / dev_matrix_shape_.at(axis_)) * mod_rank;
 
   OperatorVector sub_op;
   sub_ops_.emplace_back(std::move(sub_op));
@@ -252,7 +252,7 @@ Status GatherV2Info::InferTensorSubOps() {
   return SUCCESS;
 }
 
-Status GatherV2Info::Init(const StrategyPtr &strategy) {
+Status GatherInfo::Init(const StrategyPtr &strategy) {
   if (InitWithAutoRepeatCalc(strategy) != SUCCESS) {
     MS_LOG(ERROR) << name_ << ": Init failed.";
     return FAILED;
@@ -266,7 +266,7 @@ Status GatherV2Info::Init(const StrategyPtr &strategy) {
   return SUCCESS;
 }
 
-Status GatherV2Info::InitForCostModel(const StrategyPtr &strategy) {
+Status GatherInfo::InitForCostModel(const StrategyPtr &strategy) {
   if (InitForCostModelWithAutoRepeatCalc(strategy) != SUCCESS) {
     MS_LOG(ERROR) << name_ << ": Init for cost model failed.";
     return FAILED;
@@ -275,7 +275,7 @@ Status GatherV2Info::InitForCostModel(const StrategyPtr &strategy) {
   return SUCCESS;
 }
 
-Status GatherV2Info::GenerateStrategies(int32_t stage_id) {
+Status GatherInfo::GenerateStrategies(int64_t stage_id) {
   if ((inputs_shape_.size() != GATHER_V2_INPUTS_SIZE) || (outputs_shape_.size() != GATHER_V2_OUTPUTS_SIZE)) {
     MS_LOG(ERROR) << name_ << " : Inputs shape size(" << inputs_shape_.size() << ") or outputs shape size("
                   << outputs_shape_.size() << "is wrong.";
@@ -301,15 +301,13 @@ Status GatherV2Info::GenerateStrategies(int32_t stage_id) {
   return SUCCESS;
 }
 
-Status GatherV2Info::SetCostUnderStrategy(const StrategyPtr &strategy) { return SetCostUnderStrategyBase(strategy); }
+Status GatherInfo::SetCostUnderStrategy(const StrategyPtr &strategy) { return SetCostUnderStrategyBase(strategy); }
 
-std::shared_ptr<Strategys> GatherV2Info::GenerateBatchStrategies() {
+std::shared_ptr<Strategys> GatherInfo::GenerateBatchStrategies() {
   if (inputs_shape_.size() != GATHER_V2_INPUTS_SIZE) {
     MS_LOG(EXCEPTION) << name_ << ": inputs shape size must be " << GATHER_V2_INPUTS_SIZE << ", but is "
                       << inputs_shape_.size();
   }
-  CheckGlobalDeviceManager();
-  size_t dev_num = g_device_manager->GetDeviceListByStageId(0).size();
   if (GetAttrs() != SUCCESS) {
     MS_LOG(EXCEPTION) << "GetAttrs failed!";
   }
@@ -318,7 +316,7 @@ std::shared_ptr<Strategys> GatherV2Info::GenerateBatchStrategies() {
   if (index_size_ != 1) {
     strategy.push_back(1);
   } else {
-    strategy.push_back(SizeToInt(dev_num));
+    strategy.push_back(stage_device_size_);
   }
   for (size_t i = 1; i < inputs_shape_[0].size(); i++) {
     strategy.push_back(1);

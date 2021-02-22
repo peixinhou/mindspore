@@ -1,4 +1,4 @@
-# Copyright 2020 Huawei Technologies Co., Ltd
+# Copyright 2020-2021 Huawei Technologies Co., Ltd
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 The context of mindspore, used to configure the current execution environment,
 includes the execution mode, execution backend and other feature switches.
 """
+import json
 import os
 import time
 import threading
@@ -214,19 +215,16 @@ class _Context:
         self.set_param(ms_ctx_param.max_call_depth, max_call_depth)
 
     def set_profiling_options(self, option):
-        options = ["training_trace", "task_trace",
-                   "task_trace:training_trace", "training_trace:task_trace", "op_trace"]
-        if option not in options:
-            raise ValueError("Profiling options must be in 'training_trace' 'task_trace' "
-                             "'task_trace:training_trace' 'training_trace:task_trace' or 'op_trace'.")
+        if not isinstance(option, str):
+            raise TypeError("The parameter option must be str.")
         self.set_param(ms_ctx_param.profiling_options, option)
 
     def set_variable_memory_max_size(self, variable_memory_max_size):
         """set values of variable_memory_max_size and graph_memory_max_size"""
         if not Validator.check_str_by_regular(variable_memory_max_size, _re_pattern):
             raise ValueError("Context param variable_memory_max_size should be in correct format! Such as \"5GB\"")
-        if int(variable_memory_max_size[:-2]) >= _DEVICE_APP_MEMORY_SIZE:
-            raise ValueError("Context param variable_memory_max_size should be less than 31GB.")
+        if int(variable_memory_max_size[:-2]) > _DEVICE_APP_MEMORY_SIZE:
+            raise ValueError("Context param variable_memory_max_size should be not greater than 31GB.")
         variable_memory_max_size_ = variable_memory_max_size[:-2] + " * 1024 * 1024 * 1024"
         graph_memory_max_size = _DEVICE_APP_MEMORY_SIZE - int(variable_memory_max_size[:-2])
         graph_memory_max_size_ = str(graph_memory_max_size) + " * 1024 * 1024 * 1024"
@@ -257,9 +255,24 @@ class _Context:
             full_file_name = print_file_path
         self.set_param(ms_ctx_param.print_file_path, full_file_name)
 
+    def set_env_config_path(self, env_config_path):
+        """Check and set env_config_path."""
+        if not self._context_handle.enable_dump_ir():
+            raise ValueError("The 'env_config_path' is not supported, please turn on ENABLE_DUMP_IR "
+                             "and recompile source to enable it.")
+        env_config_path = os.path.realpath(env_config_path)
+        if not os.path.isfile(env_config_path):
+            raise ValueError("The %r set by 'env_config_path' should be an existing json file." % env_config_path)
+        try:
+            with open(env_config_path, 'r') as f:
+                json.load(f)
+        except (TypeError, ValueError) as exo:
+            raise ValueError("The %r set by 'env_config_path' should be a json file. "
+                             "Detail: %s." % (env_config_path, str(exo)))
+        self.set_param(ms_ctx_param.env_config_path, env_config_path)
+
     setters = {
         'mode': set_mode,
-        'backend_policy': set_backend_policy,
         'save_graphs_path': set_save_graphs_path,
         'device_target': set_device_target,
         'device_id': set_device_id,
@@ -267,7 +280,8 @@ class _Context:
         'profiling_options': set_profiling_options,
         'variable_memory_max_size': set_variable_memory_max_size,
         'max_device_memory': set_max_device_memory,
-        'print_file_path': set_print_file_path
+        'print_file_path': set_print_file_path,
+        'env_config_path': set_env_config_path
     }
 
     @property
@@ -377,23 +391,26 @@ def set_auto_parallel_context(**kwargs):
                      - recursive_programming: Recursive programming search mode.
 
                      - dynamic_programming: Dynamic programming search mode.
-        parameter_broadcast (bool): A developing feature. Whether to broadcast parameters before training.
-                       "stand_alone", "semi_auto_parallel" and "auto_parallel" do not support parameter
-                       broadcast. Default: False.
+        parameter_broadcast (bool): Whether to broadcast parameters before training. Before training, in order to have
+                     the same network initialization parameter values for all devices, broadcast the parameters
+                     on device 0 to other devices. Parameter broadcasting in different parallel modes is different,
+                     data_parallel mode, all parameters are broadcast except for the parameter whose attribute
+                     layerwise_parallel is True. Hybrid_parallel, semi_auto_parallel and auto_parallel mode, the
+                     segmented parameters do not participate in broadcasting. Default: False.
         strategy_ckpt_load_file (str): The path to load parallel strategy checkpoint. Default: ''
         strategy_ckpt_save_file (str): The path to save parallel strategy checkpoint. Default: ''
         full_batch (bool): If you load whole batch datasets in auto_parallel mode, this parameter
                        should be set with True. Default: False.
         enable_parallel_optimizer (bool): This is a developing feature, which shards the weight update computation for
-                       data parallel training in the benefit of time and memory saving. For now, auto parallel mode
-                       supports all optimizers. Data parallel mode only supports `Lamb` and `AdamWeightDecay`.
-                       Default: False.
+                       data parallel training in the benefit of time and memory saving. Currently, auto and semi auto
+                       parallel mode support all optimizers in both Ascend and GPU. Data parallel mode only supports
+                       `Lamb` and `AdamWeightDecay` in Ascend . Default: False.
         all_reduce_fusion_config (list): Set allreduce fusion strategy by parameters indices. Only support ReduceOp.SUM
                        and HCCL_WORLD_GROUP/NCCL_WORLD_GROUP. No Default, if it is not set, the fusion is closed.
         pipeline_stages (int): Set the stage information for pipeline parallel. This indicates how
                         the devices are distributed alone the pipeline. The total devices will be divided into
                         'pipeline_stags' stages. This currently could only be used when
-                        parall mode semi_auto_parallel is enabled.
+                        parallel mode semi_auto_parallel is enabled. Default: 1.
 
     Raises:
         ValueError: If input key is not attribute in auto parallel context.
@@ -446,12 +463,13 @@ def reset_auto_parallel_context():
     - strategy_ckpt_save_file: ''.
     - full_batch: False.
     - enable_parallel_optimizer: False.
+    - pipeline_stages: 1.
     """
     _reset_auto_parallel_context()
 
 
 def _check_target_specific_cfgs(device, arg_key):
-    """Checking whether a config is sutable for a specified device"""
+    """Checking whether a config is suitable for a specified device"""
     device_cfgs = {
         'enable_auto_mixed_precision': ['Ascend'],
         'enable_dump': ['Ascend'],
@@ -480,7 +498,7 @@ def _check_target_specific_cfgs(device, arg_key):
                  save_dump_path=str, enable_reduce_precision=bool, variable_memory_max_size=str,
                  enable_profiling=bool, profiling_options=str, enable_auto_mixed_precision=bool,
                  enable_graph_kernel=bool, check_bprop=bool, max_device_memory=str, print_file_path=str,
-                 enable_sparse=bool, max_call_depth=int)
+                 enable_sparse=bool, max_call_depth=int, env_config_path=str)
 def set_context(**kwargs):
     """
     Sets context for running environment.
@@ -497,15 +515,15 @@ def set_context(**kwargs):
 
     Note:
         Attribute name is required for setting attributes.
-        The mode is not recommended to be changed after net was initilized because the implementations of some
+        The mode is not recommended to be changed after net was initialized because the implementations of some
         operations are different in graph mode and pynative mode. Default: PYNATIVE_MODE.
 
-    Some configurations are device specific, see the bellow table for details:
+    Some configurations are device specific, see the below table for details:
 
     ===========================  ===========================  =================
     Common(CPU/GPU/Ascend)       Ascend                       GPU
     ===========================  ===========================  =================
-    check_bprop                  enable_auto_mixed_precision  max_device_memory
+    check_bprop                  print_file_path              max_device_memory
     device_id                    enable_dump                  enable_graph_kernel
     device_target                save_dump_path
     enable_sparse                enable_graph_kernel
@@ -513,7 +531,8 @@ def set_context(**kwargs):
     mode                         enable_profiling
     reserve_class_name_in_scope  profiling_options
     save_graphs                  variable_memory_max_size
-    save_graphs_path             print_file_path
+    save_graphs_path
+    env_config_path
     ===========================  ===========================  =================
 
     Args:
@@ -523,7 +542,6 @@ def set_context(**kwargs):
                     while device_num_per_host should be no more than 4096. Default: 0.
         save_graphs (bool): Whether to save graphs. Default: False.
         save_graphs_path (str): Path to save graphs. Default: "."
-        enable_auto_mixed_precision (bool): Whether to enable auto mixed precision. Default: False.
         enable_graph_kernel (bool): Whether to enable composition of basic primitives. These primitives would be
             compiled into a fused kernel automatically. Default: False.
         reserve_class_name_in_scope (bool) : Whether to save the network class name in the scope. Default: True.
@@ -536,19 +554,43 @@ def set_context(**kwargs):
         enable_profiling (bool): Whether to open profiling. Default: False.
         profiling_options (str): Set profiling collection options, operators can profiling data here.
             The values of profiling collection options are as follows, supporting the collection of multiple data.
+            - output: the saving the path of the profiling collection result file. The directory spectified by this
+              parameter needs to be created in advance on the training environment (container or host side) and ensure
+              that the running user configured during installation has read and write permissions.It supports the
+              configuration of absolute or relative paths(relative to the current path when executing the command line).
+              The absolute path configuration starts with '/', for example:/home/data/output.
+              The relative path configuration directly starts with the directory name,for example:output.
 
             - training_trace: collect iterative trajectory data, that is, the training task and software information of
               the AI software stack, to achieve performance analysis of the training task, focusing on data
               enhancement, forward and backward calculation, gradient aggregation update and other related data.
+              The value is on/off.
 
             - task_trace: collect task trajectory data, that is, the hardware information of the HWTS/AICore of
               the Ascend 910 processor, and analyze the information of beginning and ending of the task.
+              The value is on/off.
 
-            - op_trace: collect single operator performance data.
-            The profiling can choose the combination of `training_trace`, `task_trace`,
-            `training_trace` and `task_trace` combination, and eparated by colons;
-            a single operator can choose `op_trace`, `op_trace` cannot be combined with
-            `training_trace` and `task_trace`. Default: "training_trace".
+            - aicpu: collect profiling data enhanced by aicpu data. The value is on/off.
+
+            - fp_point: specify the start position of the forward operator of the training network iteration trajectory,
+              which is used to record the start timestamp of the forward calculation.The configuration value is the name
+              of the first operator specified in the forward direction. when the value is empty,the system will
+              automatically obtain the forward operator name.
+
+            - bp_point: specify the end position of the iteration trajectory reversal operator of the training network,
+              record the end timestamp of the backward calculation. The configuration value is the name of the operator
+              after the specified reverse. when the value is empty,the system will automatically obtain the backward
+              operator name.
+
+            - aic_metrics: the values are as follows:
+              ArithmeticUtilization: percentage statistics of various calculation indicators.
+              PipeUtilization: the time-consuming ratio of calculation unit and handling unit,this item is
+              the default value.
+              Memory: percentage of external memory read and write instructions.
+              MemoryL0: percentage of internal memory read and write instructions.
+              ResourceConflictRatio: proportion of pipline queue instructions.
+            The profiling_options is like '{"output":'/home/data/output','training_trace':'on'}'
+
         check_bprop (bool): Whether to check bprop. Default: False.
         max_device_memory (str): Sets the maximum memory available for devices.
             Currently, it is only supported on GPU. The format is "xxGB". Default: "1024GB".
@@ -556,7 +598,8 @@ def set_context(**kwargs):
             a file by default, and turns off printing to the screen. If the file already exists, add a timestamp
             suffix to the file. Default: ''.
         enable_sparse (bool): Whether to enable sparsity feature. Default: False.
-        max_call_depth(int): Specify the maximum depth of function call. Default: 1000.
+        max_call_depth (int): Specify the maximum depth of function call. Default: 1000.
+        env_config_path (str): Config path for DFX.
 
     Raises:
         ValueError: If input key is not an attribute in context.
@@ -572,12 +615,14 @@ def set_context(**kwargs):
         >>> context.set_context(reserve_class_name_in_scope=True)
         >>> context.set_context(variable_memory_max_size="6GB")
         >>> context.set_context(mode=context.GRAPH_MODE,
-        >>>                     device_target="Ascend",device_id=0, save_graphs=True,
-        >>>                     save_graphs_path="/mindspore")
-        >>> context.set_context(enable_profiling=True, profiling_options="training_trace")
+        ...                     device_target="Ascend",device_id=0, save_graphs=True,
+        ...                     save_graphs_path="/mindspore")
+        >>> context.set_context(enable_profiling=True, \
+                                profiling_options='{"output":"/home/data/output","training_trace":"on"}')
         >>> context.set_context(max_device_memory="3.5GB")
         >>> context.set_context(print_file_path="print.pb")
         >>> context.set_context(max_call_depth=80)
+        >>> context.set_context(env_config_path="./env_config.json")
     """
     ctx = _context()
     # set device target first
@@ -597,7 +642,7 @@ def set_context(**kwargs):
         if key in ctx.setters:
             ctx.setters[key](ctx, value)
             continue
-        # enum variables begining with '_' are for internal use
+        # enum variables beginning with '_' are for internal use
         if key in ms_ctx_param.__members__ and key[0] != '_':
             ctx.set_param(ms_ctx_param.__members__[key], value)
             continue
@@ -622,7 +667,7 @@ def get_context(attr_key):
     _ = _check_target_specific_cfgs(device, attr_key)
     if hasattr(ctx, attr_key):
         return getattr(ctx, attr_key)
-    # enum variables begining with '_' are for internal use
+    # enum variables beginning with '_' are for internal use
     if attr_key in ms_ctx_param.__members__ and attr_key[0] != '_':
         return ctx.get_param(ms_ctx_param.__members__[attr_key])
     raise ValueError("Get context keyword %s is not recognized!" % attr_key)

@@ -20,9 +20,14 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <string.h>
+#if defined(ENBALE_AVX) || defined(ENABLE_SSE) || defined(ENABLE_ARM)
+#include "nnacl/intrinsics/ms_simd_instructions.h"
+#endif
 
 #define C2NUM 2
 #define C4NUM 4
+#define C6NUM 6
 #define C8NUM 8
 #define C12NUM 12
 #define C16NUM 16
@@ -38,8 +43,12 @@
 
 #define MSVALID(left, x, right) (MSMIN((MSMAX(left, x)), right))
 
+#define COMM_SHAPE_SIZE 4
+#define MAX_SHAPE_SIZE 8
+
 #define DIMENSION_4D 4
 #define DIMENSION_6D 6
+#define DIMENSION_7D 7
 #define kInputIndex 0
 #define kWeightIndex 1
 #define kBiasIndex 2
@@ -50,11 +59,14 @@
 #define kNHWC_C 3
 #define kInputSize1 2
 #define kInputSize2 3
+#define MAX_LEN 256
 
 typedef enum LiteDataType {
   kDataTypeFloat,
+  kDataTypeFloat16,
   kDataTypeInt,
   kDataTypeInt8,
+  KDataTypeBool,
 } LiteDataType;
 
 typedef enum DataOrder {
@@ -68,6 +80,24 @@ typedef struct OpParameter {
   int thread_num_;
 } OpParameter;
 
+typedef struct QuantArg {
+  float scale_;
+  int32_t zp_;
+} QuantArg;
+
+typedef struct QuantMulArg {
+  int32_t multiplier_;
+  int left_shift_;
+  int right_shift_;
+} QuantMulArg;
+
 typedef enum ActType { ActType_No, ActType_Relu, ActType_Sigmod, ActType_Relu6, ActType_Prelu } ActType;
+typedef enum PadMode { Pad_No, Pad_Same, Pad_Valid } PadMode;
+typedef enum RoundingMode { Rounding_No, Rounding_Away_from_zero, Rounding_Up } RoundingMode;
+typedef enum CalFixedMultiplierMode {
+  Method_No,
+  Method_SinglePrecision,
+  Method_DoublePrecision
+} CalFixedMultiplierMode;
 
 #endif  // MINDSPORE_LITE_NNACL_OP_BASE_H_

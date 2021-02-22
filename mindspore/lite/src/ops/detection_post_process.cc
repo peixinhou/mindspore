@@ -169,8 +169,8 @@ int DetectionPostProcess::InferShape(std::vector<lite::Tensor *> inputs_, std::v
   const auto input_anchors_shape = anchors->shape();
   MS_ASSERT(input_scores_shape[2] >= GetNumClasses());
   MS_ASSERT(input_scores_shape[2] - GetNumClasses() <= 1);
-  MS_ASSERT(input_box_shape[1] = input_scores_shape[1]);
-  MS_ASSERT(input_box_shape[1] = input_anchors_shape[0]);
+  MS_ASSERT(input_box_shape[1] == input_scores_shape[1]);
+  MS_ASSERT(input_box_shape[1] == input_anchors_shape[0]);
 
   auto detected_boxes = outputs_.at(0);
   MS_ASSERT(detected_boxes != nullptr);
@@ -190,7 +190,7 @@ int DetectionPostProcess::InferShape(std::vector<lite::Tensor *> inputs_, std::v
   num_det->set_format(boxes->format());
   num_det->set_data_type(kNumberTypeFloat32);
   if (!infer_flag()) {
-    return RET_OK;
+    return RET_INFER_INVALID;
   }
   const auto max_detections = GetMaxDetections();
   const auto max_classes_per_detection = GetMaxClassesPerDetection();

@@ -28,7 +28,6 @@ using mindspore::lite::KernelRegistrar;
 using mindspore::lite::RET_ERROR;
 using mindspore::lite::RET_NULL_PTR;
 using mindspore::lite::RET_OK;
-using mindspore::schema::PrimitiveType_Mean;
 using mindspore::schema::PrimitiveType_Reduce;
 using mindspore::schema::ReduceMode;
 using mindspore::schema::ReduceMode_ReduceMax;
@@ -45,12 +44,17 @@ int ReduceFp16CPUKernel::Init() {
   if (ret != RET_OK) {
     return ret;
   }
-  if (mode_ != static_cast<int>(ReduceMode_ReduceMean)) {
-    MS_LOG(ERROR) << "Reduce fp16 only support ReduceMode_ReduceMean";
-    return RET_ERROR;
+  switch (mode_) {
+    case static_cast<int>(ReduceMode_ReduceMean):
+      reducer_ = ReduceMeanFp16;
+      break;
+    case static_cast<int>(ReduceMode_ReduceMax):
+      reducer_ = ReduceMaxFp16;
+      break;
+    default:
+      MS_LOG(ERROR) << "Reduce unsupported reduce mode: " << mode_;
+      return RET_ERROR;
   }
-  reducer_ = ReduceMeanFp16;
-
   if (!InferShapeDone()) {
     return RET_OK;
   }
@@ -83,14 +87,7 @@ int ReduceFp16CPUKernel::Run() {
   }
 
   auto in_tensor = in_tensors_.at(0);
-  if (in_tensor->data_type() == kNumberTypeFloat32 || in_tensor->data_type() == kNumberTypeFloat) {
-    auto input_data = reinterpret_cast<float *>(in_tensor->MutableData());
-    Float32ToFloat16(input_data, fp16_input_, in_tensor->ElementsNum());
-  } else {
-    fp16_input_ = reinterpret_cast<float16_t *>(in_tensor->MutableData());
-  }
-
-  fp16_src_data_ = fp16_input_;
+  fp16_src_data_ = reinterpret_cast<float16_t *>(in_tensor->MutableData());
   for (size_t i = 0; i < data_buffers_.size(); ++i) {
     fp16_dst_data_ = data_buffers_.at(i);
     outer_size_ = outer_sizes_.at(i);
@@ -106,11 +103,16 @@ int ReduceFp16CPUKernel::Run() {
   }
 
   auto out_tensor = out_tensors_.at(0);
-  if (out_tensor->data_type() == kNumberTypeFloat32 || out_tensor->data_type() == kNumberTypeFloat) {
-    dst_data_ = reinterpret_cast<float *>(out_tensor->MutableData());
-    Float16ToFloat32(fp16_dst_data_, dst_data_, out_tensor->ElementsNum());
-  } else {
-    memcpy(out_tensor->MutableData(), fp16_dst_data_, out_tensor->ElementsNum() * sizeof(float16_t));
+  fp16_dst_data_ = reinterpret_cast<float16_t *>(out_tensor->data_c());
+  MS_ASSERT(fp16_dst_data_ != nullptr);
+  outer_size_ = outer_sizes_.back();
+  inner_size_ = inner_sizes_.back();
+  axis_size_ = axis_sizes_.back();
+  auto error_code = ParallelLaunch(this->context_->thread_pool_, ReduceFp16Impl, this, context_->thread_num_);
+  if (error_code != RET_OK) {
+    FreeTmpBuffer();
+    MS_LOG(ERROR) << "Reduce run error, error_code[" << error_code << "]";
+    return RET_ERROR;
   }
 
   FreeTmpBuffer();
@@ -125,14 +127,6 @@ void ReduceFp16CPUKernel::FreeTmpBuffer() {
     }
   }
   data_buffers_.clear();
-
-  auto in_tensor = in_tensors_.at(0);
-  if (in_tensor->data_type() == kNumberTypeFloat32 || in_tensor->data_type() == kNumberTypeFloat) {
-    if (fp16_input_ != nullptr) {
-      context_->allocator->Free(fp16_input_);
-      fp16_input_ = nullptr;
-    }
-  }
 }
 
 int ReduceFp16CPUKernel::MallocTmpBuffer() {
@@ -145,79 +139,8 @@ int ReduceFp16CPUKernel::MallocTmpBuffer() {
     }
     data_buffers_.emplace_back(buffer);
   }
-
-  auto in_tensor = in_tensors_.front();
-  if (in_tensor->data_type() == kNumberTypeFloat32 || in_tensor->data_type() == kNumberTypeFloat) {
-    fp16_input_ =
-      reinterpret_cast<float16_t *>(context_->allocator->Malloc(in_tensor->ElementsNum() * sizeof(float16_t)));
-    if (fp16_input_ == nullptr) {
-      MS_LOG(ERROR) << "Malloc data failed";
-      return RET_ERROR;
-    }
-  }
   return RET_OK;
 }
 
-kernel::LiteKernel *CpuReduceFp16KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                               const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter,
-                                               const lite::InnerContext *ctx, const kernel::KernelKey &desc,
-                                               const mindspore::lite::PrimitiveC *primitive) {
-  MS_ASSERT(opParameter != nullptr);
-  MS_ASSERT(desc.type == schema::PrimitiveType_Reduce);
-  if (opParameter == nullptr) {
-    MS_LOG(ERROR) << "Reduce opParameter nullptr";
-    return nullptr;
-  }
-  if (desc.type != schema::PrimitiveType_Reduce) {
-    MS_LOG(ERROR) << "Reduce op desc.type should be PrimitiveType_Reduce, got " << desc.type;
-    return nullptr;
-  }
-  auto *kernel = new (std::nothrow) ReduceFp16CPUKernel(opParameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "Reduce new ReduceCPUKernel failed.";
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
-}
-
-kernel::LiteKernel *CpuMeanFp16KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                             const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter,
-                                             const lite::InnerContext *ctx, const kernel::KernelKey &desc,
-                                             const mindspore::lite::PrimitiveC *primitive) {
-  MS_ASSERT(opParameter != nullptr);
-  MS_ASSERT(desc.type == schema::PrimitiveType_Mean);
-  if (opParameter == nullptr) {
-    MS_LOG(ERROR) << "Reduce opParameter nullptr";
-    return nullptr;
-  }
-  if (desc.type != schema::PrimitiveType_Mean) {
-    MS_LOG(ERROR) << "Reduce op desc.type should be PrimitiveType_Mean, got " << desc.type;
-    free(opParameter);
-    return nullptr;
-  }
-  auto *kernel = new (std::nothrow) ReduceFp16CPUKernel(opParameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "Reduce new ReduceCPUKernel failed.";
-    free(opParameter);
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
-}
-
-REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_Reduce, CpuReduceFp16KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_Mean, CpuMeanFp16KernelCreator)
+REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_Reduce, LiteKernelCreator<ReduceFp16CPUKernel>)
 }  // namespace mindspore::kernel

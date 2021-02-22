@@ -22,69 +22,56 @@
 
 namespace mindspore {
 namespace lite {
-STATUS TfliteResizeParser::Parse(TfliteTensorsInfo *tensors_info, const std::unique_ptr<tflite::OperatorT> &tflite_op,
-                                 const std::unique_ptr<tflite::ModelT> &tflite_model,
-                                 const std::unique_ptr<tflite::SubGraphT> &tflite_subgraph, schema::CNodeT *op) {
-  MS_ASSERT(tflite_op != nullptr);
-  MS_ASSERT(tflite_model != nullptr);
-  MS_ASSERT(tflite_subgraph != nullptr);
-  if (op == nullptr) {
-    MS_LOG(ERROR) << "op is null";
-    return RET_NULL_PTR;
-  }
-  op->primitive = std::make_unique<schema::PrimitiveT>();
-  if (op->primitive == nullptr) {
-    MS_LOG(ERROR) << "op->primitive is null";
-    return RET_NULL_PTR;
+PrimitiveC *TfliteResizeParser::ParseLitePrimitive(const std::unique_ptr<tflite::OperatorT> &tflite_op,
+                                                   const std::unique_ptr<tflite::ModelT> &tflite_model) {
+  auto &tflite_subgraph = tflite_model->subgraphs.front();
+  auto primitive = std::make_unique<schema::PrimitiveT>();
+  if (primitive == nullptr) {
+    MS_LOG(ERROR) << "primitive is null";
+    return nullptr;
   }
 
   std::unique_ptr<schema::ResizeT> attr = std::make_unique<schema::ResizeT>();
   if (attr == nullptr) {
     MS_LOG(ERROR) << "new op failed";
-    return RET_NULL_PTR;
+    return nullptr;
   }
-  attr->coordinateTransformMode = schema::CoordinateTransformMode_COMMON;
-  std::vector<std::string> node_name_str;
-  Split(op->name, &node_name_str, "-");
-  const char *node_name = node_name_str.data()->c_str();
-  if (std::strcmp(node_name, "ResizeBilinear") == 0) {
+  attr->coordinateTransformMode = schema::CoordinateTransformMode_ASYMMETRIC;
+  auto tflite_op_type = (tflite_model->operator_codes[tflite_op->opcode_index])->builtin_code;
+  if (tflite_op_type == tflite::BuiltinOperator_RESIZE_BILINEAR) {
     MS_LOG(DEBUG) << "parse TfliteResizeBilinearParser";
     const auto &tfliteAttr = tflite_op->builtin_options.AsResizeBilinearOptions();
     if (tfliteAttr == nullptr) {
-      MS_LOG(ERROR) << "get op: " << op->name.c_str() << " attr failed";
-      return RET_NULL_PTR;
+      MS_LOG(ERROR) << "get op ResizeBilinear attr failed";
+      return nullptr;
     }
     if (tfliteAttr->align_corners) {
-      attr->alignCorners = tfliteAttr->align_corners;
       attr->coordinateTransformMode = schema::CoordinateTransformMode_ALIGN_CORNERS;
     }
     if (tfliteAttr->half_pixel_centers) {
-      attr->coordinateTransformMode = (attr->coordinateTransformMode == schema::CoordinateTransformMode_COMMON
-                                         ? schema::CoordinateTransformMode_TF_HALF_PIXEL
-                                         : schema::CoordinateTransformMode_ALIGN_CORNERS_WITH_HALF_PIEXL);
+      MS_LOG(ERROR) << "Does not support half pixel centers";
+      return nullptr;
     }
     attr->method = schema::ResizeMethod_LINEAR;
-  } else if (std::strcmp(node_name, "NearestNeighbor") == 0) {
+  } else if (tflite_op_type == tflite::BuiltinOperator_RESIZE_NEAREST_NEIGHBOR) {
     MS_LOG(DEBUG) << "parse TfliteResizeNearestNeighborParser";
     const auto &tfliteAttr = tflite_op->builtin_options.AsResizeNearestNeighborOptions();
     if (tfliteAttr == nullptr) {
-      MS_LOG(ERROR) << "get op: " << op->name.c_str() << " attr failed";
-      return RET_NULL_PTR;
+      MS_LOG(ERROR) << "get op ResizeNearestNeighbor attr failed";
+      return nullptr;
     }
     if (tfliteAttr->align_corners) {
-      attr->alignCorners = tfliteAttr->align_corners;
       attr->coordinateTransformMode = schema::CoordinateTransformMode_ALIGN_CORNERS;
     }
     if (tfliteAttr->half_pixel_centers) {
-      attr->coordinateTransformMode = (attr->coordinateTransformMode == schema::CoordinateTransformMode_COMMON
-                                         ? schema::CoordinateTransformMode_TF_HALF_PIXEL
-                                         : schema::CoordinateTransformMode_ALIGN_CORNERS_WITH_HALF_PIEXL);
+      MS_LOG(ERROR) << "Does not support half pixel centers";
+      return nullptr;
     }
     attr->method = schema::ResizeMethod_NEAREST;
     attr->nearestMode = schema::NearestMode_NORMAL;
   } else {
     MS_LOG(ERROR) << "wrong resize type";
-    return RET_ERROR;
+    return nullptr;
   }
 
   attr->format = schema::Format::Format_NHWC;
@@ -94,13 +81,13 @@ STATUS TfliteResizeParser::Parse(TfliteTensorsInfo *tensors_info, const std::uni
   const auto &shape_tensor = tflite_subgraph->tensors[tfliteResizeTensorIndex];
   if (shape_tensor == nullptr) {
     MS_LOG(ERROR) << "shape_tensor is null";
-    return RET_NULL_PTR;
+    return nullptr;
   }
   auto resizeTensorBufferIndex = shape_tensor->buffer;
   const auto &buff = tflite_model->buffers.at(resizeTensorBufferIndex);
   if (buff == nullptr) {
     MS_LOG(ERROR) << "buff_data is null";
-    return RET_NULL_PTR;
+    return nullptr;
   }
   auto buffData = reinterpret_cast<int32_t *>(buff->data.data());
   if (buffData != nullptr) {
@@ -110,18 +97,13 @@ STATUS TfliteResizeParser::Parse(TfliteTensorsInfo *tensors_info, const std::uni
     attr->newHeight = height;
   }
 
-  op->primitive->value.type = schema::PrimitiveType_Resize;
-  op->primitive->value.value = attr.release();
-
-  AddOpInput(op, tensors_info, tflite_op->inputs[0], tflite_subgraph->tensors.size(), schema::Format::Format_NHWC);
-  if (buffData == nullptr) {
-    AddOpInput(op, tensors_info, tflite_op->inputs[1], tflite_subgraph->tensors.size(), schema::Format::Format_NHWC);
-  }
-  AddOpOutput(op, tensors_info, tflite_op->outputs[0], tflite_subgraph->tensors.size(), schema::Format::Format_NHWC);
-  return RET_OK;
+  primitive->value.type = schema::PrimitiveType_Resize;
+  primitive->value.value = attr.release();
+  return PrimitiveC::Create(primitive.release());
 }
 
-TfliteNodeRegister g_tfliteResizeBilinearParser("ResizeBilinear", new TfliteResizeParser());
-TfliteNodeRegister g_tfliteResizeNearestNeighborParser("NearestNeighbor", new TfliteResizeParser());
+TfliteNodeRegister g_tfliteResizeBilinearParser(tflite::BuiltinOperator_RESIZE_BILINEAR, new TfliteResizeParser());
+TfliteNodeRegister g_tfliteResizeNearestNeighborParser(tflite::BuiltinOperator_RESIZE_NEAREST_NEIGHBOR,
+                                                       new TfliteResizeParser());
 }  // namespace lite
 }  // namespace mindspore

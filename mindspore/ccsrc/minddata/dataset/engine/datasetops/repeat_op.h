@@ -1,5 +1,5 @@
 /**
- * Copyright 2019 Huawei Technologies Co., Ltd
+ * Copyright 2019-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -78,7 +78,7 @@ class RepeatOp : public PipelineOp {
   // However, the RepeatOp is defined as a inlined operator, so it is invalid to launch the
   // functor since this op runs inlined inside another operator.  The function is overloaded to
   // ensure that it is not called by mistake (it will generate an error).
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status operator()() override;
 
   // This function returns the buffer that is at the top of our output connector. The caller is
@@ -90,7 +90,7 @@ class RepeatOp : public PipelineOp {
   // @param p_buffer - output pointer to the buffer that it will fetch.
   // @param worker_id - The worker id
   // @param retry_if_eoe Set this flag to true to allow calling pop() again after the first pop() returns EOE.
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status GetNextBuffer(std::unique_ptr<DataBuffer> *p_buffer, int32_t worker_id, bool retry_if_eoe) override;
 
   // Base-class override for handling cases when an eoe is received.
@@ -109,18 +109,6 @@ class RepeatOp : public PipelineOp {
   // @param workerId - The worker id
   int32_t num_producers() const override;
 
-  /// \brief Base-class override for NodePass pre-visit acceptor
-  /// \param[in] p The node to visit
-  /// \param[out] modified Indicator if the node was modified
-  /// \return Status of the node visit
-  Status PreAccept(NodePass *p, bool *modified) override;
-
-  /// \brief Base-class override for NodePass visitor acceptor
-  /// \param[in] p The node to visit
-  /// \param[out] modified Indicator if the node was modified
-  /// \return Status of the node visit
-  Status Accept(NodePass *p, bool *modified) override;
-
   // Op name getter
   // @return Name of the current Op
   std::string Name() const override { return kRepeatOp; }
@@ -130,13 +118,8 @@ class RepeatOp : public PipelineOp {
   int32_t num_repeats() { return num_repeats_; }
 
   /// \brief reset Op
-  /// \@return Status - The error code return
+  /// \@return Status The status code returned
   Status Reset() override;
-
-  /// \brief Base-class override for GetDatasetSize
-  /// \param[out] dataset_size the size of the dataset
-  /// \return Status of the function
-  Status GetDatasetSize(int64_t *dataset_size) override;
 
   int64_t GetTreeRepeatCount() override;
 

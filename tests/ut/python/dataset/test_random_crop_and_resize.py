@@ -1,4 +1,4 @@
-# Copyright 2019 Huawei Technologies Co., Ltd
+# Copyright 2019-2021 Huawei Technologies Co., Ltd
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -32,6 +32,22 @@ DATA_DIR = ["../data/dataset/test_tf_file_3_images/train-0000-of-0001.data"]
 SCHEMA_DIR = "../data/dataset/test_tf_file_3_images/datasetSchema.json"
 
 GENERATE_GOLDEN = False
+
+
+def test_random_crop_and_resize_callable():
+    """
+    Test RandomCropAndResize op is callable
+    """
+    logger.info("test_random_crop_and_resize_callable")
+    img = np.fromfile("../data/dataset/apple.jpg", dtype=np.uint8)
+    logger.info("Image.type: {}, Image.shape: {}".format(type(img), img.shape))
+
+    decode_op = c_vision.Decode()
+    img = decode_op(img)
+
+    random_crop_and_resize_op = c_vision.RandomResizedCrop((256, 512), (2, 2), (1, 3))
+    img = random_crop_and_resize_op(img)
+    assert np.shape(img) == (256, 512, 3)
 
 
 def test_random_crop_and_resize_op_c(plot=False):
@@ -255,7 +271,7 @@ def test_random_crop_and_resize_04_c():
         data = data.map(operations=random_crop_and_resize_op, input_columns=["image"])
     except ValueError as e:
         logger.info("Got an exception in DE: {}".format(str(e)))
-        assert "Input is not within the required interval of (0 to 16777216)." in str(e)
+        assert "scale should be in (min,max) format. Got (max,min)." in str(e)
 
 
 def test_random_crop_and_resize_04_py():
@@ -278,7 +294,7 @@ def test_random_crop_and_resize_04_py():
         data = data.map(operations=transform, input_columns=["image"])
     except ValueError as e:
         logger.info("Got an exception in DE: {}".format(str(e)))
-        assert "Input is not within the required interval of (0 to 16777216)." in str(e)
+        assert "scale should be in (min,max) format. Got (max,min)." in str(e)
 
 
 def test_random_crop_and_resize_05_c():
@@ -298,7 +314,7 @@ def test_random_crop_and_resize_05_c():
         data = data.map(operations=random_crop_and_resize_op, input_columns=["image"])
     except ValueError as e:
         logger.info("Got an exception in DE: {}".format(str(e)))
-        assert "Input is not within the required interval of (0 to 16777216)." in str(e)
+        assert "ratio should be in (min,max) format. Got (max,min)." in str(e)
 
 
 def test_random_crop_and_resize_05_py():
@@ -321,7 +337,7 @@ def test_random_crop_and_resize_05_py():
         data = data.map(operations=transform, input_columns=["image"])
     except ValueError as e:
         logger.info("Got an exception in DE: {}".format(str(e)))
-        assert "Input is not within the required interval of (0 to 16777216)." in str(e)
+        assert "ratio should be in (min,max) format. Got (max,min)." in str(e)
 
 
 def test_random_crop_and_resize_comp(plot=False):
@@ -389,6 +405,7 @@ def test_random_crop_and_resize_06():
 
 
 if __name__ == "__main__":
+    test_random_crop_and_resize_callable()
     test_random_crop_and_resize_op_c(True)
     test_random_crop_and_resize_op_py(True)
     test_random_crop_and_resize_op_py_ANTIALIAS()

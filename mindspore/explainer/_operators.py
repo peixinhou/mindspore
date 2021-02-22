@@ -13,20 +13,6 @@
 # limitations under the License.
 # ============================================================================
 """Packaged operations based on MindSpore."""
-from typing import List, Tuple, Union, Callable
-
-import numpy as np
-
-import mindspore
-from mindspore import nn
-import mindspore.ops.operations as op
-
-
-_Axis = Union[int, Tuple[int, ...], List[int]]
-_Idx = Union[int, mindspore.Tensor, Tuple[int, ...], Tuple[mindspore.Tensor, ...]]
-_Number = Union[int, float, np.int, np.float]
-_Shape = Union[int, Tuple[int, ...]]
-Tensor = mindspore.Tensor
 
 __all__ = [
     'absolute',
@@ -42,6 +28,7 @@ __all__ = [
     'mean',
     'mul',
     'sort',
+    'sqrt',
     'squeeze',
     'tile',
     'reshape',
@@ -51,6 +38,20 @@ __all__ = [
     'Tensor',
     'summation'
 ]
+
+from typing import List, Tuple, Union, Callable
+
+import numpy as np
+
+import mindspore
+from mindspore import nn
+import mindspore.ops.operations as op
+
+_Axis = Union[int, Tuple[int, ...], List[int]]
+_Idx = Union[int, mindspore.Tensor, Tuple[int, ...], Tuple[mindspore.Tensor, ...]]
+_Number = Union[int, float, np.int, np.float]
+_Shape = Union[int, Tuple[int, ...]]
+Tensor = mindspore.Tensor
 
 
 def absolute(inputs: Tensor) -> Tensor:
@@ -130,21 +131,21 @@ def matmul(inputs_x: Tensor, inputs_y: Tensor) -> Tensor:
 
 
 def maximum(inputs: Tensor, axis: _Axis = (), keep_dims: bool = False) -> Tensor:
-    """Reduce a dimension of a tensor by the maximum value in this dimension."""
+    """Reduces a dimension of a tensor by the maximum value in this dimension."""
     max_op = op.ReduceMax(keep_dims)
     outputs = max_op(inputs, axis)
     return outputs
 
 
 def minimum(inputs: Tensor, axis: _Axis = (), keep_dims: bool = False) -> Tensor:
-    """Reduce a dimension of a tensor by the minimum value in the dimension."""
+    """Reduces a dimension of a tensor by the minimum value in the dimension."""
     max_op = op.ReduceMin(keep_dims)
     outputs = max_op(inputs, axis)
     return outputs
 
 
 def mean(inputs: Tensor, axis: _Axis = (), keep_dims: bool = False) -> Tensor:
-    """Reduce a dimension of a tensor by averaging all elements in the dimension."""
+    """Reduces a dimension of a tensor by averaging all elements in the dimension."""
     mean_op = op.ReduceMean(keep_dims)
     outputs = mean_op(inputs, axis)
     return outputs
@@ -235,14 +236,14 @@ def randint(low: int, high: int, shape: _Shape, dtype: mindspore.dtype = mindspo
     return outputs
 
 
-def softmax(axis: int) -> Callable:
+def softmax(axis: int = -1) -> Callable:
     """Softmax activation function."""
     func = nn.Softmax(axis=axis)
     return func
 
 
 def summation(inputs: Tensor, axis: _Axis = (), keep_dims: bool = False) -> Tensor:
-    """Reduce a dimension of a tensor by summing all elements in the dimension."""
+    """Reduces a dimension of a tensor by summing all elements in the dimension."""
     sum_op = op.ReduceSum(keep_dims)
     outputs = sum_op(inputs, axis)
     return outputs

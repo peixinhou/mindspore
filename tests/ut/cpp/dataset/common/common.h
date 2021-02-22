@@ -1,5 +1,5 @@
 /**
- * Copyright 2019 Huawei Technologies Co., Ltd
+ * Copyright 2019-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,7 +17,29 @@
 #define TESTS_DATASET_UT_CORE_COMMON_DE_UT_COMMON_H_
 
 #include "gtest/gtest.h"
+#include "include/api/status.h"
 #include "utils/log_adapter.h"
+
+using mindspore::Status;
+using mindspore::StatusCode;
+
+#define ASSERT_OK(_s)                          \
+  do {                                         \
+    Status __rc = (_s);                        \
+    if (__rc.IsError()) {                      \
+      MS_LOG(ERROR) << __rc.ToString() << "."; \
+      ASSERT_TRUE(false);                      \
+    }                                          \
+  } while (false)
+
+#define EXPECT_OK(_s)                          \
+  do {                                         \
+    Status __rc = (_s);                        \
+    if (__rc.IsError()) {                      \
+      MS_LOG(ERROR) << __rc.ToString() << "."; \
+      EXPECT_TRUE(false);                      \
+    }                                          \
+  } while (false)
 
 namespace UT {
 class Common : public testing::Test {

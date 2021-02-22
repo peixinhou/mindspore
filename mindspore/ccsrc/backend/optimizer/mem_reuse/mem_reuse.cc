@@ -249,7 +249,8 @@ KernelRefCountPtr MemReuseUtil::GetRef(const AnfNodePtr &node, int output_idx) {
   if (node == nullptr) {
     MS_LOG(EXCEPTION) << "The node pointer is a nullptr.";
   }
-  if (node->isa<CNode>()) {
+  // Get ref count for cnode, except monad cnode.
+  if (node->isa<CNode>() && !HasAbstractMonad(node)) {
     auto ak_node = node->cast<CNodePtr>();
     auto key = ak_node.get();
     MemReuseChecker::GetInstance().CheckOutRef(kernel_output_refs_, ak_node, IntToSize(output_idx));
@@ -268,10 +269,10 @@ KernelRefCountPtr MemReuseUtil::GetKernelInputRef(const CNodePtr &kernel, size_t
   session::KernelWithIndex kernel_input;
   if (is_all_nop_node_) {
     // The graph does not remove the nop node.
-    kernel_input = AnfAlgo::VisitKernelWithReturnType(input_node, 0, false);
+    kernel_input = VisitKernelWithReturnType(input_node, 0, false);
   } else {
     // The graph removes the nop node.
-    kernel_input = AnfAlgo::VisitKernelWithReturnType(input_node, 0, true);
+    kernel_input = VisitKernelWithReturnType(input_node, 0, true);
   }
   if (IsPrimitive(kernel_input.first, prim::kPrimMakeTuple)) {
     MS_LOG(EXCEPTION) << "Input node [" << input_node->DebugString() << "]'s input " << input_idx << " is MakeTuple";
@@ -314,7 +315,8 @@ void MemReuseUtil::SetKernelDefInputs() {
       MS_LOG(EXCEPTION) << "kernel [" << kernel->fullname_with_scope() << "] is not init.";
     }
     auto kernel_def = iter->second;
-    for (size_t i = 0; i < AnfAlgo::GetInputTensorNum(kernel); ++i) {
+    size_t input_num = AnfAlgo::GetInputTensorNum(kernel);
+    for (size_t i = 0; i < input_num; ++i) {
       auto ref_ptr = GetKernelInputRef(kernel, i);
       if (ref_ptr != nullptr) {
         // set the inputs of this kernel_def
@@ -459,6 +461,10 @@ void MemReuseUtil::SetAllInfo(const KernelGraph *graph) {
 #ifdef MEM_REUSE_DEBUG
   MemReuseChecker::GetInstance().CheckMemReuseIR(total_refs_list_, kernel_def_ptr_list_, graph);
 #endif
+
+  auto context_ptr = MsContext::GetInstance();
+  MS_EXCEPTION_IF_NULL(context_ptr);
+  enable_visit_kernel_cache_ = context_ptr->get_param<bool>(MS_CTX_ENABLE_GRAPH_KERNEL);
 }
 
 uint8_t *MemReuseUtil::GetNodeOutputPtr(const AnfNodePtr &node, size_t index) const {
@@ -489,6 +495,23 @@ uint8_t *MemReuseUtil::GetNodeWorkSpacePtr(const AnfNodePtr &node, size_t index)
     ptr = mem_base_ + wk_ref->offset_;
   }
   return ptr;
+}
+
+session::KernelWithIndex MemReuseUtil::VisitKernelWithReturnType(const AnfNodePtr &node, size_t i,
+                                                                 bool visit_nop_node) {
+  if (!enable_visit_kernel_cache_ || i != 0) {
+    return AnfAlgo::VisitKernelWithReturnType(node, i, visit_nop_node);
+  }
+
+  auto &cache =
+    visit_nop_node ? visit_kernel_with_return_type_in0pos_cache_ : visit_kernel_with_return_type_in0pos_skip_nop_cache_;
+  std::unordered_map<AnfNodePtr, session::KernelWithIndex>::iterator tag_iter;
+  if (auto iter = cache.find(node); iter == cache.end()) {
+    tag_iter = cache.insert({node, AnfAlgo::VisitKernelWithReturnType(node, i, visit_nop_node)}).first;
+  } else {
+    tag_iter = iter;
+  }
+  return tag_iter->second;
 }
 }  // namespace memreuse
 }  // namespace mindspore

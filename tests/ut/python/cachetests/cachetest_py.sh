@@ -15,7 +15,8 @@
 # ============================================================================
 
 # source the globals and functions for use with cache testing
-SKIP_ADMIN_COUNTER=true
+export SKIP_ADMIN_COUNTER=true
+declare session_id failed_tests
 . cachetest_lib.sh
 echo
 
@@ -55,6 +56,9 @@ export SESSION_ID=$session_id
 PytestCmd "test_cache_map.py" "test_cache_map_failure" 1
 HandleRcExit $? 0 0
 
+PytestCmd "test_cache_map.py" "test_cache_map_split" 1
+HandleRcExit $? 0 0
+
 # DatasetCache parameter check
 PytestCmd "test_cache_map.py" "test_cache_map_parameter_check"
 HandleRcExit $? 0 0
@@ -79,10 +83,6 @@ GetSession
 HandleRcExit $? 1 1
 export SESSION_ID=$session_id
 PytestCmd "test_cache_map.py" "test_cache_map_running_twice2"
-HandleRcExit $? 0 0
-
-# Set size parameter of DatasetCache to a extra small value
-PytestCmd "test_cache_map.py" "test_cache_map_extra_small_size" 1
 HandleRcExit $? 0 0
 
 PytestCmd "test_cache_map.py" "test_cache_map_no_image"
@@ -252,15 +252,6 @@ export SESSION_ID=$session_id
 PytestCmd "test_cache_nomap.py" "test_cache_nomap_running_twice2"
 HandleRcExit $? 0 0
 
-# Set size parameter of DatasetCache to a extra small value
-GetSession
-HandleRcExit $? 1 1
-export SESSION_ID=$session_id
-PytestCmd "test_cache_nomap.py" "test_cache_nomap_extra_small_size" 1
-HandleRcExit $? 0 0
-DestroySession $session_id
-HandleRcExit $? 1 1
-
 # Run two parallel pipelines (sharing cache)
 for i in $(seq 1 2)
 do
@@ -318,6 +309,18 @@ HandleRcExit $? 0 0
 PytestCmd "test_cache_nomap.py" "test_cache_nomap_nested_repeat"
 HandleRcExit $? 0 0
 
+PytestCmd "test_cache_nomap.py" "test_cache_nomap_get_repeat_count"
+HandleRcExit $? 0 0
+
+PytestCmd "test_cache_nomap.py" "test_cache_nomap_long_file_list"
+HandleRcExit $? 0 0
+
+PytestCmd "test_cache_nomap.py" "test_cache_nomap_failure" 1
+HandleRcExit $? 0 0
+
+PytestCmd "test_cache_nomap.py" "test_cache_nomap_pyfunc" 1
+HandleRcExit $? 0 0
+
 for i in $(seq 1 3)
 do
    test_name="test_cache_nomap_multiple_cache${i}"
@@ -357,7 +360,7 @@ HandleRcExit $? 1 1
 export SESSION_ID=$session_id
 
 PytestCmd "test_cache_nomap.py" "test_cache_nomap_session_destroy" &
-pid=("$!")
+pid=$!
 
 sleep 10
 DestroySession $session_id
@@ -372,7 +375,7 @@ HandleRcExit $? 1 1
 export SESSION_ID=$session_id
 
 PytestCmd "test_cache_nomap.py" "test_cache_nomap_server_stop" &
-pid=("$!")
+pid=$!
 
 sleep 10
 StopServer
@@ -405,6 +408,26 @@ HandleRcExit $? 1 1
 export SESSION_ID=$session_id
 PytestCmd "test_cache_nomap.py" "test_cache_nomap_server_workers_100"
 HandleRcExit $? 0 0
+StopServer
+HandleRcExit $? 0 1
+
+# start cache server with a spilling path
+cmd="${CACHE_ADMIN} --start -s /tmp"
+CacheAdminCmd "${cmd}" 0
+sleep 1
+HandleRcExit $? 0 0
+
+GetSession
+HandleRcExit $? 1 1
+export SESSION_ID=$session_id
+
+# Set size parameter of mappable DatasetCache to a extra small value
+PytestCmd "test_cache_map.py" "test_cache_map_extra_small_size" 1
+HandleRcExit $? 0 0
+# Set size parameter of non-mappable DatasetCache to a extra small value
+PytestCmd "test_cache_nomap.py" "test_cache_nomap_extra_small_size" 1
+HandleRcExit $? 0 0
+
 StopServer
 HandleRcExit $? 0 1
 

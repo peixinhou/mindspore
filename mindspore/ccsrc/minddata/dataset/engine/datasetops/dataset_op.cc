@@ -1,5 +1,5 @@
 /**
- * Copyright 2019 Huawei Technologies Co., Ltd
+ * Copyright 2019-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,10 +26,8 @@
 #include "minddata/dataset/engine/execution_tree.h"
 #include "minddata/dataset/engine/datasetops/device_queue_op.h"
 #include "minddata/dataset/engine/datasetops/source/sampler/sampler.h"
-#include "minddata/dataset/engine/datasetops/epoch_ctrl_op.h"
 #include "minddata/dataset/engine/data_buffer.h"
 #include "minddata/dataset/engine/db_connector.h"
-#include "minddata/dataset/engine/opt/pass.h"
 #ifndef ENABLE_ANDROID
 #include "utils/system/crc32c.h"
 #include "utils/log_adapter.h"
@@ -108,7 +106,7 @@ Status DatasetOp::InsertAsParent(std::shared_ptr<DatasetOp> to_add) {
   }
   RETURN_IF_NOT_OK(to_add->AddChild(shared_from_this()));
   if (tree_->root()->id() == this->id()) {
-    tree_->AssignRoot(to_add);
+    RETURN_IF_NOT_OK(tree_->AssignRoot(to_add));
   }
   return Status::OK();
 }
@@ -149,14 +147,16 @@ Status DatasetOp::Remove() {
   // If we remove B, then first take our child A and update it's parent to be C
   // It's possible the parent is null if we are the root node being removed.
   if (!child_.empty()) {
-    // If we have a parent, then assign chlid's parent to point to our parent.
+    // If we have a parent, then assign child's parent to point to our parent.
     if (!parent_.empty()) {
+      CHECK_FAIL_RETURN_UNEXPECTED(parent_[0]->Children().size() == 1,
+                                   "Removing a node whose parent has more than 1 child is not supported.");
       child_[0]->parent_[0] = parent_[0];
     } else {
       // We don't have a parent, so we are the root node being removed.
       // clear the parent list of our child so that it becomes the new root.
       child_[0]->parent_.clear();
-      tree_->AssignRoot(child_[0]);
+      RETURN_IF_NOT_OK(tree_->AssignRoot(child_[0]));
     }
   }
 
@@ -204,9 +204,6 @@ void DatasetOp::Parent(DatasetOp **parent, int32_t parent_index) const {
   }
 }
 
-// Getter function to get all of our children.
-std::vector<std::shared_ptr<DatasetOp>> DatasetOp::children() const { return child_; }
-
 // Getter function to get all of our parents.
 std::vector<DatasetOp *> DatasetOp::parents() const { return parent_; }
 
@@ -250,7 +247,7 @@ void DatasetOp::Print(std::ostream &out, bool show_all) const {
         << "\nNumber repeats per epoch : " << op_num_repeats_per_epoch_;
     if (sampler_) {
       out << "\nSampler:\n";
-      sampler_->Print(out, show_all);
+      sampler_->SamplerPrint(out, show_all);
     }
   }
 }
@@ -292,27 +289,34 @@ Status DatasetOp::GetNextInput(std::unique_ptr<DataBuffer> *p_buffer, int32_t wo
   return Status::OK();
 }
 
-// Gets the dataset size
-Status DatasetOp::GetDatasetSize(int64_t *dataset_size) {
-  if (dataset_size_ > 0) {
-    *dataset_size = dataset_size_;
-    return Status::OK();
-  }
-  CHECK_FAIL_RETURN_UNEXPECTED(child_.size() == 1, "Can't get the dataset size for the current tree.");
-
-  return child_[0]->GetDatasetSize(dataset_size);
-}
-
 // Gets the number of classes
 Status DatasetOp::GetNumClasses(int64_t *num_classes) {
-  if (num_classes_ > 0) {
-    *num_classes = num_classes_;
+  if (child_.size() == 1) {
+    return child_[0]->GetNumClasses(num_classes);
+  } else if (child_.size() > 1) {
+    // It is okay for dataset to have more than 1 child, GetNumClasses shouldn't fail in this case.
+    // This is done mostly for cache, which injects cache lookup/merge operators. Cache path will
+    // always be in front of the child_ structure, so we get num classes from the last child.
+    return child_[child_.size() - 1]->GetNumClasses(num_classes);
+  } else {
+    // when num classes isn't found, the default behavior is to return -1
+    MS_LOG(WARNING) << "Num classes not defined for : " << Name();
+    *num_classes = -1;
     return Status::OK();
   }
-  if (!child_.empty()) {
-    return child_[0]->GetNumClasses(num_classes);
+}
+
+Status DatasetOp::GetClassIndexing(std::vector<std::pair<std::string, std::vector<int32_t>>> *output_class_indexing) {
+  if (child_.size() == 1) {
+    return child_[0]->GetClassIndexing(output_class_indexing);
+  } else if (child_.size() > 1) {
+    // It is okay for dataset to have more than 1 child, GetClassIndexing shouldn't fail in this case.
+    // This is done mostly for cache, which injects cache lookup/merge operators. Cache path will
+    // always be in the front of the child_ structure, so we get data from the last child.
+    return child_[child_.size() - 1]->GetClassIndexing(output_class_indexing);
   } else {
-    RETURN_STATUS_UNEXPECTED("Can't get the dataset size for the current tree.");
+    *output_class_indexing = {};
+    RETURN_STATUS_UNEXPECTED("Trying to get class index from leaf node, missing override");
   }
 }
 
@@ -332,13 +336,8 @@ Status DatasetOp::EofReceived(int32_t worker_id) {
   return (out_connector_->Add(static_cast<int>(worker_id), std::move(eof_buffer)));
 }
 
-// During tree prepare phase, operators may have specific pre-operations to perform depending on
-// their role.
-Status DatasetOp::PrepareNodePreAction() { return Status::OK(); }
-
-// During tree prepare phase, operators may have specific post-operations to perform depending on
-// their role.
-Status DatasetOp::PrepareNodePostAction() {
+// During tree prepare phase, operators may have specific post-operations to perform depending on their role.
+Status DatasetOp::PrepareOperator() {
   // Creating Connector object for each op.
   // The consumer of the root node is assumed to be one thread.
   // If multiple threads are consuming from the root node, they will get the ordered data in round robin fashion.
@@ -357,9 +356,6 @@ Status DatasetOp::PrepareNodePostAction() {
 
   return Status::OK();
 }
-
-// Getter function.  Base class does not have any special flags setting.
-uint32_t DatasetOp::PrepareFlags() const { return ExecutionTree::kDePrepNone; }
 
 // Derived classes may implement the reset function if the operator is stateful and needs
 // specific reset handling that is not contained in this common code version of the reset.
@@ -394,18 +390,6 @@ Status DatasetOp::ComputeColMap() {
     MS_LOG(WARNING) << "Column name map is already set!";
   }
   return Status::OK();
-}
-
-Status DatasetOp::PreAccept(NodePass *p, bool *modified) {
-  // DatasetOp is the base class of visitor target pre-visit.
-  // This method will only be called if its derived class does not implement one.
-  return p->PreRunOnNode(shared_from_this(), modified);
-}
-
-Status DatasetOp::Accept(NodePass *p, bool *modified) {
-  // DatasetOp is the base class of visitor target.
-  // This method will only be called if its derived class does not implement one.
-  return p->RunOnNode(shared_from_this(), modified);
 }
 
 // Getter for the sampler, and it also removes the sampler from the op
@@ -444,9 +428,15 @@ uint32_t DatasetOp::GenerateCRC(const std::shared_ptr<DatasetOp> &op) {
   ss_str = std::regex_replace(ss_str, std::regex("device_id.*\n"), "");
 
   // Filter out the operator id field
-  ss_str = std::regex_replace(ss_str, std::regex("Parent.*\n"), "");
-  ss_str = std::regex_replace(ss_str, std::regex("Child.*\n"), "");
+  ss_str = std::regex_replace(ss_str, std::regex(" *Parent.*\n"), "");
+  ss_str = std::regex_replace(ss_str, std::regex(" *Child.*\n"), "");
   ss_str = std::regex_replace(ss_str, std::regex(R"(\(\s*\d+?\))"), "");
+
+  // Doesn't matter whether there is any parent node above CacheOp or not.
+  ss_str = std::regex_replace(ss_str, std::regex("Number of parents.*\n"), "");
+
+  // Filter out shuffle seed from ShuffleOp
+  ss_str = std::regex_replace(ss_str, std::regex("Shuffle seed.*\n"), "");
 
   // Filter out the total repeats and number repeats per epoch field
   ss_str = std::regex_replace(ss_str, std::regex("Total repeats.*\n"), "");
@@ -469,17 +459,31 @@ void DatasetOp::UpdateRepeatAndEpochCounter() {
   if (op_current_repeats_ % op_num_repeats_per_epoch_ == 0) op_current_epochs_++;
   MS_LOG(DEBUG) << Name() << " current repeats: " << op_current_repeats_ << ", current epochs: " << op_current_epochs_;
 }
+
 int64_t DatasetOp::GetTreeBatchSize() {
-  if (!child_.empty()) {
+  if (child_.size() == 1) {
     return child_[0]->GetTreeBatchSize();
+  } else if (child_.size() > 1) {
+    // It is okay for dataset to have more than 1 child, GetBatchSize shouldn't fail in this case.
+    // This is done mostly for cache, which injects cache lookup/merge operators. Cache path will
+    // always be in front of the child_ structure, so we get data from the last child.
+    return child_[child_.size() - 1]->GetTreeBatchSize();
+  } else {
+    return 1;
   }
-  return 1;
 }
+
 int64_t DatasetOp::GetTreeRepeatCount() {
-  if (!child_.empty()) {
+  if (child_.size() == 1) {
     return child_[0]->GetTreeRepeatCount();
+  } else if (child_.size() > 1) {
+    // It is okay for dataset to have more than 1 child, GetRepeatCount shouldn't fail in this case.
+    // This is done mostly for cache, which injects cache lookup/merge operators. Cache path will
+    // always be in front of the child_ structure, so we get data from the last child.
+    return child_[child_.size() - 1]->GetTreeRepeatCount();
+  } else {
+    return 1;
   }
-  return 1;
 }
 }  // namespace dataset
 }  // namespace mindspore

@@ -1,5 +1,5 @@
 /**
- * Copyright 2020 Huawei Technologies Co., Ltd
+ * Copyright 2020-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,14 +32,32 @@ ManifestNode::ManifestNode(const std::string &dataset_file, const std::string &u
                            const std::shared_ptr<SamplerObj> &sampler,
                            const std::map<std::string, int32_t> &class_indexing, bool decode,
                            std::shared_ptr<DatasetCache> cache)
-    : DatasetNode(std::move(cache)),
+    : MappableSourceNode(std::move(cache)),
       dataset_file_(dataset_file),
       usage_(usage),
       decode_(decode),
       class_index_(class_indexing),
       sampler_(sampler) {}
 
+std::shared_ptr<DatasetNode> ManifestNode::Copy() {
+  std::shared_ptr<SamplerObj> sampler = (sampler_ == nullptr) ? nullptr : sampler_->SamplerCopy();
+  auto node = std::make_shared<ManifestNode>(dataset_file_, usage_, sampler, class_index_, decode_, cache_);
+  return node;
+}
+
+void ManifestNode::Print(std::ostream &out) const {
+  out << Name() + "(file:" + dataset_file_;
+  if (sampler_ != nullptr) {
+    out << ",sampler";
+  }
+  if (cache_ != nullptr) {
+    out << ",cache";
+  }
+  out << ")";
+}
+
 Status ManifestNode::ValidateParams() {
+  RETURN_IF_NOT_OK(DatasetNode::ValidateParams());
   std::vector<char> forbidden_symbols = {':', '*', '?', '"', '<', '>', '|', '`', '&', '\'', ';'};
   for (char c : dataset_file_) {
     auto p = std::find(forbidden_symbols.begin(), forbidden_symbols.end(), c);
@@ -64,26 +82,25 @@ Status ManifestNode::ValidateParams() {
   return Status::OK();
 }
 
-std::vector<std::shared_ptr<DatasetOp>> ManifestNode::Build() {
-  // A vector containing shared pointer to the Dataset Ops that this object will create
-  std::vector<std::shared_ptr<DatasetOp>> node_ops;
-
+Status ManifestNode::Build(std::vector<std::shared_ptr<DatasetOp>> *const node_ops) {
   // Do internal Schema generation.
   auto schema = std::make_unique<DataSchema>();
-  RETURN_EMPTY_IF_ERROR(schema->AddColumn(ColDescriptor("image", DataType(DataType::DE_UINT8), TensorImpl::kCv, 1)));
+  RETURN_IF_NOT_OK(schema->AddColumn(ColDescriptor("image", DataType(DataType::DE_UINT8), TensorImpl::kCv, 1)));
   TensorShape scalar = TensorShape::CreateScalar();
-  RETURN_EMPTY_IF_ERROR(
+  RETURN_IF_NOT_OK(
     schema->AddColumn(ColDescriptor("label", DataType(DataType::DE_UINT32), TensorImpl::kFlexible, 0, &scalar)));
 
   std::shared_ptr<ManifestOp> manifest_op;
-  manifest_op =
-    std::make_shared<ManifestOp>(num_workers_, rows_per_buffer_, dataset_file_, connector_que_size_, decode_,
-                                 class_index_, std::move(schema), std::move(sampler_->Build()), usage_);
-  RETURN_EMPTY_IF_ERROR(AddCacheOp(&node_ops));
+  std::shared_ptr<SamplerRT> sampler_rt = nullptr;
+  RETURN_IF_NOT_OK(sampler_->SamplerBuild(&sampler_rt));
 
-  node_ops.push_back(manifest_op);
+  manifest_op = std::make_shared<ManifestOp>(num_workers_, rows_per_buffer_, dataset_file_, connector_que_size_,
+                                             decode_, class_index_, std::move(schema), std::move(sampler_rt), usage_);
+  manifest_op->set_total_repeats(GetTotalRepeats());
+  manifest_op->set_num_repeats_per_epoch(GetNumRepeatsPerEpoch());
+  node_ops->push_back(manifest_op);
 
-  return node_ops;
+  return Status::OK();
 }
 
 // Get the shard id of node
@@ -93,5 +110,41 @@ Status ManifestNode::GetShardId(int32_t *shard_id) {
   return Status::OK();
 }
 
+// Get Dataset size
+Status ManifestNode::GetDatasetSize(const std::shared_ptr<DatasetSizeGetter> &size_getter, bool estimate,
+                                    int64_t *dataset_size) {
+  if (dataset_size_ > 0) {
+    *dataset_size = dataset_size_;
+    return Status::OK();
+  }
+  int64_t num_rows, sample_size;
+  int64_t num_classes;  // dummy variable
+  RETURN_IF_NOT_OK(ManifestOp::CountTotalRows(dataset_file_, class_index_, usage_, &num_rows, &num_classes));
+  std::shared_ptr<SamplerRT> sampler_rt = nullptr;
+  RETURN_IF_NOT_OK(sampler_->SamplerBuild(&sampler_rt));
+  sample_size = sampler_rt->CalculateNumSamples(num_rows);
+  *dataset_size = sample_size;
+  dataset_size_ = *dataset_size;
+  return Status::OK();
+}
+
+Status ManifestNode::to_json(nlohmann::json *out_json) {
+  nlohmann::json args, sampler_args;
+  RETURN_IF_NOT_OK(sampler_->to_json(&sampler_args));
+  args["sampler"] = sampler_args;
+  args["num_parallel_workers"] = num_workers_;
+  args["dataset_file"] = dataset_file_;
+  args["usage"] = usage_;
+  args["class_indexing"] = class_index_;
+  args["decode"] = decode_;
+
+  if (cache_ != nullptr) {
+    nlohmann::json cache_args;
+    RETURN_IF_NOT_OK(cache_->to_json(&cache_args));
+    args["cache"] = cache_args;
+  }
+  *out_json = args;
+  return Status::OK();
+}
 }  // namespace dataset
 }  // namespace mindspore

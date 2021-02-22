@@ -51,6 +51,8 @@ class GPUDeviceManager {
 
   bool CopyDeviceMemToHostAsync(const HostMemPtr &dst, const DeviceMemPtr &src, size_t size, DeviceStream stream) const;
   bool CopyHostMemToDeviceAsync(const DeviceMemPtr &dst, const void *src, size_t size, DeviceStream stream) const;
+  bool CopyDeviceMemToDeviceAsync(const DeviceMemPtr &dst, const DeviceMemPtr &src, size_t size,
+                                  DeviceStream stream) const;
 
   static GPUDeviceManager &GetInstance() {
     static GPUDeviceManager instance;
@@ -58,7 +60,7 @@ class GPUDeviceManager {
   }
 
  private:
-  GPUDeviceManager() : dev_id_init_(false), cur_dev_id_(0) {}
+  GPUDeviceManager() : dev_id_init_(false), cur_dev_id_(0), dev_alive_(false) {}
   ~GPUDeviceManager() = default;
   GPUDeviceManager(const GPUDeviceManager &) = delete;
   GPUDeviceManager &operator=(const GPUDeviceManager &) = delete;
@@ -79,6 +81,7 @@ class GPUDeviceManager {
   cusolverDnHandle_t cusolver_dn_handle_{nullptr};
   bool dev_id_init_;
   uint32_t cur_dev_id_;
+  bool dev_alive_;
 };
 }  // namespace gpu
 }  // namespace device

@@ -1,4 +1,4 @@
-# Copyright 2020 Huawei Technologies Co., Ltd
+# Copyright 2020-2021 Huawei Technologies Co., Ltd
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -29,6 +29,7 @@ from .rpn import RPN
 from .roi_align import SingleRoIExtractor
 from .anchor_generator import AnchorGenerator
 
+
 class Faster_Rcnn_Resnet50(nn.Cell):
     """
     FasterRcnn Network.
@@ -50,6 +51,8 @@ class Faster_Rcnn_Resnet50(nn.Cell):
     """
     def __init__(self, config):
         super(Faster_Rcnn_Resnet50, self).__init__()
+        self.dtype = np.float32
+        self.ms_type = mstype.float32
         self.train_batch_size = config.batch_size
         self.num_classes = config.num_classes
         self.anchor_scales = config.anchor_scales
@@ -111,24 +114,10 @@ class Faster_Rcnn_Resnet50(nn.Cell):
         # Assign and sampler stage two
         self.bbox_assigner_sampler_for_rcnn = BboxAssignSampleForRcnn(config, self.train_batch_size,
                                                                       config.num_bboxes_stage2, True)
-        self.decode = P.BoundingBoxDecode(max_shape=(768, 1280), means=self.target_means, \
+        self.decode = P.BoundingBoxDecode(max_shape=(config.img_height, config.img_width), means=self.target_means, \
                                           stds=self.target_stds)
-
         # Roi
-        self.roi_align = SingleRoIExtractor(config,
-                                            config.roi_layer,
-                                            config.roi_align_out_channels,
-                                            config.roi_align_featmap_strides,
-                                            self.train_batch_size,
-                                            config.roi_align_finest_scale)
-        self.roi_align.set_train_local(config, True)
-        self.roi_align_test = SingleRoIExtractor(config,
-                                                 config.roi_layer,
-                                                 config.roi_align_out_channels,
-                                                 config.roi_align_featmap_strides,
-                                                 1,
-                                                 config.roi_align_finest_scale)
-        self.roi_align_test.set_train_local(config, False)
+        self.roi_init(config)
 
         # Rcnn
         self.rcnn = Rcnn(config, config.rcnn_in_channels * config.roi_layer['out_size'] * config.roi_layer['out_size'],
@@ -146,7 +135,33 @@ class Faster_Rcnn_Resnet50(nn.Cell):
         self.greater = P.Greater()
         self.transpose = P.Transpose()
 
+        # Improve speed
+        self.concat_start = min(self.num_classes - 2, 55)
+        self.concat_end = (self.num_classes - 1)
+
         # Test mode
+        self.test_mode_init(config)
+
+        # Init tensor
+        self.init_tensor(config)
+
+    def roi_init(self, config):
+        self.roi_align = SingleRoIExtractor(config,
+                                            config.roi_layer,
+                                            config.roi_align_out_channels,
+                                            config.roi_align_featmap_strides,
+                                            self.train_batch_size,
+                                            config.roi_align_finest_scale)
+        self.roi_align.set_train_local(config, True)
+        self.roi_align_test = SingleRoIExtractor(config,
+                                                 config.roi_layer,
+                                                 config.roi_align_out_channels,
+                                                 config.roi_align_featmap_strides,
+                                                 1,
+                                                 config.roi_align_finest_scale)
+        self.roi_align_test.set_train_local(config, False)
+
+    def test_mode_init(self, config):
         self.test_batch_size = config.test_batch_size
         self.split = P.Split(axis=0, output_num=self.test_batch_size)
         self.split_shape = P.Split(axis=0, output_num=4)
@@ -157,7 +172,7 @@ class Faster_Rcnn_Resnet50(nn.Cell):
 
         self.rpn_max_num = config.rpn_max_num
 
-        self.zeros_for_nms = Tensor(np.zeros((self.rpn_max_num, 3)).astype(np.float16))
+        self.zeros_for_nms = Tensor(np.zeros((self.rpn_max_num, 3)).astype(self.dtype))
         self.ones_mask = np.ones((self.rpn_max_num, 1)).astype(np.bool)
         self.zeros_mask = np.zeros((self.rpn_max_num, 1)).astype(np.bool)
         self.bbox_mask = Tensor(np.concatenate((self.ones_mask, self.zeros_mask,
@@ -165,10 +180,10 @@ class Faster_Rcnn_Resnet50(nn.Cell):
         self.nms_pad_mask = Tensor(np.concatenate((self.ones_mask, self.ones_mask,
                                                    self.ones_mask, self.ones_mask, self.zeros_mask), axis=1))
 
-        self.test_score_thresh = Tensor(np.ones((self.rpn_max_num, 1)).astype(np.float16) * config.test_score_thr)
-        self.test_score_zeros = Tensor(np.ones((self.rpn_max_num, 1)).astype(np.float16) * 0)
-        self.test_box_zeros = Tensor(np.ones((self.rpn_max_num, 4)).astype(np.float16) * -1)
-        self.test_iou_thr = Tensor(np.ones((self.rpn_max_num, 1)).astype(np.float16) * config.test_iou_thr)
+        self.test_score_thresh = Tensor(np.ones((self.rpn_max_num, 1)).astype(self.dtype) * config.test_score_thr)
+        self.test_score_zeros = Tensor(np.ones((self.rpn_max_num, 1)).astype(self.dtype) * 0)
+        self.test_box_zeros = Tensor(np.ones((self.rpn_max_num, 4)).astype(self.dtype) * -1)
+        self.test_iou_thr = Tensor(np.ones((self.rpn_max_num, 1)).astype(self.dtype) * config.test_iou_thr)
         self.test_max_per_img = config.test_max_per_img
         self.nms_test = P.NMSWithMask(config.test_iou_thr)
         self.softmax = P.Softmax(axis=1)
@@ -177,15 +192,11 @@ class Faster_Rcnn_Resnet50(nn.Cell):
         self.test_topk = P.TopK(sorted=True)
         self.test_num_proposal = self.test_batch_size * self.rpn_max_num
 
-        # Improve speed
-        self.concat_start = min(self.num_classes - 2, 55)
-        self.concat_end = (self.num_classes - 1)
-
-        # Init tensor
+    def init_tensor(self, config):
         roi_align_index = [np.array(np.ones((config.num_expected_pos_stage2 + config.num_expected_neg_stage2, 1)) * i,
-                                    dtype=np.float16) for i in range(self.train_batch_size)]
+                                    dtype=self.dtype) for i in range(self.train_batch_size)]
 
-        roi_align_index_test = [np.array(np.ones((config.rpn_max_num, 1)) * i, dtype=np.float16) \
+        roi_align_index_test = [np.array(np.ones((config.rpn_max_num, 1)) * i, dtype=self.dtype) \
                                 for i in range(self.test_batch_size)]
 
         self.roi_align_index_tensor = Tensor(np.concatenate(roi_align_index))
@@ -258,7 +269,6 @@ class Faster_Rcnn_Resnet50(nn.Cell):
                 bboxes_all = bboxes_tuple[0]
             rois = self.concat_1((self.roi_align_index_test_tensor, bboxes_all))
 
-
         rois = self.cast(rois, mstype.float32)
         rois = F.stop_gradient(rois)
 
@@ -275,8 +285,7 @@ class Faster_Rcnn_Resnet50(nn.Cell):
                                             self.cast(x[2], mstype.float32),
                                             self.cast(x[3], mstype.float32))
 
-
-        roi_feats = self.cast(roi_feats, mstype.float16)
+        roi_feats = self.cast(roi_feats, self.ms_type)
         rcnn_masks = self.concat(mask_tuple)
         rcnn_masks = F.stop_gradient(rcnn_masks)
         rcnn_mask_squeeze = self.squeeze(self.cast(rcnn_masks, mstype.bool_))
@@ -420,6 +429,16 @@ class Faster_Rcnn_Resnet50(nn.Cell):
         for i in range(num_levels):
             anchors = self.anchor_generators[i].grid_anchors(
                 featmap_sizes[i], self.anchor_strides[i])
-            multi_level_anchors += (Tensor(anchors.astype(np.float16)),)
+            multi_level_anchors += (Tensor(anchors.astype(self.dtype)),)
 
         return multi_level_anchors
+
+class FasterRcnn_Infer(nn.Cell):
+    def __init__(self, config):
+        super(FasterRcnn_Infer, self).__init__()
+        self.network = Faster_Rcnn_Resnet50(config)
+        self.network.set_train(False)
+
+    def construct(self, img_data, img_metas):
+        output = self.network(img_data, img_metas, None, None, None)
+        return output

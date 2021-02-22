@@ -91,14 +91,6 @@ int ConvolutionDepthwiseInt8CPUKernel::InitWeightBias() {
 }
 
 int ConvolutionDepthwiseInt8CPUKernel::Init() {
-  if (!InferShapeDone()) {
-    return RET_OK;
-  }
-  return ReSize();
-}
-
-int ConvolutionDepthwiseInt8CPUKernel::ReSize() {
-  ConvolutionBaseCPUKernel::Init();
   auto ret = ConvolutionBaseCPUKernel::SetQuantParam();
   if (ret != RET_OK) {
     MS_LOG(ERROR) << "Set quant param failed.";
@@ -110,6 +102,14 @@ int ConvolutionDepthwiseInt8CPUKernel::ReSize() {
     MS_LOG(ERROR) << "Depthwise int8 InitWeightBias error!";
     return ret;
   }
+  if (!InferShapeDone()) {
+    return RET_OK;
+  }
+  return ReSize();
+}
+
+int ConvolutionDepthwiseInt8CPUKernel::ReSize() {
+  ConvolutionBaseCPUKernel::Init();
   return RET_OK;
 }
 
@@ -182,8 +182,7 @@ kernel::LiteKernel *CpuConvDwInt8KernelCreator(const std::vector<lite::Tensor *>
       conv_param->output_h_ = outputs[kOutputIndex]->Height();
       conv_param->output_w_ = outputs[kOutputIndex]->Width();
     }
-    auto weight_quant_size = inputs[kWeightIndex]->quant_params().size();
-    if (CheckIfUse3X3(conv_param) && weight_quant_size == 1) {
+    if (CheckConvDwUse3X3(conv_param) && conv_param->input_channel_ % C8NUM == 0) {
 #ifdef ENABLE_ARM64
       kernel =
         new (std::nothrow) kernel::ConvolutionDepthwise3x3Int8CPUKernel(opParameter, inputs, outputs, ctx, primitive);

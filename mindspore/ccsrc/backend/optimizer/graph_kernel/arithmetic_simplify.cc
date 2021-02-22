@@ -15,7 +15,10 @@
  */
 #include "backend/optimizer/graph_kernel/arithmetic_simplify.h"
 
+#include <algorithm>
 #include <list>
+#include <utility>
+#include <vector>
 #include "backend/optimizer/graph_kernel/graph_kernel_helper.h"
 #include "backend/kernel_compiler/common_utils.h"
 #include "backend/session/anf_runtime_algorithm.h"
@@ -29,7 +32,9 @@ namespace opt {
 AnfNodePtr NewCNodeWithInfo(const AnfNodePtrList &inputs, const AnfNodePtr &ori_node) {
   auto func_graph = ori_node->func_graph();
   MS_EXCEPTION_IF_NULL(func_graph);
+  TraceManager::DebugTrace(std::make_shared<TraceOpt>(ori_node->debug_info()));
   auto new_cnode = func_graph->NewCNode(inputs);
+  TraceManager::EndTrace();
   new_cnode->set_abstract(ori_node->abstract());
   new_cnode->set_kernel_info(std::make_shared<device::KernelInfo>());
   if (func_graph->has_attr(FUNC_GRAPH_ATTR_GRAPH_KERNEL)) {
@@ -42,7 +47,7 @@ AnfNodePtr NewCNodeWithInfo(const AnfNodePtrList &inputs, const AnfNodePtr &ori_
 }
 
 AnfNodePtr SimplifyAdd(const AnfNodePtr &node) {
-  if (!IsPrimitiveCNode(node, prim::kPrimTensorAdd)) {
+  if (!IsPrimitiveCNode(node, prim::kPrimAdd)) {
     return nullptr;
   }
   PatternNode<AnfNodePtr> x, y, z;
@@ -52,13 +57,13 @@ AnfNodePtr SimplifyAdd(const AnfNodePtr &node) {
   PConstant<AnfNodePtr> any_const_2(node);
 
   auto add_distri_lambda = [&node, &x, &y, &any_const]() -> AnfNodePtr {
-    auto node_tmp = NewCNodeWithInfo({NewValueNode(prim::kPrimTensorAdd), x.GetNode(node), y.GetNode(node)}, node);
+    auto node_tmp = NewCNodeWithInfo({NewValueNode(prim::kPrimAdd), x.GetNode(node), y.GetNode(node)}, node);
     auto new_cnode = NewCNodeWithInfo({NewValueNode(prim::kPrimMul), node_tmp, any_const.GetNode(node)}, node);
     return new_cnode;
   };
   auto add_union_lambda = [&node, &x, &any_const, &any_const_2]() -> AnfNodePtr {
     auto new_rhs = any_const.AddByPatternConst(any_const_2, x.GetNode(node));
-    auto new_cnode = NewCNodeWithInfo({NewValueNode(prim::kPrimTensorAdd), x.GetNode(node), new_rhs}, node);
+    auto new_cnode = NewCNodeWithInfo({NewValueNode(prim::kPrimAdd), x.GetNode(node), new_rhs}, node);
     return new_cnode;
   };
   // A + 0 = A
@@ -83,7 +88,7 @@ AnfNodePtr SimplifySub(const AnfNodePtr &node) {
   PConstant<AnfNodePtr> any_const(node);
   auto sub_toadd_lambda = [&node, &x, &any_const]() -> AnfNodePtr {
     auto new_rhs = any_const.ValueNodeWithOprations(prim::kPrimNeg);
-    auto new_cnode = NewCNodeWithInfo({NewValueNode(prim::kPrimTensorAdd), x.GetNode(node), new_rhs}, node);
+    auto new_cnode = NewCNodeWithInfo({NewValueNode(prim::kPrimAdd), x.GetNode(node), new_rhs}, node);
     return new_cnode;
   };
   // A - 0 = A
@@ -264,7 +269,7 @@ AnfNodePtr SimplifyMul(const AnfNodePtr &node) {
     return new_cnode;
   };
   auto exp_merge_lambda = [&node, &x, &y]() -> AnfNodePtr {
-    auto node_tmp = NewCNodeWithInfo({NewValueNode(prim::kPrimTensorAdd), x.GetNode(node), y.GetNode(node)}, node);
+    auto node_tmp = NewCNodeWithInfo({NewValueNode(prim::kPrimAdd), x.GetNode(node), y.GetNode(node)}, node);
     auto new_cnode = NewCNodeWithInfo({NewValueNode(prim::kPrimExp), node_tmp}, node);
     return new_cnode;
   };
@@ -424,9 +429,9 @@ AnfNodePtr SimplifyDiv(const AnfNodePtr &node) {
   }
 
 bool TryTransposeToReshape(const AnfNodePtr &node) {
-  auto perm = AnfAlgo::GetNodeAttr<std::vector<int>>(node, "perm");
+  auto perm = AnfAlgo::GetNodeAttr<std::vector<int64_t>>(node, "perm");
   auto ori_shape = AnfAlgo::GetPrevNodeOutputInferShape(node, 0);
-  std::vector<int> remove_one_perm;
+  std::vector<int64_t> remove_one_perm;
   for (auto idx : perm) {
     if (idx < 0 || IntToSize(idx) >= ori_shape.size()) {
       MS_EXCEPTION(ValueError);
@@ -498,23 +503,23 @@ ShapeVector TransAxisValueToVector(const ValuePtr &value) {
   MS_EXCEPTION_IF_NULL(value);
   ShapeVector axis_vector;
   if (value->isa<Int32Imm>()) {
-    axis_vector.emplace_back(GetValue<int>(value));
+    axis_vector.emplace_back(GetValue<int64_t>(value));
   }
   if (value->isa<ValueTuple>() || value->isa<ValueList>()) {
-    axis_vector = GetValue<std::vector<int>>(value);
+    axis_vector = GetValue<std::vector<int64_t>>(value);
   }
   return axis_vector;
 }
 
 ShapeVector GetNodeShape(const AnfNodePtr &node) {
   auto base_shape = node->Shape()->cast<abstract::ShapePtr>();
-  std::vector<int> shape;
+  std::vector<int64_t> shape;
   std::transform(base_shape->shape().begin(), base_shape->shape().end(), std::back_inserter(shape), IntToSize);
   return shape;
 }
 
-std::vector<std::pair<int, int>> GetUnmodifiedDim(const ShapeVector &a, const ShapeVector &b) {
-  std::vector<std::pair<int, int>> unmodified;
+std::vector<std::pair<int64_t, int64_t>> GetUnmodifiedDim(const ShapeVector &a, const ShapeVector &b) {
+  std::vector<std::pair<int64_t, int64_t>> unmodified;
   for (size_t i = 0, j = 0, patial_a = 1, patial_b = 1;;) {
     if (i >= a.size() && j >= b.size()) {
       break;
@@ -560,15 +565,16 @@ AnfNodePtr SimplifyReduce(const AnfNodePtr &node) {
   auto trans_reduce_lambda = [&node, &x](PrimitivePtr &operation) -> AnfNodePtr {
     auto shape = GetNodeShape(node);
     if (shape.size() != 0 && shape.size() != 1) {
-      return node;
+      return nullptr;
     } else {
       auto tmp_node = node->cast<CNodePtr>();
       auto transpose_node = tmp_node->input(1);
-      auto transpose_dimensions = GetValue<std::vector<int>>(AnfAlgo::GetNodeAttr<ValuePtr>(transpose_node, "perm"));
+      auto transpose_dimensions =
+        GetValue<std::vector<int64_t>>(AnfAlgo::GetNodeAttr<ValuePtr>(transpose_node, "perm"));
       ShapeVector new_dimensions;
       auto reduce_dimensions = TransAxisValueToVector(AnfAlgo::GetNodeAttr<ValuePtr>(tmp_node, "axis"));
       std::transform(reduce_dimensions.begin(), reduce_dimensions.end(), std::back_inserter(new_dimensions),
-                     [&transpose_dimensions](const int &dim) { return transpose_dimensions[dim]; });
+                     [&transpose_dimensions](const int64_t &dim) { return transpose_dimensions[dim]; });
       std::sort(new_dimensions.begin(), new_dimensions.end());
       auto new_cnode = NewCNodeWithInfo({NewValueNode(operation), x.GetNode(node)}, node);
       AnfAlgo::SetNodeAttr("axis", MakeValue(new_dimensions), new_cnode);
@@ -635,7 +641,7 @@ AnfNodePtr SimplifyReduce(const AnfNodePtr &node) {
       AnfAlgo::CopyNodeAttr("keep_dims", node, new_cnode);
       return new_cnode;
     }
-    return node;
+    return nullptr;
   };
   auto neg_reducesum_lambda = [&node, &x]() -> AnfNodePtr {
     auto arg_node = NewCNodeWithInfo({NewValueNode(prim::kPrimReduceSum), x.GetNode(node)}, node);
@@ -662,9 +668,7 @@ AnfNodePtr SimplifyReduce(const AnfNodePtr &node) {
 }
 
 AnfNodePtr TrySimplify(const AnfNodePtr &node) {
-  std::list<std::function<AnfNodePtr(AnfNodePtr)>> SimplifyFuncList = {
-    SimplifyAdd,    SimplifyDiv,  SimplifyLog, SimplifyMul,       SimplifyNeg,    SimplifyPow,   SimplifyRsqrt,
-    SimplifySelect, SimplifySqrt, SimplifySub, SimplifyTranspose, SimplifyMatMul, SimplifyReduce};
+  std::list<std::function<AnfNodePtr(AnfNodePtr)>> SimplifyFuncList = {SimplifyReduce};
   for (auto f : SimplifyFuncList) {
     auto ret = f(node);
     if (ret != nullptr) {
@@ -685,6 +689,7 @@ void InlineSubgraph(const CNodePtr &kernel_node, const FuncGraphPtr &sub_graph, 
 
 CNodePtr AddIdentityToEmptyPath(const AnfNodePtr &node, const FuncGraphPtr &sub_graph) {
   if (node->isa<Parameter>() || node->isa<ValueNode>()) {
+    TraceGuard guard(std::make_shared<TraceOpt>(node->debug_info()));
     auto identity_node = sub_graph->NewCNode({NewValueNode(prim::kPrimIdentity), node});
     identity_node->set_abstract(node->abstract());
     sub_graph->AddNode(identity_node);

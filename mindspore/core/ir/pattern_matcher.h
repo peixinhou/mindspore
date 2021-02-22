@@ -21,6 +21,7 @@
 #include <memory>
 #include <tuple>
 #include <vector>
+#include <algorithm>
 
 #include "base/core_ops.h"
 #include "ir/visitor.h"
@@ -464,7 +465,7 @@ class PPrimitive : public PBase<PPrimitive<TArgs...> > {
 template <typename T = AnfNodePtr>
 class PConstant : public PBase<PConstant<T> > {
  public:
-  explicit PConstant(const AnfNodePtr &as_node, const bool any_value = true, const int check_value = 0,
+  explicit PConstant(const AnfNodePtr &as_node, const bool any_value = true, const int64_t check_value = 0,
                      const bool is_scalar = false)
       : as_node_(as_node),
         captured_node_(as_node),
@@ -755,6 +756,9 @@ class PConstant : public PBase<PConstant<T> > {
       ShapeVector tensor_shape = tensor_abstract->shape()->shape();
       auto new_tensor_ptr = std::make_shared<tensor::Tensor>(tensor_type_ptr->type_id(), tensor_shape);
       size_t mem_size = GetTypeByte(tensor_type_ptr) * IntToSize(new_tensor_ptr->ElementsNum());
+      if (new_tensor_ptr->DataSize() < tensor_ptr->DataSize()) {
+        MS_EXCEPTION(ValueError) << "DataSize of new_tensor_ptr is smaller than DataSize of tensor_ptr";
+      }
       if ((tensor_type == TypeId::kNumberTypeFloat32) || (tensor_type == TypeId::kNumberTypeFloat) ||
           (tensor_type == TypeId::kNumberTypeFloat64)) {
         float *data = reinterpret_cast<float *>(tensor_ptr->data_c());
@@ -811,6 +815,9 @@ class PConstant : public PBase<PConstant<T> > {
   template <typename TM>
   void CalcByOperator(void *in_data_1, int in_data_1_size, void *in_data_2, int in_data_2_size, void **out_data,
                       int out_data_size, BinOperator bin_operator) const {
+    if (out_data_size <= 0) {
+      MS_EXCEPTION(ValueError) << "out_data_size should be greater than zeros";
+    }
     TM *data_1 = reinterpret_cast<TM *>(in_data_1);
     TM *data_2 = reinterpret_cast<TM *>(in_data_2);
     TM *data_out = new TM[out_data_size];
@@ -834,14 +841,24 @@ class PConstant : public PBase<PConstant<T> > {
       }
     } else {
       if (in_data_2_size < out_data_size) {
-        MS_EXCEPTION(ValueError) << "in_data_2_size is smaller than out_data_size.";
+        MS_LOG(INFO) << "in_data_2_size:" << in_data_2_size << " is smaller than out_data_size:" << out_data_size
+                     << ".in_data2 will be broadcast.";
       }
-      for (int i = 0; i < out_data_size; i++) {
+      auto min_size = std::min<int>(in_data_2_size, out_data_size);
+      for (int i = 0; i < min_size; i++) {
         if (bin_operator == ADD) {
           data_out[i] += data_2[i];
         } else {
           data_out[i] *= data_2[i];
         }
+      }
+      // In case of in_data2_size < out_data_size
+      for (int i = min_size; i < out_data_size; i++) {
+        if (bin_operator != ADD) {
+          // if operator is MUL, data_out[i] *= 0, => data_out[i] = 0.
+          data_out[i] = 0;
+        }
+        // if operator is ADD, data_out[i] += 0, => data_out[i] = data_out[i], => NoChange.
       }
     }
     *out_data = reinterpret_cast<void *>(data_out);
@@ -957,7 +974,7 @@ class PConstant : public PBase<PConstant<T> > {
   mutable AnfNodePtr as_node_;
   mutable AnfNodePtr captured_node_;
   bool any_value_{true};
-  int check_value_{0};
+  int64_t check_value_{0};
   bool is_scalar_{false};
   mutable bool is_new_value_node_{false};
   mutable bool captured_{false};
@@ -972,7 +989,7 @@ class PConstant : public PBase<PConstant<T> > {
   }
 
 // Arithmetic operations
-BIN_OPERATION_PATTERN(operator+, prim::kPrimTensorAdd, true);
+BIN_OPERATION_PATTERN(operator+, prim::kPrimAdd, true);
 BIN_OPERATION_PATTERN(operator*, prim::kPrimMul, true);
 BIN_OPERATION_PATTERN(operator/, prim::kPrimRealDiv, false);
 BIN_OPERATION_PATTERN(operator-, prim::kPrimSub, false);

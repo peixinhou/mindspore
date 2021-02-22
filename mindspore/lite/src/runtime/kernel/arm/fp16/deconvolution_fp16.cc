@@ -17,7 +17,6 @@
 #include "src/runtime/kernel/arm/fp16/deconvolution_fp16.h"
 #include "src/runtime/kernel/arm/fp16/deconvolution_winograd_fp16.h"
 #include "src/runtime/runtime_api.h"
-#include "src/runtime/kernel/arm/base/dequant.h"
 
 using mindspore::kernel::KERNEL_ARCH::kCPU;
 using mindspore::lite::KernelRegistrar;
@@ -63,7 +62,8 @@ int DeConvolutionFp16CPUKernel::InitWeightBias() {
     return RET_ERROR;
   }
   memset(bias_data_, 0, UP_ROUND(output_channel, C4NUM) * sizeof(float16_t));
-  if (in_tensors_.size() == 3) {
+  if (in_tensors_.size() == 3 && in_tensors_.at(kBiasIndex)->shape().size() == 1 &&
+      in_tensors_.at(kBiasIndex)->DimensionSize(0) == output_channel) {
     Float32ToFloat16(reinterpret_cast<float *>(in_tensors_.at(2)->MutableData()),
                      reinterpret_cast<float16_t *>(bias_data_), output_channel);
   }
@@ -189,7 +189,6 @@ int DeConvolutionFp16CPUKernel::Run() {
   int error_code = InitRunBuf();
   if (error_code != RET_OK) {
     MS_LOG(ERROR) << "deconv fp16 InitRunBuf error! error_code[" << error_code << "]";
-    ConvolutionBaseFP16CPUKernel::FreeTmpBuffer();
     FreeRunBuf();
     return RET_ERROR;
   }
@@ -206,8 +205,6 @@ int DeConvolutionFp16CPUKernel::Run() {
     }
   }
 
-  ConvolutionBaseFP16CPUKernel::IfCastOutput();
-  ConvolutionBaseFP16CPUKernel::FreeTmpBuffer();
   FreeRunBuf();
   return error_code;
 }
@@ -218,22 +215,6 @@ kernel::LiteKernel *CpuDeConvFp16KernelCreator(const std::vector<lite::Tensor *>
                                                const mindspore::lite::PrimitiveC *primitive) {
   MS_ASSERT(opParameter != nullptr);
   MS_ASSERT(desc.type == schema::PrimitiveType_DeConv2D);
-
-  auto *weight_tensor = inputs.at(kWeightIndex);
-  auto *restore_data = weight_tensor->data_c();
-  auto restore_type = weight_tensor->data_type();
-  auto dequant_flag =
-    !weight_tensor->quant_params().empty() && weight_tensor->quant_params().front().inited && restore_data != nullptr;
-  if (dequant_flag) {
-    auto *dequant_weight = kernel::DequantUtil::DequantWeight(weight_tensor);
-    if (dequant_weight == nullptr) {
-      MS_LOG(ERROR) << "dequant data is nullptr.";
-      free(opParameter);
-      return nullptr;
-    }
-    weight_tensor->set_data_type(kNumberTypeFloat32);
-    weight_tensor->set_data(dequant_weight);
-  }
 
   kernel::LiteKernel *kernel;
   auto conv_param = reinterpret_cast<ConvParameter *>(opParameter);
@@ -246,11 +227,6 @@ kernel::LiteKernel *CpuDeConvFp16KernelCreator(const std::vector<lite::Tensor *>
 
   if (kernel == nullptr) {
     MS_LOG(ERROR) << "kernel is nullptr.";
-    if (dequant_flag) {
-      weight_tensor->FreeData();
-      weight_tensor->set_data(restore_data);
-      weight_tensor->set_data_type(restore_type);
-    }
     free(opParameter);
     return nullptr;
   }
@@ -258,18 +234,8 @@ kernel::LiteKernel *CpuDeConvFp16KernelCreator(const std::vector<lite::Tensor *>
   if (ret != RET_OK) {
     MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
                   << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
-    if (dequant_flag) {
-      weight_tensor->FreeData();
-      weight_tensor->set_data(restore_data);
-      weight_tensor->set_data_type(restore_type);
-    }
     delete kernel;
     return nullptr;
-  }
-  if (dequant_flag) {
-    weight_tensor->FreeData();
-    weight_tensor->set_data(restore_data);
-    weight_tensor->set_data_type(restore_type);
   }
   return kernel;
 }

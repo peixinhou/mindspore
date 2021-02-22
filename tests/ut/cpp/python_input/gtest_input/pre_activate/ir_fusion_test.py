@@ -15,14 +15,15 @@
 from mindspore.ops import Primitive
 from mindspore.ops import operations as P
 from mindspore.ops.operations import _grad_ops as G
+from mindspore.ops import _constants as Constants
 
 # pylint: disable=unused-variable
 
-tuple_getitem = Primitive('tuple_getitem')
-add = P.TensorAdd()
+tuple_getitem = Primitive(Constants.kTupleGetItem)
+add = P.Add()
 allreduce = P.AllReduce()
 allreduce.add_prim_attr('fusion', 1)
-make_tuple = Primitive('make_tuple')
+make_tuple = Primitive("make_tuple")
 conv = P.Conv2D(out_channel=64, kernel_size=7, mode=1, pad_mode="valid", pad=0, stride=1, dilation=1, group=1)
 bn = P.FusedBatchNorm()
 relu = P.ReLU()
@@ -131,17 +132,6 @@ def test_all_reduce_fusion_all(tag):
 
     @fns
     def after(x1, x2, x3, x4, x5):
-        ar = allreduce(x5, x4, x3, x2, x1)
-        y5 = tuple_getitem(ar, 0)
-        y4 = tuple_getitem(ar, 1)
-        y3 = tuple_getitem(ar, 2)
-        y2 = tuple_getitem(ar, 3)
-        y1 = tuple_getitem(ar, 4)
-        res = make_tuple(y1, y2, y3, y4, y5)
-        return make_tuple(res)
-
-    @fns
-    def after1(x1, x2, x3, x4, x5):
         ar = allreduce(x1, x2, x3, x4, x5)
         y1 = tuple_getitem(ar, 0)
         y2 = tuple_getitem(ar, 1)
@@ -169,13 +159,13 @@ def test_all_reduce_fusion_group(tag):
 
     @fns
     def after1(x1, x2, x3, x4, x5):
-        ar1 = allreduce(x5, x4)
-        ar2 = allreduce(x3, x2, x1)
-        y4 = tuple_getitem(ar1, 1)
-        y5 = tuple_getitem(ar1, 0)
-        y1 = tuple_getitem(ar2, 2)
-        y2 = tuple_getitem(ar2, 1)
+        ar1 = allreduce(x1, x2)
+        ar2 = allreduce(x3, x4, x5)
+        y1 = tuple_getitem(ar1, 0)
+        y2 = tuple_getitem(ar1, 1)
         y3 = tuple_getitem(ar2, 0)
+        y4 = tuple_getitem(ar2, 1)
+        y5 = tuple_getitem(ar2, 2)
         res = make_tuple(y1, y2, y3, y4, y5)
         return make_tuple(res)
 
@@ -183,11 +173,11 @@ def test_all_reduce_fusion_group(tag):
     def after2(x1, x2, x3, x4, x5):
         ar1 = allreduce(x1, x3, x5)
         ar2 = allreduce(x2, x4)
-        y1 = tuple_getitem(ar1, 2)
+        y1 = tuple_getitem(ar1, 0)
         y3 = tuple_getitem(ar1, 1)
-        y5 = tuple_getitem(ar1, 0)
-        y2 = tuple_getitem(ar2, 1)
-        y4 = tuple_getitem(ar2, 0)
+        y5 = tuple_getitem(ar1, 2)
+        y2 = tuple_getitem(ar2, 0)
+        y4 = tuple_getitem(ar2, 1)
         output = make_tuple(y1, y2, y3, y4, y5)
         return make_tuple(output)
 

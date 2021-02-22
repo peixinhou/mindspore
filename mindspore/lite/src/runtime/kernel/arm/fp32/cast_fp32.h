@@ -17,7 +17,11 @@
 #define MINDSPORE_LITE_SRC_RUNTIME_KERNEL_ARM_FP32_CAST_H_
 
 #include <vector>
+#include "include/errorcode.h"
 #include "src/lite_kernel.h"
+#include "src/tensor.h"
+#include "nnacl/op_base.h"
+#include "nnacl/base/cast_base.h"
 
 namespace mindspore::kernel {
 class CastCPUKernel : public LiteKernel {
@@ -35,8 +39,8 @@ class CastCPUKernel : public LiteKernel {
   int DoCast(int thread_id);
 
  private:
-  uint32_t stride_;
-  uint32_t data_num_;
+  int stride_;
+  int data_num_;
 };
 }  // namespace mindspore::kernel
 

@@ -1,5 +1,5 @@
 /**
- * Copyright 2020 Huawei Technologies Co., Ltd
+ * Copyright 2020-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,6 +26,7 @@ __global__ void SqrtGradKernel(const T *input, const T *dout, T *output, const s
   }
   return;
 }
+
 template <typename T>
 __global__ void RsqrtGradKernel(const T *input, const T *dout, T *output, const size_t count) {
   for (size_t i = blockIdx.x * blockDim.x + threadIdx.x; i < (count); i += blockDim.x * gridDim.x) {
@@ -37,6 +38,7 @@ __global__ void RsqrtGradKernel(const T *input, const T *dout, T *output, const 
   }
   return;
 }
+
 template <typename T>
 __global__ void AsinGradKernel(const T *input, const T *dout, T *output, const size_t count) {
   for (size_t i = blockIdx.x * blockDim.x + threadIdx.x; i < (count); i += blockDim.x * gridDim.x) {
@@ -46,6 +48,7 @@ __global__ void AsinGradKernel(const T *input, const T *dout, T *output, const s
   }
   return;
 }
+
 template <>
 __global__ void AsinGradKernel(const half *input, const half *dout, half *output, const size_t count) {
   for (size_t i = blockIdx.x * blockDim.x + threadIdx.x; i < (count); i += blockDim.x * gridDim.x) {
@@ -55,6 +58,7 @@ __global__ void AsinGradKernel(const half *input, const half *dout, half *output
   }
   return;
 }
+
 template <typename T>
 __global__ void ACosGradKernel(const T *input, const T *dout, T *output, const size_t count) {
   for (size_t i = blockIdx.x * blockDim.x + threadIdx.x; i < (count); i += blockDim.x * gridDim.x) {
@@ -65,6 +69,7 @@ __global__ void ACosGradKernel(const T *input, const T *dout, T *output, const s
   }
   return;
 }
+
 template <>
 __global__ void ACosGradKernel(const half *input, const half *dout, half *output, const size_t count) {
   for (size_t i = blockIdx.x * blockDim.x + threadIdx.x; i < (count); i += blockDim.x * gridDim.x) {
@@ -75,11 +80,54 @@ __global__ void ACosGradKernel(const half *input, const half *dout, half *output
   }
   return;
 }
+
+template <typename T>
+__global__ void AtanGradKernel(const T *input, const T *dout, T *output, const size_t count) {
+  for (size_t i = blockIdx.x * blockDim.x + threadIdx.x; i < (count); i += blockDim.x * gridDim.x) {
+    T one = 1;
+    T divisor = one + input[i] * input[i];
+    output[i] = dout[i] / divisor;
+  }
+  return;
+}
+
+template <typename T>
+__global__ void AsinhGradKernel(const T *input, const T *dout, T *output, const size_t count) {
+  for (size_t i = blockIdx.x * blockDim.x + threadIdx.x; i < (count); i += blockDim.x * gridDim.x) {
+    float inputf = static_cast<float>(input[i]);
+    T coshy = static_cast<T>(coshf(inputf));
+    output[i] = dout[i] / coshy;
+  }
+  return;
+}
+
+template <typename T>
+__global__ void AcoshGradKernel(const T *input, const T *dout, T *output, const size_t count) {
+  for (size_t i = blockIdx.x * blockDim.x + threadIdx.x; i < (count); i += blockDim.x * gridDim.x) {
+    float inputf = static_cast<float>(input[i]);
+    T sinhy = static_cast<T>(sinhf(inputf));
+    output[i] = dout[i] / sinhy;
+  }
+  return;
+}
+
+template <typename T>
+__global__ void ReciprocalGradKernel(const T *input, const T *dout, T *output, const size_t count) {
+  for (size_t i = blockIdx.x * blockDim.x + threadIdx.x; i < count; i += blockDim.x * gridDim.x) {
+    float inputf = static_cast<float>(input[i]);
+    float doutf = static_cast<float>(dout[i]);
+    float res = -1 * doutf * inputf * inputf;
+    output[i] = static_cast<T>(res);
+  }
+  return;
+}
+
 template <typename T>
 void SqrtGrad(const T *input, const T *dout, T *output, const size_t count, cudaStream_t cuda_stream) {
   SqrtGradKernel<<<GET_BLOCKS(count), GET_THREADS, 0, cuda_stream>>>(input, dout, output, count);
   return;
 }
+
 template <typename T>
 void RsqrtGrad(const T *input, const T *dout, T *output, const size_t count, cudaStream_t cuda_stream) {
   RsqrtGradKernel<<<GET_BLOCKS(count), GET_THREADS, 0, cuda_stream>>>(input, dout, output, count);
@@ -98,14 +146,46 @@ void ACosGrad(const T *input, const T *dout, T *output, const size_t count, cuda
   return;
 }
 
+template <typename T>
+void AtanGrad(const T *input, const T *dout, T *output, const size_t count, cudaStream_t cuda_stream) {
+  AtanGradKernel<<<GET_BLOCKS(count), GET_THREADS, 0, cuda_stream>>>(input, dout, output, count);
+  return;
+}
+
+template <typename T>
+void AsinhGrad(const T *input, const T *dout, T *output, const size_t count, cudaStream_t cuda_stream) {
+  AsinhGradKernel<<<GET_BLOCKS(count), GET_THREADS, 0, cuda_stream>>>(input, dout, output, count);
+  return;
+}
+
+template <typename T>
+void AcoshGrad(const T *input, const T *dout, T *output, const size_t count, cudaStream_t cuda_stream) {
+  AcoshGradKernel<<<GET_BLOCKS(count), GET_THREADS, 0, cuda_stream>>>(input, dout, output, count);
+  return;
+}
+
+template <typename T>
+void ReciprocalGrad(const T *input, const T *dout, T *output, const size_t count, cudaStream_t cuda_stream) {
+  ReciprocalGradKernel<<<GET_BLOCKS(count), GET_THREADS, 0, cuda_stream>>>(input, dout, output, count);
+  return;
+}
+
 template void SqrtGrad<float>(const float *input, const float *dout, float *output, const size_t count,
                               cudaStream_t cuda_stream);
 template void RsqrtGrad<float>(const float *input, const float *dout, float *output, const size_t count,
                                cudaStream_t cuda_stream);
 template void AsinGrad<float>(const float *input, const float *dout, float *output, const size_t count,
-                               cudaStream_t cuda_stream);
+                              cudaStream_t cuda_stream);
 template void ACosGrad<float>(const float *input, const float *dout, float *output, const size_t count,
+                              cudaStream_t cuda_stream);
+template void AtanGrad<float>(const float *input, const float *dout, float *output, const size_t count,
+                              cudaStream_t cuda_stream);
+template void AsinhGrad<float>(const float *input, const float *dout, float *output, const size_t count,
                                cudaStream_t cuda_stream);
+template void AcoshGrad<float>(const float *input, const float *dout, float *output, const size_t count,
+                               cudaStream_t cuda_stream);
+template void ReciprocalGrad<float>(const float *input, const float *dout, float *output, const size_t count,
+                                    cudaStream_t cuda_stream);
 template void SqrtGrad<half>(const half *input, const half *dout, half *output, const size_t count,
                              cudaStream_t cuda_stream);
 template void RsqrtGrad<half>(const half *input, const half *dout, half *output, const size_t count,
@@ -113,4 +193,12 @@ template void RsqrtGrad<half>(const half *input, const half *dout, half *output,
 template void AsinGrad<half>(const half *input, const half *dout, half *output, const size_t count,
                              cudaStream_t cuda_stream);
 template void ACosGrad<half>(const half *input, const half *dout, half *output, const size_t count,
+                             cudaStream_t cuda_stream);
+template void AtanGrad<half>(const half *input, const half *dout, half *output, const size_t count,
+                             cudaStream_t cuda_stream);
+template void AsinhGrad<half>(const half *input, const half *dout, half *output, const size_t count,
                               cudaStream_t cuda_stream);
+template void AcoshGrad<half>(const half *input, const half *dout, half *output, const size_t count,
+                              cudaStream_t cuda_stream);
+template void ReciprocalGrad<half>(const half *input, const half *dout, half *output, const size_t count,
+                                   cudaStream_t cuda_stream);

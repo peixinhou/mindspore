@@ -35,7 +35,7 @@ class NetWithSparseGatherV2(nn.Cell):
     def construct(self, indices, label):
         return self.gather(self.weight1, indices, self.axis) + self.weight2
 
-@pytest.mark.level0
+# @pytest.mark.level0
 @pytest.mark.platform_arm_ascend_training
 @pytest.mark.platform_x86_ascend_training
 @pytest.mark.env_onecard
@@ -56,7 +56,7 @@ def test_ftrl_net():
                                                  [[0.6821311, 0.6821311]],
                                                  [[0.6821311, 0.6821311]]]))
 
-@pytest.mark.level0
+# @pytest.mark.level0
 @pytest.mark.platform_arm_ascend_training
 @pytest.mark.platform_x86_ascend_training
 @pytest.mark.env_onecard
@@ -67,6 +67,25 @@ def test_lazy_adam_net():
 
     optimizer = LazyAdam(net.trainable_params(), learning_rate=0.1, weight_decay=0.9, loss_scale=2.0)
     optimizer.target = 'Ascend'
+    train_network = TrainOneStepCell(net, optimizer)
+    output = train_network(indices, label)
+    np.allclose(output.asnumpy(), np.array([[[2, 2]], [[2, 2]], [[2, 2]]]))
+    np.allclose(net.weight1.asnumpy(), np.array([[[0.9, 0.9]], [[0.9, 0.9]], [[1.0, 1.0]]]))
+    np.allclose(net.weight2.asnumpy(), np.array([[[0.9, 0.9]], [[0.9, 0.9]], [[0.9, 0.9]]]))
+
+
+@pytest.mark.level0
+@pytest.mark.platform_arm_ascend_training
+@pytest.mark.platform_x86_ascend_training
+@pytest.mark.env_onecard
+def test_lazy_adam_net_sparse():
+    indices = Tensor(np.array([0, 0, 1]).astype(np.int32))
+    label = Tensor(np.zeros([2, 1, 2]).astype(np.float32))
+    net = NetWithSparseGatherV2()
+
+    optimizer = LazyAdam(net.trainable_params(), learning_rate=0.1, weight_decay=0.9, loss_scale=2.0)
+    # will use sparse_opt in LazyAdam
+    optimizer.target = 'CPU'
     train_network = TrainOneStepCell(net, optimizer)
     output = train_network(indices, label)
     np.allclose(output.asnumpy(), np.array([[[2, 2]], [[2, 2]], [[2, 2]]]))

@@ -37,12 +37,12 @@ class ReLUV2Info : public OperatorInfo {
  public:
   ReLUV2Info(const std::string &operator_name, const Shapes &inputs_shape, const Shapes &outputs_shape,
              const PrimitiveAttrs &attrs)
-      : OperatorInfo(operator_name, inputs_shape, outputs_shape, attrs, std::make_shared<ActivationCost>(false)) {}
+      : OperatorInfo(operator_name, inputs_shape, outputs_shape, attrs, std::make_shared<ReLUV2Cost>()) {}
   ~ReLUV2Info() override = default;
 
   Status Init(const StrategyPtr &strategy) override;
   Status InitForCostModel(const StrategyPtr &strategy) override;
-  Status GenerateStrategies(int32_t stage_id) override;
+  Status GenerateStrategies(int64_t stage_id) override;
   Status SetCostUnderStrategy(const StrategyPtr &strategy) override;
 
  protected:

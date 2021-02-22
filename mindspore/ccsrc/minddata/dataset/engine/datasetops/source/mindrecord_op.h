@@ -1,5 +1,5 @@
 /**
- * Copyright 2019 Huawei Technologies Co., Ltd
+ * Copyright 2019-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -164,13 +164,13 @@ class MindRecordOp : public ParallelOp {
 
   // Worker thread pulls a number of IOBlock from IOBlock Queue, make a buffer and push it to Connector
   // @param int32_t workerId - id of each worker
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status WorkerEntry(int32_t worker_id) override;
 
   // Class functor operator () override.
   // All DatasetOps operate by launching a thread (see ExecutionTree). This class functor will
   // provide the master loop that drives the logic for performing the work.
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status operator()() override;
 
   // Called first when function is called
@@ -180,7 +180,7 @@ class MindRecordOp : public ParallelOp {
   // Overrides base class reset method.  When an operator does a reset, it cleans up any state
   // info from it's previous execution and then initializes itself so that it can be executed
   // again.
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status Reset() override;
 
   // Getter method
@@ -202,20 +202,9 @@ class MindRecordOp : public ParallelOp {
 
   Status Init();
 
-  // Base-class override for NodePass visitor acceptor.
-  // @param p - Pointer to the NodePass to be accepted.
-  // @param modified - Whether this node visit modified the pipeline.
-  // @return - Status of the node visit.
-  Status Accept(NodePass *p, bool *modified) override;
-
   // Op name getter
   // @return Name of the current Op
   std::string Name() const override { return "MindRecordOp"; }
-
-  /// \brief Base-class override for GetDatasetSize
-  /// \param[out] dataset_size the size of the dataset
-  /// \return Status of the function
-  Status GetDatasetSize(int64_t *dataset_size) override;
 
  private:
   Status GetBufferFromReader(std::unique_ptr<DataBuffer> *fetched_buffer, int64_t buffer_id, int32_t worker_id);

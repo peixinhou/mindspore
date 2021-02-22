@@ -35,17 +35,16 @@ class PReLUInfo : public OperatorInfo {
  public:
   PReLUInfo(const std::string &name, const Shapes &inputs_shape, const Shapes &outputs_shape,
             const PrimitiveAttrs &attrs)
-      : OperatorInfo(name, inputs_shape, outputs_shape, attrs, std::make_shared<PReLUCost>(true)) {}
+      : OperatorInfo(name, inputs_shape, outputs_shape, attrs, std::make_shared<PReLUCost>()) {}
   ~PReLUInfo() override = default;
   Status Init(const StrategyPtr &strategy) override;
   Status InitForCostModel(const StrategyPtr &strategy) override;
 
-  Status GenerateStrategies(int32_t stage_id) override;
+  Status GenerateStrategies(int64_t stage_id) override;
   Status SetCostUnderStrategy(const StrategyPtr &strategy) override;
 
  protected:
   Status CheckStrategy(const StrategyPtr &strategy) override;
-  Status InferMirrorOps() override;
   Status InferForwardCommunication() override;
   Status InferTensorInfo() override;
   Status InferDevMatrixShape() override;

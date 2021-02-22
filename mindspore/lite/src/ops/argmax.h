@@ -37,6 +37,7 @@ class ArgMax : public PrimitiveC {
   void SetTopK(int top_k);
   void SetKeepDims(bool keep_dims);
   void SetAxisType(int axis_type);
+  int UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &inputs) override;
 #else
   int UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::FlatBufferBuilder *fbb) override;
 #endif

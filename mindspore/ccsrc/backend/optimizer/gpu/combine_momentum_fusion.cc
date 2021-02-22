@@ -36,11 +36,13 @@ kernel::KernelBuildInfoPtr GenerateKernelBuildInfo(const std::vector<AnfNodePtr>
   for (size_t idx = 0; idx < node_list.size(); ++idx) {
     auto cnode = utils::cast<CNodePtr>(node_list[idx]);
     MS_EXCEPTION_IF_NULL(cnode);
-    for (size_t input_index = 0; input_index < AnfAlgo::GetInputTensorNum(cnode); ++input_index) {
+    size_t input_num = AnfAlgo::GetInputTensorNum(cnode);
+    for (size_t input_index = 0; input_index < input_num; ++input_index) {
       inputs_device_format.push_back(kOpFormat_DEFAULT);
       inputs_device_type.push_back(AnfAlgo::GetPrevNodeOutputInferDataType(cnode, input_index));
     }
-    for (size_t output_index = 0; output_index < AnfAlgo::GetOutputTensorNum(cnode); ++output_index) {
+    size_t output_num = AnfAlgo::GetOutputTensorNum(cnode);
+    for (size_t output_index = 0; output_index < output_num; ++output_index) {
       outputs_device_format.push_back(kOpFormat_DEFAULT);
       outputs_device_type.push_back(AnfAlgo::GetOutputInferDataType(cnode, output_index));
       outputs_shape.push_back(AnfAlgo::GetOutputInferShape(cnode, output_index));
@@ -104,6 +106,7 @@ bool CombineMomentumFusion::Run(const FuncGraphPtr &graph) {
         inputs.push_back(AnfAlgo::GetInputNode(utils::cast<CNodePtr>(mom), i));
       }
     }
+    TraceGuard guard(std::make_shared<TraceOpt>(momentums[0]->debug_info()));
     auto combine_mom = graph->NewCNode(inputs);
     auto kernel_info = std::make_shared<device::KernelInfo>();
     MS_EXCEPTION_IF_NULL(kernel_info);

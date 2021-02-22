@@ -12,7 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-
+import os
+import pytest
 import mindspore.dataset as ds
 
 
@@ -354,6 +355,54 @@ def test_clue_to_device():
     data.send()
 
 
+def test_clue_invalid_files():
+    """
+    Test CLUE with invalid files
+    """
+    AFQMC_DIR = '../data/dataset/testCLUE/afqmc'
+    afqmc_train_json = os.path.join(AFQMC_DIR)
+    with pytest.raises(ValueError) as info:
+        _ = ds.CLUEDataset(afqmc_train_json, task='AFQMC', usage='train', shuffle=False)
+    assert "The following patterns did not match any files" in str(info.value)
+    assert AFQMC_DIR in str(info.value)
+
+
+def test_clue_exception_file_path():
+    """
+    Test file info in err msg when exception occur of CLUE dataset
+    """
+    TRAIN_FILE = '../data/dataset/testCLUE/afqmc/train.json'
+    def exception_func(item):
+        raise Exception("Error occur!")
+
+    try:
+        data = ds.CLUEDataset(TRAIN_FILE, task='AFQMC', usage='train')
+        data = data.map(operations=exception_func, input_columns=["label"], num_parallel_workers=1)
+        for _ in data.create_dict_iterator():
+            pass
+        assert False
+    except RuntimeError as e:
+        assert "map operation: [PyFunc] failed. The corresponding data files" in str(e)
+
+    try:
+        data = ds.CLUEDataset(TRAIN_FILE, task='AFQMC', usage='train')
+        data = data.map(operations=exception_func, input_columns=["sentence1"], num_parallel_workers=1)
+        for _ in data.create_dict_iterator():
+            pass
+        assert False
+    except RuntimeError as e:
+        assert "map operation: [PyFunc] failed. The corresponding data files" in str(e)
+
+    try:
+        data = ds.CLUEDataset(TRAIN_FILE, task='AFQMC', usage='train')
+        data = data.map(operations=exception_func, input_columns=["sentence2"], num_parallel_workers=1)
+        for _ in data.create_dict_iterator():
+            pass
+        assert False
+    except RuntimeError as e:
+        assert "map operation: [PyFunc] failed. The corresponding data files" in str(e)
+
+
 if __name__ == "__main__":
     test_clue()
     test_clue_num_shards()
@@ -366,3 +415,5 @@ if __name__ == "__main__":
     test_clue_tnews()
     test_clue_wsc()
     test_clue_to_device()
+    test_clue_invalid_files()
+    test_clue_exception_file_path()

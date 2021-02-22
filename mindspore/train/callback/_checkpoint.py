@@ -272,11 +272,18 @@ class ModelCheckpoint(Callback):
         if _is_role_pserver():
             self._prefix = "PServer_" + str(_get_ps_mode_rank()) + "_" + self._prefix
         cb_params = run_context.original_args()
+        _make_directory(self._directory)
         # save graph (only once)
         if not self._graph_saved:
             graph_file_name = os.path.join(self._directory, self._prefix + '-graph.meta')
+            if os.path.isfile(graph_file_name) and context.get_context("mode") == context.GRAPH_MODE:
+                os.remove(graph_file_name)
             _save_graph(cb_params.train_network, graph_file_name)
             self._graph_saved = True
+        thread_list = threading.enumerate()
+        for thread in thread_list:
+            if thread.getName() == "asyn_save_ckpt":
+                thread.join()
         self._save_ckpt(cb_params)
 
     def end(self, run_context):
@@ -291,10 +298,9 @@ class ModelCheckpoint(Callback):
         self._save_ckpt(cb_params, _to_save_last_ckpt)
 
         thread_list = threading.enumerate()
-        if len(thread_list) > 1:
-            for thread in thread_list:
-                if thread.getName() == "asyn_save_ckpt":
-                    thread.join()
+        for thread in thread_list:
+            if thread.getName() == "asyn_save_ckpt":
+                thread.join()
 
         from mindspore.parallel._cell_wrapper import destroy_allgather_cell
         destroy_allgather_cell()

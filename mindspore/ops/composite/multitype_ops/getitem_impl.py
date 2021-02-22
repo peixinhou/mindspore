@@ -162,7 +162,7 @@ def _tensor_getitem_by_number(data, number_index):
 
 
 @getitem.register("Tensor", "None")
-def _tensor_getitem_by_none(data, index):
+def _tensor_getitem_by_none(data, none_index):
     """
     For none indexing , expand data with one dim.
 
@@ -194,7 +194,7 @@ def _tensor_getitem_by_slice(data, slice_index):
 @getitem.register("Tensor", "Tensor")
 def _tensor_getitem_by_tensor(data, tensor_index):
     """
-    Getting item of tensor by tensor indice.
+    Getting item of tensor by tensor indices.
 
     Inputs:
         data (Tensor): A tensor.
@@ -204,21 +204,6 @@ def _tensor_getitem_by_tensor(data, tensor_index):
         Tensor, element type is the same as the element type of data.
     """
     return compile_utils.tensor_index_by_tensor(data, tensor_index)
-
-
-@getitem.register("Tensor", "Tuple")
-def _tensor_getitem_by_tuple(data, tuple_index):
-    """
-    Getting item of tensor by tuple.
-
-    Inputs:
-        data (Tensor): A tensor.
-        tuple_index (tuple): Index in tuple.
-
-    Outputs:
-        Tensor, element type is the same as the element type of data.
-    """
-    return compile_utils.tensor_index_by_tuple(data, tuple_index)
 
 
 @getitem.register("Tensor", "Ellipsis")
@@ -234,3 +219,33 @@ def _tensor_getitem_by_ellipsis(data, ellipsis_index):
         Tensor, same as data.
     """
     return data
+
+
+@getitem.register("Tensor", "List")
+def _tensor_getitem_by_list(data, list_index):
+    """
+    Getting item of tensor by list.
+
+    Inputs:
+        data (Tensor): A tensor
+        list_index (List): A list object.
+
+    Outputs:
+        Tensor ,same as data.
+    """
+    return compile_utils.tensor_index_by_list(data, list_index)
+
+
+@getitem.register("Tensor", "Tuple")
+def _tensor_getitem_by_tuple(data, tuple_index):
+    """
+    Getting item of tensor by tuple.
+
+    Inputs:
+        data (Tensor): A tensor.
+        tuple_index (tuple): Index in tuple which include ellipsis, slice, int, Tensor, None, list, tuple.
+
+    Outputs:
+        Tensor, element type is the same as the element type of data.
+    """
+    return compile_utils.tensor_index_by_tuple(data, tuple_index)

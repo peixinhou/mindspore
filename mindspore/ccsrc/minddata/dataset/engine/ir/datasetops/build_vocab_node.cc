@@ -1,5 +1,5 @@
 /**
- * Copyright 2020 Huawei Technologies Co., Ltd
+ * Copyright 2020-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@
 #include <vector>
 
 #include "minddata/dataset/engine/datasetops/build_vocab_op.h"
-
+#include "minddata/dataset/engine/opt/pass.h"
 #include "minddata/dataset/util/status.h"
 namespace mindspore {
 namespace dataset {
@@ -36,22 +36,32 @@ BuildVocabNode::BuildVocabNode(std::shared_ptr<DatasetNode> child, std::shared_p
       top_k_(top_k),
       special_tokens_(special_tokens),
       special_first_(special_first) {
-  this->children.push_back(child);
+  this->AddChild(child);
+}
+
+std::shared_ptr<DatasetNode> BuildVocabNode::Copy() {
+  auto node =
+    std::make_shared<BuildVocabNode>(nullptr, vocab_, columns_, freq_range_, top_k_, special_tokens_, special_first_);
+  return node;
+}
+
+void BuildVocabNode::Print(std::ostream &out) const {
+  out << Name() + "(<vocab>," + "columns:" + PrintColumns(columns_) + ",...)";
 }
 
 // Function to build BuildVocabNode
-std::vector<std::shared_ptr<DatasetOp>> BuildVocabNode::Build() {
-  // A vector containing shared pointer to the Dataset Ops that this object will create
-  std::vector<std::shared_ptr<DatasetOp>> node_ops;
-
+Status BuildVocabNode::Build(std::vector<std::shared_ptr<DatasetOp>> *const node_ops) {
   std::shared_ptr<BuildVocabOp> build_vocab_op;
   build_vocab_op = std::make_shared<BuildVocabOp>(vocab_, columns_, freq_range_, top_k_, special_tokens_,
                                                   special_first_, num_workers_, connector_que_size_);
-  node_ops.push_back(build_vocab_op);
-  return node_ops;
+  build_vocab_op->set_total_repeats(GetTotalRepeats());
+  build_vocab_op->set_num_repeats_per_epoch(GetNumRepeatsPerEpoch());
+  node_ops->push_back(build_vocab_op);
+  return Status::OK();
 }
 
 Status BuildVocabNode::ValidateParams() {
+  RETURN_IF_NOT_OK(DatasetNode::ValidateParams());
   if (vocab_ == nullptr) {
     std::string err_msg = "BuildVocabNode: vocab is null.";
     MS_LOG(ERROR) << err_msg;
@@ -78,5 +88,16 @@ Status BuildVocabNode::ValidateParams() {
   return Status::OK();
 }
 
+// Visitor accepting method for IRNodePass
+Status BuildVocabNode::Accept(IRNodePass *const p, bool *const modified) {
+  // Downcast shared pointer then call visitor
+  return p->Visit(shared_from_base<BuildVocabNode>(), modified);
+}
+
+// Visitor accepting method for IRNodePass
+Status BuildVocabNode::AcceptAfter(IRNodePass *const p, bool *const modified) {
+  // Downcast shared pointer then call visitor
+  return p->VisitAfter(shared_from_base<BuildVocabNode>(), modified);
+}
 }  // namespace dataset
 }  // namespace mindspore

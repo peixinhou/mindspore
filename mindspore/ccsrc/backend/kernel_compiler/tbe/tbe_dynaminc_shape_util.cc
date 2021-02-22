@@ -24,7 +24,6 @@
 namespace mindspore {
 namespace kernel {
 namespace tbe {
-
 bool TbeDynamicShapeUtil::IsDynamicShapeNode(const CNodePtr &cnode) {
   MS_EXCEPTION_IF_NULL(cnode);
   auto input_num = AnfAlgo ::GetInputTensorNum(cnode);
@@ -75,7 +74,6 @@ bool TbeDynamicShapeUtil::GetDynamicShapeAttr(const CNodePtr &cnode) {
   MS_EXCEPTION_IF_NULL(cnode);
   auto is_dynamic_shape = AnfAlgo::HasNodeAttr(kAttrIsDynamicShape, cnode);
   if (!is_dynamic_shape) {
-    MS_LOG(INFO) << "Node(" << cnode->fullname_with_scope() << ") does not has is_dynamic_shape attribute.";
     return false;
   }
   is_dynamic_shape = AnfAlgo::GetNodeAttr<bool>(cnode, kAttrIsDynamicShape);
@@ -133,7 +131,6 @@ std::vector<std::pair<int, int>> TbeDynamicShapeUtil::GetOutputDynamicRange(cons
   }
   return ret;
 }
-
 }  // namespace tbe
 }  // namespace kernel
 }  // namespace mindspore

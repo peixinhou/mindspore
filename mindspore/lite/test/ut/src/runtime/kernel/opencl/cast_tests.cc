@@ -17,13 +17,14 @@
 #include <memory>
 #include "src/common/log_adapter.h"
 #include "common/common_test.h"
-#include "mindspore/lite/src/runtime/opencl/opencl_runtime.h"
 #include "mindspore/lite/src/common/file_utils.h"
-#include "mindspore/lite/src/runtime/kernel/opencl/subgraph_opencl_kernel.h"
+#include "mindspore/lite/src/runtime/kernel/opencl/opencl_subgraph.h"
 #include "mindspore/lite/src/runtime/kernel/opencl/kernel/cast.h"
 
-namespace mindspore {
-class TestCastSelfOpenCL : public mindspore::CommonTest {
+// PrimitiveType_Cast: src/ops/populate/cast_populate.cc
+
+namespace mindspore::lite::opencl::test {
+class TestCastSelfOpenCL : public CommonTest {
  public:
   TestCastSelfOpenCL() {}
 };
@@ -71,8 +72,8 @@ TEST_F(TestCastSelfOpenCL, Castfp32tofp16) {
   std::vector<lite::Tensor *> inputs{input_tensor};
   std::vector<lite::Tensor *> outputs{output_tensor};
 
-  auto *cast_kernel =
-    new (std::nothrow) kernel::CastOpenCLKernel(reinterpret_cast<OpParameter *>(param), inputs, outputs);
+  auto *cast_kernel = new (std::nothrow)
+    kernel::CastOpenCLKernel(reinterpret_cast<OpParameter *>(param), inputs, outputs, nullptr, nullptr);
   if (cast_kernel == nullptr) {
     MS_LOG(INFO) << " new kernel::CastOpenCLKernel failed ";
     for (auto tensor : inputs) {
@@ -91,9 +92,9 @@ TEST_F(TestCastSelfOpenCL, Castfp32tofp16) {
   }
   MS_LOG(INFO) << " initialize sub_graph ";
   std::vector<kernel::LiteKernel *> kernels{cast_kernel};
-  auto *sub_graph = new (std::nothrow) kernel::SubGraphOpenCLKernel(inputs, outputs, kernels, kernels, kernels);
+  auto *sub_graph = new (std::nothrow) kernel::OpenCLSubGraph(inputs, outputs, kernels, kernels, kernels);
   if (sub_graph == nullptr) {
-    MS_LOG(INFO) << " new kernel::SubGraphOpenCLKernel failed ";
+    MS_LOG(INFO) << " new kernel::OpenCLSubGraph failed ";
     for (auto tensor : inputs) {
       delete tensor;
     }
@@ -157,8 +158,8 @@ TEST_F(TestCastSelfOpenCL, Castfp16tofp32) {
   std::vector<lite::Tensor *> inputs{input_tensor};
   std::vector<lite::Tensor *> outputs{output_tensor};
 
-  auto *cast_kernel =
-    new (std::nothrow) kernel::CastOpenCLKernel(reinterpret_cast<OpParameter *>(param), inputs, outputs);
+  auto *cast_kernel = new (std::nothrow)
+    kernel::CastOpenCLKernel(reinterpret_cast<OpParameter *>(param), inputs, outputs, nullptr, nullptr);
   if (cast_kernel == nullptr) {
     MS_LOG(INFO) << " new kernel::CastOpenCLKernel failed ";
     for (auto tensor : inputs) {
@@ -177,9 +178,9 @@ TEST_F(TestCastSelfOpenCL, Castfp16tofp32) {
   }
   MS_LOG(INFO) << " initialize sub_graph ";
   std::vector<kernel::LiteKernel *> kernels{cast_kernel};
-  auto *sub_graph = new (std::nothrow) kernel::SubGraphOpenCLKernel(inputs, outputs, kernels, kernels, kernels);
+  auto *sub_graph = new (std::nothrow) kernel::OpenCLSubGraph(inputs, outputs, kernels, kernels, kernels);
   if (sub_graph == nullptr) {
-    MS_LOG(INFO) << " new kernel::SubGraphOpenCLKernel failed ";
+    MS_LOG(INFO) << " new kernel::OpenCLSubGraph failed ";
     for (auto tensor : inputs) {
       delete tensor;
     }
@@ -208,4 +209,4 @@ TEST_F(TestCastSelfOpenCL, Castfp16tofp32) {
   }
   delete sub_graph;
 }
-}  // namespace mindspore
+}  // namespace mindspore::lite::opencl::test

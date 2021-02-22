@@ -14,6 +14,7 @@
 # ============================================================================
 """Context for parameter server training mode"""
 
+import os
 from mindspore._c_expression import PSContext
 
 _ps_context = None
@@ -117,3 +118,30 @@ def _is_role_pserver():
 
 def _is_role_sched():
     return ps_context().is_role_sched()
+
+def _insert_hash_table_size(name, cache_vocab_size, embedding_size, vocab_size):
+    ps_context().insert_hash_table_size(name, cache_vocab_size, embedding_size, vocab_size)
+
+def _reinsert_hash_table_size(new_name, cur_name, cache_vocab_size, embedding_size):
+    ps_context().reinsert_hash_table_size(new_name, cur_name, cache_vocab_size, embedding_size)
+
+def _insert_weight_init_info(name, global_seed, op_seed):
+    ps_context().insert_weight_init_info(name, global_seed, op_seed)
+
+def _insert_accumu_init_info(name, init_val):
+    ps_context().insert_accumu_init_info(name, init_val)
+
+def _clone_hash_table(dest_param_name, src_param_name):
+    ps_context().clone_hash_table(dest_param_name, src_param_name)
+
+def _set_cache_enable(cache_enable):
+    # Environment variables are used to specify a maximum number of OpenBLAS threads:
+    # In ubuntu(GPU) environment, numpy will use too many threads for computing,
+    if cache_enable:
+        os.environ['OPENBLAS_NUM_THREADS'] = '2'
+        os.environ['GOTO_NUM_THREADS'] = '2'
+        os.environ['OMP_NUM_THREADS'] = '2'
+    ps_context().set_cache_enable(cache_enable)
+
+def _set_rank_id(rank_id):
+    ps_context().set_rank_id(rank_id)

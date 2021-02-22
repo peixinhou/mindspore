@@ -47,11 +47,10 @@ int Squeeze::UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &in
       return RET_ERROR;
     }
     if (prim.GetAttr("axis") == nullptr) {
-      MS_LOG(WARNING) << "get axis failed";
+      MS_LOG(INFO) << "Squeeze's attr xis is set to default";
       attr->axis = {0};
     } else {
-      int axis = GetValue<int>(prim.GetAttr("axis"));
-      attr->axis = {axis};
+      attr->axis = CastToInt(prim.GetAttr("axis"));
     }
     this->primitive_->value.value = attr;
   }
@@ -106,17 +105,16 @@ int Squeeze::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> out
   outputs_.front()->set_data_type(in_tensor->data_type());
   outputs_.front()->set_format(in_tensor->format());
   if (!infer_flag()) {
-    return RET_OK;
+    return RET_INFER_INVALID;
   }
   auto in_shape = in_tensor->shape();
   std::vector<int> out_shape;
 
   auto axis = GetAxis();
-  std::vector<int> axes_;
-  for (auto iter = axis.begin(); iter != axis.end(); iter++) {
-    axes_.push_back(*iter);
-  }
-  if (axes_.size() == 0) {
+  std::vector<int> axes;
+  std::transform(axis.begin(), axis.end(), std::back_inserter(axes),
+                 [in_shape](int a) { return a >= 0 ? a : a + in_shape.size(); });
+  if (axes.size() == 0) {
     for (size_t i = 0; i < in_shape.size(); i++) {
       if (in_shape.at(i) != 1) {
         out_shape.push_back(in_shape.at(i));
@@ -125,7 +123,7 @@ int Squeeze::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> out
   } else {
     size_t axisIdx = 0;
     for (size_t i = 0; i < in_shape.size(); i++) {
-      if (axisIdx < axes_.size() && axes_.at(axisIdx) == static_cast<int>(i)) {
+      if (axisIdx < axes.size() && axes.at(axisIdx) == static_cast<int>(i)) {
         MS_ASSERT(in_shape.at(i) == 1);
         axisIdx++;
         continue;
@@ -135,7 +133,7 @@ int Squeeze::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> out
     }
   }
   outputs_.front()->set_shape(out_shape);
-  return 0;
+  return RET_OK;
 }
 }  // namespace lite
 }  // namespace mindspore

@@ -1,6 +1,6 @@
 # This is the Python adaptation and derivative work of Myia (https://github.com/mila-iqia/myia/).
 #
-# Copyright 2020 Huawei Technologies Co., Ltd
+# Copyright 2020-2021 Huawei Technologies Co., Ltd
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,13 +17,13 @@
 """Resources for ast tree parse."""
 import ast
 import math
+
 from mindspore import RowTensor, SparseTensor
-from mindspore.ops.composite import multitype_ops
 from mindspore.ops import functional as F, composite as C
+from mindspore.ops.composite import multitype_ops
 from . import standard_method as M
 from . import trope as T
 from .namespace import CellNamespace
-
 
 # namespace define
 functional_ns = CellNamespace('mindspore.ops.functional')
@@ -86,7 +86,6 @@ convert_object_map = {
     T.floordiv:     multitype_ops.floordiv,
     T.mod:          multitype_ops.mod,
     T.pow:          multitype_ops.pow_,
-    T.matmul:       F.dot,
     T.lshift:       NO_IMPLEMENT,
     T.rshift:       NO_IMPLEMENT,
     T.and_:         multitype_ops.logical_and,
@@ -109,7 +108,7 @@ convert_object_map = {
 
     # system function
     T.len:          M.ms_len,
-    T.bool:         M.bool_,
+    T.bool_:        M.bool_,
     T.map:          C.Map(),
     T.partial:      F.partial,
     T.zip:          C.zip_operation,

@@ -17,9 +17,11 @@
 #define MINDSPORE_LITE_SRC_RUNTIME_KERNEL_ARM_INT8_ADD_INT8_H_
 
 #include <vector>
+#include <limits>
+#include <algorithm>
 #include "src/lite_kernel.h"
 #include "nnacl/int8/add_int8.h"
-#include "nnacl/arithmetic_common.h"
+#include "nnacl/arithmetic.h"
 #include "src/runtime/runtime_api.h"
 
 namespace mindspore::kernel {
@@ -28,7 +30,7 @@ class QuantizedAddCPUKernel : public LiteKernel {
   explicit QuantizedAddCPUKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
                                  const std::vector<lite::Tensor *> &outputs, const lite::InnerContext *ctx,
                                  const mindspore::lite::PrimitiveC *primitive)
-      : LiteKernel(parameter, inputs, outputs, ctx, primitive), ctx_(ctx), thread_count_(ctx_->thread_num_) {
+      : LiteKernel(parameter, inputs, outputs, ctx, primitive) {
     arith_para_ = reinterpret_cast<ArithmeticParameter *>(parameter);
   }
   ~QuantizedAddCPUKernel() override {}
@@ -39,12 +41,16 @@ class QuantizedAddCPUKernel : public LiteKernel {
   int DoExecute(int tId);
 
  private:
-  const lite::InnerContext *ctx_;
+  void BroadcastRun(int task_id);
+
+ private:
   AddQuantParameter para_;
   ArithmeticParameter *arith_para_ = nullptr;
+  int in_size_ = 0;
+  int out_size_ = 0;
   int thread_count_ = 1;
-  int64_t elements_num_ = 0;
-  int64_t count_unit_ = 0;
+  int elements_num_ = 0;
+  bool support_opt_add_ = false;
   int8_t *input0_data_ = nullptr;
   int8_t *input1_data_ = nullptr;
   int8_t *output_data_ = nullptr;

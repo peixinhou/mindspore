@@ -1,5 +1,5 @@
 /**
- * Copyright 2020 Huawei Technologies Co., Ltd
+ * Copyright 2020-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@
 #include "pybind_api/ir/primitive_py.h"
 #include "pipeline/jit/parse/python_adapter.h"
 #include "frontend/operator/ops.h"
+#include "base/core_ops.h"
 
 namespace mindspore {
 namespace prim {
@@ -34,52 +35,52 @@ class TestOps : public UT::Common {
 
 // Arithmetic
 TEST_F(TestOps, ScalarAddTest) {
-  auto prim = std::make_shared<Primitive>("scalar_add");
+  auto prim = std::make_shared<Primitive>(prim::kScalarAdd);
   ASSERT_EQ(prim->name(), kPrimScalarAdd->name());
 }
 
 TEST_F(TestOps, ScalarSubTest) {
-  auto prim = std::make_shared<Primitive>("scalar_sub");
+  auto prim = std::make_shared<Primitive>(prim::kScalarSub);
   ASSERT_EQ(prim->name(), kPrimScalarSub->name());
 }
 
 TEST_F(TestOps, ScalarMulTest) {
-  auto prim = std::make_shared<Primitive>("scalar_mul");
+  auto prim = std::make_shared<Primitive>(prim::kScalarMul);
   ASSERT_EQ(prim->name(), kPrimScalarMul->name());
 }
 
 TEST_F(TestOps, ScalarDivTest) {
-  auto prim = std::make_shared<Primitive>("scalar_div");
+  auto prim = std::make_shared<Primitive>(prim::kScalarDiv);
   ASSERT_EQ(prim->name(), kPrimScalarDiv->name());
 }
 
 TEST_F(TestOps, ScalarModTest) {
-  auto prim = std::make_shared<Primitive>("scalar_mod");
+  auto prim = std::make_shared<Primitive>(prim::kScalarMod);
   ASSERT_EQ(prim->name(), kPrimScalarMod->name());
 }
 
 TEST_F(TestOps, ScalarPowTest) {
-  auto prim = std::make_shared<Primitive>("scalar_pow");
+  auto prim = std::make_shared<Primitive>(prim::kScalarPow);
   ASSERT_EQ(prim->name(), kPrimScalarPow->name());
 }
 
 TEST_F(TestOps, ScalarTruncTest) {
-  auto prim = std::make_shared<Primitive>("scalar_trunc");
+  auto prim = std::make_shared<Primitive>(prim::kScalarTrunc);
   ASSERT_EQ(prim->name(), kPrimScalarTrunc->name());
 }
 
 TEST_F(TestOps, ScalarFloorTest) {
-  auto prim = std::make_shared<Primitive>("scalar_floor");
+  auto prim = std::make_shared<Primitive>(prim::kScalarFloor);
   ASSERT_EQ(prim->name(), kPrimScalarFloor->name());
 }
 
 TEST_F(TestOps, ScalarUaddTest) {
-  auto prim = std::make_shared<Primitive>("scalar_uadd");
+  auto prim = std::make_shared<Primitive>(prim::kScalarUadd);
   ASSERT_EQ(prim->name(), kPrimScalarUadd->name());
 }
 
 TEST_F(TestOps, ScalarUsubTest) {
-  auto prim = std::make_shared<Primitive>("scalar_usub");
+  auto prim = std::make_shared<Primitive>(prim::kScalarUsub);
   ASSERT_EQ(prim->name(), kPrimScalarUsub->name());
 }
 
@@ -187,7 +188,7 @@ TEST_F(TestOps, MakeRecordTest) {
 }
 
 TEST_F(TestOps, TupleGetItemTest) {
-  auto prim = std::make_shared<Primitive>("tuple_getitem");
+  auto prim = std::make_shared<Primitive>(kTupleGetItem);
   ASSERT_EQ(prim->name(), kPrimTupleGetItem->name());
 }
 
@@ -287,11 +288,6 @@ TEST_F(TestOps, TransposeTest) {
   ASSERT_EQ(prim->name(), kPrimTranspose->name());
 }
 
-TEST_F(TestOps, DotTest) {
-  auto prim = std::make_shared<Primitive>("dot");
-  ASSERT_EQ(prim->name(), kPrimDot->name());
-}
-
 TEST_F(TestOps, Im2ColTest) {
   auto prim = std::make_shared<Primitive>("im2col");
   ASSERT_EQ(prim->name(), kPrimIm2Col->name());
@@ -374,13 +370,13 @@ TEST_F(TestOps, Conv2dTest) {
 TEST_F(TestOps, Conv2dAttrTest) {
   Primitive prim("Conv2D");
   prim.SetAttrs({
-    {"stride", MakeValue(3)},
-    {"pad", MakeValue(1)},
+    {"stride", MakeValue(static_cast<int64_t>(3))},
+    {"pad", MakeValue(static_cast<int64_t>(1))},
   });
   ASSERT_EQ(prim.name(), kPrimConv2D->name());
 
-  Int32Imm stride(3);
-  Int32Imm pad(1);
+  Int64Imm stride(3);
+  Int64Imm pad(1);
   ASSERT_EQ(*prim.GetAttr("stride"), stride);
   ASSERT_EQ(*prim.GetAttr("pad"), pad);
 }
@@ -388,8 +384,8 @@ TEST_F(TestOps, Conv2dAttrTest) {
 TEST_F(TestOps, CustomOpAttrTest) {
   Primitive prim("CustomOp", true, kPrimTypePyInferShape);
   prim.SetAttrs({
-    {"attr1", MakeValue(3)},
-    {"attr2", MakeValue(1)},
+    {"attr1", MakeValue(static_cast<int64_t>(3))},
+    {"attr2", MakeValue(static_cast<int64_t>(1))},
   });
   ASSERT_EQ(prim.name(), std::string("CustomOp"));
   ASSERT_EQ(prim.prim_type(), kPrimTypePyInferShape);

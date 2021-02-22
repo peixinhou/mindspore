@@ -30,8 +30,6 @@
 #include "src/runtime/kernel/arm/base/layout_transform.h"
 
 using mindspore::lite::InnerContext;
-using mindspore::schema::PadMode;
-using mindspore::schema::QuantType;
 
 namespace mindspore::kernel {
 class ConvolutionBaseCPUKernel : public LiteKernel {
@@ -55,6 +53,7 @@ class ConvolutionBaseCPUKernel : public LiteKernel {
   int SetFilterTensorQuantParam();
   int SetOutputTensorQuantParam();
   int SetQuantMultiplier();
+  void SetRoundingAndMultipilerMode();
   int CheckResizeValid();
   void FreeQuantParam();
 

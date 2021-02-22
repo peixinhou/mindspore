@@ -34,8 +34,8 @@ dynamic_gru_v2_op_info = TBERegOp("DynamicGRUV2") \
     .attr("is_training", "optional", "bool", "all", "true") \
     .partial_flag(True) \
     .input(0, "x", False, "required", "all") \
-    .input(1, "weight_input", False, "required", "all") \
-    .input(2, "weight_hidden", False, "required", "all") \
+    .input(1, "weight_input", False, "required", "all", reshape_type="CN") \
+    .input(2, "weight_hidden", False, "required", "all", reshape_type="CN") \
     .input(3, "bias_input", False, "optional", "all") \
     .input(4, "bias_hidden", False, "optional", "all") \
     .input(5, "seq_length", False, "optional", "all") \
@@ -46,6 +46,38 @@ dynamic_gru_v2_op_info = TBERegOp("DynamicGRUV2") \
     .output(3, "reset", False, "optional", "all") \
     .output(4, "new", False, "optional", "all") \
     .output(5, "hidden_new", False, "optional", "all") \
+    .dtype_format(DataType.F16_FracNZ, DataType.F16_FracZ, DataType.F16_FracZ, DataType.F32_Default,
+                  DataType.F32_Default, DataType.None_Default, DataType.F32_FracNZ, DataType.F32_FracNZ,
+                  DataType.F32_FracNZ, DataType.F32_FracNZ, DataType.F32_FracNZ, DataType.F32_FracNZ,
+                  DataType.F32_FracNZ) \
+    .dtype_format(DataType.F16_FracNZ, DataType.F16_FracZ, DataType.F16_FracZ, DataType.F32_Default,
+                  DataType.None_Default, DataType.None_Default, DataType.F32_FracNZ, DataType.F32_FracNZ,
+                  DataType.F32_FracNZ, DataType.F32_FracNZ, DataType.F32_FracNZ, DataType.F32_FracNZ,
+                  DataType.F32_FracNZ) \
+    .dtype_format(DataType.F16_FracNZ, DataType.F16_FracZ, DataType.F16_FracZ, DataType.None_Default,
+                  DataType.F32_Default, DataType.None_Default, DataType.F32_FracNZ, DataType.F32_FracNZ,
+                  DataType.F32_FracNZ, DataType.F32_FracNZ, DataType.F32_FracNZ, DataType.F32_FracNZ,
+                  DataType.F32_FracNZ) \
+    .dtype_format(DataType.F16_FracNZ, DataType.F16_FracZ, DataType.F16_FracZ, DataType.None_Default,
+                  DataType.None_Default, DataType.None_Default, DataType.F32_FracNZ, DataType.F32_FracNZ,
+                  DataType.F32_FracNZ, DataType.F32_FracNZ, DataType.F32_FracNZ, DataType.F32_FracNZ,
+                  DataType.F32_FracNZ) \
+    .dtype_format(DataType.F16_FracNZ, DataType.F16_FracZ, DataType.F16_FracZ, DataType.F16_Default,
+                  DataType.F16_Default, DataType.None_Default, DataType.F16_FracNZ, DataType.F16_FracNZ,
+                  DataType.F16_FracNZ, DataType.F16_FracNZ, DataType.F16_FracNZ, DataType.F16_FracNZ,
+                  DataType.F16_FracNZ) \
+    .dtype_format(DataType.F16_FracNZ, DataType.F16_FracZ, DataType.F16_FracZ, DataType.F16_Default,
+                  DataType.None_Default, DataType.None_Default, DataType.F16_FracNZ, DataType.F16_FracNZ,
+                  DataType.F16_FracNZ, DataType.F16_FracNZ, DataType.F16_FracNZ, DataType.F16_FracNZ,
+                  DataType.F16_FracNZ) \
+    .dtype_format(DataType.F16_FracNZ, DataType.F16_FracZ, DataType.F16_FracZ, DataType.None_Default,
+                  DataType.F16_Default, DataType.None_Default, DataType.F16_FracNZ, DataType.F16_FracNZ,
+                  DataType.F16_FracNZ, DataType.F16_FracNZ, DataType.F16_FracNZ, DataType.F16_FracNZ,
+                  DataType.F16_FracNZ) \
+    .dtype_format(DataType.F16_FracNZ, DataType.F16_FracZ, DataType.F16_FracZ, DataType.None_Default,
+                  DataType.None_Default, DataType.None_Default, DataType.F16_FracNZ, DataType.F16_FracNZ,
+                  DataType.F16_FracNZ, DataType.F16_FracNZ, DataType.F16_FracNZ, DataType.F16_FracNZ,
+                  DataType.F16_FracNZ) \
     .dtype_format(DataType.F16_FracNZ, DataType.F16_FracZ, DataType.F16_FracZ, DataType.F32_Default,
                   DataType.F32_Default, DataType.I32_Default, DataType.F32_FracNZ, DataType.F32_FracNZ,
                   DataType.F32_FracNZ, DataType.F32_FracNZ, DataType.F32_FracNZ, DataType.F32_FracNZ,

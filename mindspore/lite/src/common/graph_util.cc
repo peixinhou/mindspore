@@ -81,5 +81,12 @@ std::vector<size_t> GetLinkedPostNodeIdx(const lite::Model *model, const size_t 
   }
   return post_node_idxes;
 }
+
+bool IsPackedOp(schema::PrimitiveType op_type) {
+  static std::vector<schema::PrimitiveType> packed_ops = {
+    schema::PrimitiveType_Conv2D, schema::PrimitiveType_DeConv2D, schema::PrimitiveType_DepthwiseConv2D,
+    schema::PrimitiveType_DeDepthwiseConv2D, schema::PrimitiveType_MatMul};
+  return IsContain(packed_ops, op_type);
+}
 }  // namespace lite
 }  // namespace mindspore

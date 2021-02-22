@@ -18,22 +18,21 @@
 #define MINDSPORE_LITE_SRC_RUNTIME_KERNEL_ARM_INT8_SQUEEZE_INT8_H_
 
 #include <vector>
-#include "src/lite_kernel.h"
 #include "include/context.h"
+#include "include/errorcode.h"
+#include "src/lite_kernel.h"
 #include "src/runtime/runtime_api.h"
-#include "src/runtime/kernel/arm/base/squeeze_base.h"
+#include "nnacl/int8/squeeze_int8.h"
+#include "nnacl/squeeze_parameter.h"
 
 using mindspore::lite::InnerContext;
-
 namespace mindspore::kernel {
-class SqueezeInt8CPUKernel : public SqueezeBaseCPUKernel {
+class SqueezeInt8CPUKernel : public LiteKernel {
  public:
   SqueezeInt8CPUKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
                        const std::vector<lite::Tensor *> &outputs, const InnerContext *ctx,
                        const mindspore::lite::PrimitiveC *primitive)
-      : SqueezeBaseCPUKernel(parameter, inputs, outputs, ctx, primitive) {
-    para_ = reinterpret_cast<SqueezeParameter *>(parameter);
-  }
+      : LiteKernel(parameter, inputs, outputs, ctx, primitive) {}
   ~SqueezeInt8CPUKernel() override;
 
   int Init() override;
@@ -42,12 +41,10 @@ class SqueezeInt8CPUKernel : public SqueezeBaseCPUKernel {
   int DoExecute(int tId);
 
  private:
-  SqueezeParameter *para_;
   SqueezeQuantArg *quant_squeeze_param_;
 };
 
 int SqueezeInt8Run(void *cdata, int task_id);
-
 }  // namespace mindspore::kernel
 
 #endif  // MINDSPORE_LITE_SRC_RUNTIME_KERNEL_ARM_INT8_SQUEEZE_INT8_H_

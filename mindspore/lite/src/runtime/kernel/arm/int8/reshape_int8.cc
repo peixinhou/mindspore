@@ -31,7 +31,6 @@ using mindspore::schema::PrimitiveType_Reshape;
 namespace mindspore::kernel {
 
 int ReshapeInt8CPUKernel::Init() {
-  ReshapeBaseCPUKernel::Init();
   auto *input_tensor = in_tensors_.at(kInputIndex);
   auto in_quant_args = input_tensor->quant_params();
   reshape_param_->quant_para_.in_args_.scale_ = in_quant_args.front().scale;
@@ -51,7 +50,7 @@ int ReshapeInt8CPUKernel::Init() {
 int ReshapeInt8CPUKernel::ReSize() { return RET_OK; }
 
 int ReshapeInt8CPUKernel::Run() {
-  MS_ASSERT(in_tensors_.size() == 1);
+  MS_ASSERT(in_tensors_.size() == 1 || in_tensors_.size() == 2);
   MS_ASSERT(out_tensors_.size() == 1);
   input_data_ = static_cast<int8_t *>(in_tensors_.at(kInputIndex)->MutableData());
   output_data_ = static_cast<int8_t *>(out_tensors_.at(kOutputIndex)->MutableData());
@@ -82,30 +81,6 @@ int ReshapeInt8CPUKernel::DoExecute(int task_id) {
   Int8Reshape(cur_input0_data, cur_output_data, real_dst_count, reshape_param_->quant_para_);
   return lite::RET_OK;
 }
-kernel::LiteKernel *CpuReshapeInt8KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                                const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter,
-                                                const InnerContext *ctx, const kernel::KernelKey &desc,
-                                                const mindspore::lite::PrimitiveC *primitive) {
-  if (opParameter == nullptr) {
-    MS_LOG(ERROR) << "Input opParameter is nullptr!";
-    return nullptr;
-  }
-  MS_ASSERT(desc.type == schema::PrimitiveType_Reshape);
-  auto *kernel = new (std::nothrow) ReshapeInt8CPUKernel(opParameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "new ReshapeInt8CPUKernel fail!";
-    free(opParameter);
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
-}
-REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Reshape, CpuReshapeInt8KernelCreator)
 
+REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Reshape, LiteKernelCreator<ReshapeInt8CPUKernel>)
 }  // namespace mindspore::kernel

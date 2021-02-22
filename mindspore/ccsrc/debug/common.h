@@ -1,5 +1,5 @@
 /**
- * Copyright 2020 Huawei Technologies Co., Ltd
+ * Copyright 2020-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,15 +22,26 @@
 #include "utils/contract.h"
 
 namespace mindspore {
+static const int maxDirectoryLength = 1024;
+static const int maxFilenameLength = 128;
+static const int maxOSFilenameLength = 255;
 class Common {
  public:
   Common() = default;
   ~Common() = default;
   static std::optional<std::string> GetRealPath(const std::string &input_path);
   static std::optional<std::string> GetConfigFile(const std::string &env);
+  static std::optional<std::string> GetEnvConfigFile();
+  static bool IsStrLengthValid(const std::string &str, const int &length_limit, const std::string &error_message = "",
+                               const bool &print_str = true);
+  static bool IsPathValid(const std::string &path, const int &length_limit, const std::string &error_message = "",
+                          const bool &print_str = true);
+  static bool IsFilenameValid(const std::string &filename, const int &length_limit,
+                              const std::string &error_message = "");
 
  private:
   static bool CreateNotExistDirs(const std::string &path);
+  static bool IsEveryFilenameValid(const std::string &path, const int &length_limit, const std::string &error_message);
 };
 }  // namespace mindspore
 #endif  // MINDSPORE_CCSRC_DEBUG_COMMON_H_

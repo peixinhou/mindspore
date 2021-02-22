@@ -1,5 +1,5 @@
 /**
- * Copyright 2019 Huawei Technologies Co., Ltd
+ * Copyright 2019-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,14 +20,7 @@
 #include "minddata/dataset/engine/execution_tree.h"
 #include "minddata/dataset/engine/datasetops/repeat_op.h"
 #include "minddata/dataset/engine/data_buffer.h"
-#include "minddata/dataset/engine/db_connector.h"
-#include "minddata/dataset/engine/opt/pass.h"
-
-#ifndef ENABLE_ANDROID
-#include "utils/log_adapter.h"
-#else
-#include "mindspore/lite/src/common/log_adapter.h"
-#endif
+#include "minddata/dataset/util/log_adapter.h"
 
 namespace mindspore {
 namespace dataset {
@@ -180,33 +173,6 @@ int32_t RepeatOp::num_producers() const {
   }
 }
 
-// Pre-Visitor accept method for NodePass
-Status RepeatOp::PreAccept(NodePass *p, bool *modified) {
-  // Downcast shared pointer then call the pre-visitation
-  return p->PreRunOnNode(shared_from_base<RepeatOp>(), modified);
-}
-
-// Visitor accept method for NodePass
-Status RepeatOp::Accept(NodePass *p, bool *modified) {
-  // Downcast shared pointer then call visitor
-  return p->RunOnNode(shared_from_base<RepeatOp>(), modified);
-}
-
-// Get Dataset size
-Status RepeatOp::GetDatasetSize(int64_t *dataset_size) {
-  if (dataset_size_ > 0) {
-    *dataset_size = dataset_size_;
-    return Status::OK();
-  }
-  int64_t num_rows;
-  RETURN_IF_NOT_OK(child_[0]->GetDatasetSize(&num_rows));
-  if (num_rows > 0 && num_repeats_ > 0) {
-    num_rows = num_rows * num_repeats_;
-  }
-  *dataset_size = num_rows;
-  dataset_size_ = num_rows;
-  return Status::OK();
-}
 int64_t RepeatOp::GetTreeRepeatCount() { return num_repeats_; }
 }  // namespace dataset
 }  // namespace mindspore

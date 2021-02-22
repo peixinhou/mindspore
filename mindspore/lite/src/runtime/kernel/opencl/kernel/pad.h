@@ -29,23 +29,21 @@ namespace mindspore::kernel {
 class PadOpenCLKernel : public OpenCLKernel {
  public:
   PadOpenCLKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
-                  const std::vector<lite::Tensor *> &outputs)
-      : OpenCLKernel(parameter, inputs, outputs) {}
+                  const std::vector<lite::Tensor *> &outputs, const lite::InnerContext *ctx,
+                  const mindspore::lite::PrimitiveC *primitive)
+      : OpenCLKernel(parameter, inputs, outputs, ctx, primitive),
+        param_(reinterpret_cast<PadParameter *>(op_parameter_)) {}
   ~PadOpenCLKernel() override = default;
 
-  int Init() override;
+  int CheckSpecs() override;
+
+  int Prepare() override;
+  void SetConstArgs() override;
+
   int Run() override;
 
  private:
-  cl::Kernel kernel_;
-  int CI_{};
-  int IH_{};
-  int IW_{};
-  int CO_{};
-  int OH_{};
-  int OW_{};
-  int CI_SLICES_{};
-  int CO_SLICES_{};
+  PadParameter *param_;
 };
 }  // namespace mindspore::kernel
 

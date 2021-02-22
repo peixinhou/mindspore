@@ -1,5 +1,5 @@
 /**
- * Copyright 2020 Huawei Technologies Co., Ltd
+ * Copyright 2020-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,7 +35,6 @@ class CacheAdminArgHandler {
   static constexpr int32_t kDefaultLogLevel = 1;
   static constexpr float kMemoryCapRatio = 0.8;
   static const char kServerBinary[];
-  static const char kDefaultSpillDir[];
 
   // These are the actual command types to execute
   enum class CommandId : int16_t {
@@ -45,6 +44,7 @@ class CacheAdminArgHandler {
     kCmdGenerateSession = 3,
     kCmdDestroySession = 4,
     kCmdListSessions = 5,
+    kCmdServerInfo = 6,
     kCmdUnknown = 32767
   };
 
@@ -75,10 +75,15 @@ class CacheAdminArgHandler {
     kArgLogLevel = 11,
     kArgMemoryCapRatio = 12,
     kArgListSessions = 13,
-    kArgNumArgs = 14  // Must be the last position to provide a count
+    kArgServerInfo = 14,
+    kArgNumArgs = 15  // Must be the last position to provide a count
   };
 
-  Status StartStopServer(CommandId);
+  Status StartServer(CommandId command_id);
+
+  Status StopServer(CommandId command_id);
+
+  Status ShowServerInfo();
 
   Status AssignArg(std::string option, int32_t *out_arg, std::stringstream *arg_stream,
                    CommandId command_id = CommandId::kCmdUnknown);

@@ -17,7 +17,10 @@
 #ifndef MINDSPORE_CCSRC_MINDDATA_DATASET_INCLUDE_DATASETS_H_
 #define MINDSPORE_CCSRC_MINDDATA_DATASET_INCLUDE_DATASETS_H_
 
+#include <sys/stat.h>
 #include <unistd.h>
+
+#include <algorithm>
 #include <map>
 #include <memory>
 #include <set>
@@ -26,27 +29,18 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
-#include "minddata/dataset/engine/ir/cache/dataset_cache.h"
 
-#include "minddata/dataset/core/constants.h"
-#include "minddata/dataset/engine/consumers/tree_consumer.h"
-#include "minddata/dataset/engine/ir/datasetops/dataset_node.h"
 #include "minddata/dataset/include/iterator.h"
 #include "minddata/dataset/include/samplers.h"
 #include "minddata/dataset/include/tensor.h"
+#include "minddata/dataset/include/text.h"
 #include "minddata/dataset/include/type_id.h"
-#include "minddata/dataset/kernels/c_func_op.h"
-#include "minddata/dataset/kernels/tensor_op.h"
-#include "minddata/dataset/util/path.h"
-#ifndef ENABLE_ANDROID
-#include "minddata/dataset/text/sentence_piece_vocab.h"
-#include "minddata/dataset/text/vocab.h"
-#endif
 
 namespace mindspore {
 namespace dataset {
 
 class Tensor;
+class TensorRow;
 class TensorShape;
 class TreeAdapter;
 class TreeGetters;
@@ -54,6 +48,7 @@ class TreeGetters;
 class Vocab;
 #endif
 
+class DatasetCache;
 class DatasetNode;
 
 class Iterator;
@@ -65,20 +60,33 @@ class CsvBase;
 
 // Dataset classes (in alphabetical order)
 class BatchDataset;
-#ifndef ENABLE_ANDROID
-class BucketBatchByLengthDataset;
-#endif
-class CSVDataset;
-class ConcatDataset;
 class MapDataset;
 class ProjectDataset;
-class RenameDataset;
-class RepeatDataset;
 class ShuffleDataset;
+#ifndef ENABLE_ANDROID
+class BucketBatchByLengthDataset;
+class FilterDataset;
+class CSVDataset;
+class TransferDataset;
+class ConcatDataset;
+class RenameDataset;
+#endif
+
+#ifndef ENABLE_ANDROID
+class SentencePieceVocab;
+enum class SentencePieceModel;
+#endif
+
+class DSCallback;
+
+class RepeatDataset;
+
+#ifndef ENABLE_ANDROID
 class SkipDataset;
 class TakeDataset;
-class TransferDataset;
 class ZipDataset;
+
+#endif
 
 /// \class Dataset datasets.h
 /// \brief A base class to represent a dataset in the data pipeline.
@@ -95,8 +103,10 @@ class Dataset : public std::enable_shared_from_this<Dataset> {
   ~Dataset() = default;
 
   /// \brief Gets the dataset size
+  /// \param[in] estimate This is only supported by some of the ops and it's used to speed up the process of getting
+  ///     dataset size at the expense of accuracy.
   /// \return dataset size. If failed, return -1
-  int64_t GetDatasetSize();
+  int64_t GetDatasetSize(bool estimate = false);
 
   /// \brief Gets the output type
   /// \return a vector of DataType. If failed, return an empty vector
@@ -118,6 +128,14 @@ class Dataset : public std::enable_shared_from_this<Dataset> {
   /// \return number of classes. If failed, return -1
   int64_t GetNumClasses();
 
+  /// \brief Gets the column names
+  /// \return Names of the columns. If failed, return an empty vector
+  std::vector<std::string> GetColumnNames();
+
+  /// \brief Gets the class indexing
+  /// \return a map of ClassIndexing. If failed, return an empty map
+  std::vector<std::pair<std::string, std::vector<int32_t>>> GetClassIndexing();
+
   /// \brief Setter function for runtime number of workers
   /// \param[in] num_workers The number of threads in this operator
   /// \return Shared pointer to the original object
@@ -125,17 +143,26 @@ class Dataset : public std::enable_shared_from_this<Dataset> {
 
   /// \brief Function to create an Iterator over the Dataset pipeline
   /// \param[in] columns List of columns to be used to specify the order of columns
+  /// \param[in] num_epochs Number of epochs to run through the pipeline, default -1 which means infinite epochs.
+  ///     An empty row is returned at the end of each epoch
   /// \return Shared pointer to the Iterator
-  std::shared_ptr<Iterator> CreateIterator(std::vector<std::string> columns = {});
+  std::shared_ptr<Iterator> CreateIterator(std::vector<std::string> columns = {}, int32_t num_epochs = -1);
 
+#ifndef ENABLE_ANDROID
   /// \brief Function to transfer data through a device.
   /// \notes If device is Ascend, features of data will be transferred one by one. The limitation
   ///     of data transmission per time is 256M.
+  /// \param[in] queue_name Channel name (default="", create new unique name).
+  /// \param[in] device_type Type of device (default="", get from MSContext).
+  /// \param[in] num_epochs Number of epochs (default=-1, infinite epochs).
   /// \param[in] send_epoch_end Whether to send end of sequence to device or not (default=true).
+  /// \param[in] total_batches Number of batches to be sent to the device (default=0, all data).
+  /// \param[in] create_data_info_queue Whether to create queue which stores types and shapes
+  ///     of data or not(default=false).
   /// \return Returns true if no error encountered else false.
-  bool DeviceQueue(bool send_epoch_end = true);
+  bool DeviceQueue(std::string queue_name = "", std::string device_type = "", int32_t num_epochs = -1,
+                   bool send_epoch_end = true, int32_t total_batches = 0, bool create_data_info_queue = false);
 
-#ifndef ENABLE_ANDROID
   /// \brief Function to create a Saver to save the dynamic data processed by the dataset pipeline
   /// \note Usage restrictions:
   ///     1. Supported dataset formats: 'mindrecord' only
@@ -202,7 +229,7 @@ class Dataset : public std::enable_shared_from_this<Dataset> {
   /// \brief Function to create a SentencePieceVocab from source dataset
   /// \notes Build a SentencePieceVocab from a dataset.
   /// \param[in] col_names Column names to get words from. It can be a vector of column names
-  /// \param[in] vocab_size Vocabulary size. The type is uint32
+  /// \param[in] vocab_size Vocabulary size.
   /// \param[in] character_coverage Percentage of characters covered by the model, must be between
   ///     0.98 and 1.0 Good defaults are: 0.9995 for languages with rich character sets like
   ///     Japanese or Chinese character sets, and 1.0 for other languages with small character sets.
@@ -210,7 +237,7 @@ class Dataset : public std::enable_shared_from_this<Dataset> {
   ///     The input sentence must be pretokenized when using word type.
   /// \param[in] params A vector contains more option parameters of sentencepiece library
   std::shared_ptr<SentencePieceVocab> BuildSentencePieceVocab(
-    const std::vector<std::string> &col_names, uint32_t vocab_size, float character_coverage,
+    const std::vector<std::string> &col_names, int32_t vocab_size, float character_coverage,
     SentencePieceModel model_type, const std::unordered_map<std::string, std::string> &params);
 
   /// \brief Function to create a Vocab from source dataset
@@ -230,17 +257,27 @@ class Dataset : public std::enable_shared_from_this<Dataset> {
                                     const std::pair<int64_t, int64_t> &freq_range = {0, kDeMaxFreq},
                                     int64_t top_k = kDeMaxTopk, const std::vector<std::string> &special_tokens = {},
                                     bool special_first = true);
-#endif
 
   /// \brief Function to create a ConcatDataset
   /// \notes Concat the datasets in the input
   /// \param[in] datasets List of shared pointers to the dataset that should be concatenated together
   /// \return Shared pointer to the current ConcatDataset
   std::shared_ptr<ConcatDataset> Concat(const std::vector<std::shared_ptr<Dataset>> &datasets) {
-    std::vector<std::shared_ptr<Dataset>> all_datasets = datasets;
-    all_datasets.push_back(shared_from_this());
+    std::vector<std::shared_ptr<Dataset>> all_datasets{shared_from_this()};
+    all_datasets.insert(std::end(all_datasets), std::begin(datasets), std::end(datasets));
     return std::make_shared<ConcatDataset>(all_datasets);
   }
+
+  /// \brief Function to filter dataset by predicate
+  /// \notes If input_columns is not provided or empty, all columns will be used
+  /// \param[in] predicate Function callable which returns a boolean value. If false then filter the element
+  /// \param[in] input_columns List of names of the input columns to filter
+  /// \return Shared pointer to the current FilterNode
+  std::shared_ptr<FilterDataset> Filter(std::function<TensorRow(TensorRow)> predicate,
+                                        const std::vector<std::string> &input_columns = {}) {
+    return std::make_shared<FilterDataset>(shared_from_this(), predicate, input_columns);
+  }
+#endif
 
   /// \brief Function to create a MapDataset
   /// \notes Applies each operation in operations to this dataset
@@ -257,15 +294,42 @@ class Dataset : public std::enable_shared_from_this<Dataset> {
   ///     name as the input columns, i.e., the columns will be replaced
   /// \param[in] project_columns A list of column names to project
   /// \param[in] cache Tensor cache to use. (default=nullptr which means no cache is used).
-  ///     The cache feature is under development and is not recommended.
   /// \return Shared pointer to the current MapDataset
   std::shared_ptr<MapDataset> Map(std::vector<std::shared_ptr<TensorOperation>> operations,
-                                  std::vector<std::string> input_columns = {},
-                                  std::vector<std::string> output_columns = {},
+                                  const std::vector<std::string> &input_columns = {},
+                                  const std::vector<std::string> &output_columns = {},
                                   const std::vector<std::string> &project_columns = {},
-                                  const std::shared_ptr<DatasetCache> &cache = nullptr) {
+                                  const std::shared_ptr<DatasetCache> &cache = nullptr,
+                                  std::vector<std::shared_ptr<DSCallback>> callbacks = {}) {
     return std::make_shared<MapDataset>(shared_from_this(), operations, input_columns, output_columns, project_columns,
-                                        cache);
+                                        cache, callbacks);
+  }
+
+  std::shared_ptr<MapDataset> Map(std::vector<std::shared_ptr<TensorTransform>> operations,
+                                  const std::vector<std::string> &input_columns = {},
+                                  const std::vector<std::string> &output_columns = {},
+                                  const std::vector<std::string> &project_columns = {},
+                                  const std::shared_ptr<DatasetCache> &cache = nullptr,
+                                  std::vector<std::shared_ptr<DSCallback>> callbacks = {}) {
+    std::vector<std::shared_ptr<TensorOperation>> transform_ops;
+    (void)std::transform(
+      operations.begin(), operations.end(), std::back_inserter(transform_ops),
+      [](std::shared_ptr<TensorTransform> op) -> std::shared_ptr<TensorOperation> { return op->Parse(); });
+    return std::make_shared<MapDataset>(shared_from_this(), transform_ops, input_columns, output_columns,
+                                        project_columns, cache, callbacks);
+  }
+
+  std::shared_ptr<MapDataset> Map(const std::vector<std::reference_wrapper<TensorTransform>> operations,
+                                  const std::vector<std::string> &input_columns = {},
+                                  const std::vector<std::string> &output_columns = {},
+                                  const std::vector<std::string> &project_columns = {},
+                                  const std::shared_ptr<DatasetCache> &cache = nullptr,
+                                  std::vector<std::shared_ptr<DSCallback>> callbacks = {}) {
+    std::vector<std::shared_ptr<TensorOperation>> transform_ops;
+    (void)std::transform(operations.begin(), operations.end(), std::back_inserter(transform_ops),
+                         [](TensorTransform &op) -> std::shared_ptr<TensorOperation> { return op.Parse(); });
+    return std::make_shared<MapDataset>(shared_from_this(), transform_ops, input_columns, output_columns,
+                                        project_columns, cache, callbacks);
   }
 
   /// \brief Function to create a Project Dataset
@@ -276,6 +340,7 @@ class Dataset : public std::enable_shared_from_this<Dataset> {
     return std::make_shared<ProjectDataset>(shared_from_this(), columns);
   }
 
+#ifndef ENABLE_ANDROID
   /// \brief Function to create a Rename Dataset
   /// \notes Renames the columns in the input dataset
   /// \param[in] input_columns List of the input columns to rename
@@ -285,7 +350,7 @@ class Dataset : public std::enable_shared_from_this<Dataset> {
                                         const std::vector<std::string> &output_columns) {
     return std::make_shared<RenameDataset>(shared_from_this(), input_columns, output_columns);
   }
-
+#endif
   /// \brief Function to create a RepeatDataset
   /// \notes Repeats this dataset count times. Repeat indefinitely if count is -1
   /// \param[in] count Number of times the dataset should be repeated
@@ -295,7 +360,7 @@ class Dataset : public std::enable_shared_from_this<Dataset> {
   std::shared_ptr<RepeatDataset> Repeat(int32_t count = -1) {
     return std::make_shared<RepeatDataset>(shared_from_this(), count);
   }
-
+#ifndef ENABLE_ANDROID
   /// \brief Function to create a Shuffle Dataset
   /// \notes Randomly shuffles the rows of this dataset
   /// \param[in] buffer_size The size of the buffer (must be larger than 1) for shuffling
@@ -327,6 +392,7 @@ class Dataset : public std::enable_shared_from_this<Dataset> {
     all_datasets.push_back(shared_from_this());
     return std::make_shared<ZipDataset>(all_datasets);
   }
+#endif
 
   std::shared_ptr<DatasetNode> IRNode() { return ir_node_; }
 
@@ -343,23 +409,36 @@ class SchemaObj {
   /// \brief Destructor
   ~SchemaObj() = default;
 
-  /// \brief SchemaObj init function
-  /// \return bool true if schema init success
-  bool init();
+  /// \brief SchemaObj Init function
+  /// \return bool true if schema initialization is successful
+  Status Init();
+
+  /// \brief Add new column to the schema with unknown shape of rank 1
+  /// \param[in] name Name of the column.
+  /// \param[in] de_type Data type of the column(TypeId).
+  /// \return Status code
+  Status add_column(const std::string &name, TypeId de_type);
+
+  /// \brief Add new column to the schema with unknown shape of rank 1
+  /// \param[in] name Name of the column.
+  /// \param[in] de_type Data type of the column(std::string).
+  /// \param[in] shape Shape of the column.
+  /// \return Status code
+  Status add_column(const std::string &name, const std::string &de_type);
 
   /// \brief Add new column to the schema
-  /// \param[in] name name of the column.
-  /// \param[in] de_type data type of the column(TypeId).
-  /// \param[in] shape shape of the column.
-  /// \return bool true if schema init success
-  bool add_column(std::string name, TypeId de_type, std::vector<int32_t> shape);
+  /// \param[in] name Name of the column.
+  /// \param[in] de_type Data type of the column(TypeId).
+  /// \param[in] shape Shape of the column.
+  /// \return Status code
+  Status add_column(const std::string &name, TypeId de_type, const std::vector<int32_t> &shape);
 
   /// \brief Add new column to the schema
-  /// \param[in] name name of the column.
-  /// \param[in] de_type data type of the column(std::string).
-  /// \param[in] shape shape of the column.
-  /// \return bool true if schema init success
-  bool add_column(std::string name, std::string de_type, std::vector<int32_t> shape);
+  /// \param[in] name Name of the column.
+  /// \param[in] de_type Data type of the column(std::string).
+  /// \param[in] shape Shape of the column.
+  /// \return Status code
+  Status add_column(const std::string &name, const std::string &de_type, const std::vector<int32_t> &shape);
 
   /// \brief Get a JSON string of the schema
   /// \return JSON string of the schema
@@ -368,26 +447,36 @@ class SchemaObj {
   /// \brief Get a JSON string of the schema
   std::string to_string() { return to_json(); }
 
-  /// \brief set a new value to dataset_type
-  inline void set_dataset_type(std::string dataset_type) { dataset_type_ = dataset_type; }
+  /// \brief Set a new value to dataset_type
+  inline void set_dataset_type(std::string dataset_type) { dataset_type_ = std::move(dataset_type); }
 
-  /// \brief set a new value to num_rows
+  /// \brief Set a new value to num_rows
   inline void set_num_rows(int32_t num_rows) { num_rows_ = num_rows; }
 
-  /// \brief get the current num_rows
-  inline int32_t get_num_rows() { return num_rows_; }
+  /// \brief Get the current num_rows
+  inline int32_t get_num_rows() const { return num_rows_; }
+
+  /// \brief Get schema file from JSON file
+  /// \param[in] json_string Name of JSON file to be parsed.
+  /// \return Status code
+  Status FromJSONString(const std::string &json_string);
+
+  /// \brief Parse and add column information
+  /// \param[in] json_string Name of JSON string for column dataset attribute information, decoded from schema file.
+  /// \return Status code
+  Status ParseColumnString(const std::string &json_string);
 
  private:
-  /// \brief Parse the columns and add it to columns
-  /// \param[in] columns dataset attribution information, decoded from schema file.
-  ///    support both nlohmann::json::value_t::array and nlohmann::json::value_t::onject.
-  /// \return JSON string of the schema
-  bool parse_column(nlohmann::json columns);
+  /// \brief Parse the columns and add them to columns
+  /// \param[in] columns Dataset attribution information, decoded from schema file.
+  ///    Support both nlohmann::json::value_t::array and nlohmann::json::value_t::onject.
+  /// \return Status code
+  Status parse_column(nlohmann::json columns);
 
-  /// \brief Get schema file from json file
-  /// \param[in] json_obj object of json parsed.
-  /// \return bool true if json dump success
-  bool from_json(nlohmann::json json_obj);
+  /// \brief Get schema file from JSON file
+  /// \param[in] json_obj parsed JSON object
+  /// \return Status code
+  Status from_json(nlohmann::json json_obj);
 
   int32_t num_rows_;
   std::string dataset_type_;
@@ -398,6 +487,7 @@ class SchemaObj {
 class BatchDataset : public Dataset {
  public:
   BatchDataset(std::shared_ptr<Dataset> input, int32_t batch_size, bool drop_remainder = false);
+  ~BatchDataset() = default;
 };
 
 #ifndef ENABLE_ANDROID
@@ -409,58 +499,78 @@ class BucketBatchByLengthDataset : public Dataset {
     std::function<TensorRow(TensorRow)> element_length_function = nullptr,
     const std::map<std::string, std::pair<TensorShape, std::shared_ptr<Tensor>>> &pad_info = {},
     bool pad_to_bucket_boundary = false, bool drop_remainder = false);
+  ~BucketBatchByLengthDataset() = default;
 };
-
-#endif
 
 class ConcatDataset : public Dataset {
  public:
   explicit ConcatDataset(const std::vector<std::shared_ptr<Dataset>> &input);
+  ~ConcatDataset() = default;
 };
+
+class FilterDataset : public Dataset {
+ public:
+  FilterDataset(std::shared_ptr<Dataset> input, std::function<TensorRow(TensorRow)> predicate,
+                const std::vector<std::string> &input_columns);
+  ~FilterDataset() = default;
+};
+#endif
 
 class MapDataset : public Dataset {
  public:
   MapDataset(std::shared_ptr<Dataset> input, std::vector<std::shared_ptr<TensorOperation>> operations,
-             std::vector<std::string> input_columns, std::vector<std::string> output_columns,
-             const std::vector<std::string> &project_columns, const std::shared_ptr<DatasetCache> &cache);
+             const std::vector<std::string> &input_columns, const std::vector<std::string> &output_columns,
+             const std::vector<std::string> &project_columns, const std::shared_ptr<DatasetCache> &cache,
+             std::vector<std::shared_ptr<DSCallback>> callbacks);
+  ~MapDataset() = default;
 };
 
 class ProjectDataset : public Dataset {
  public:
   ProjectDataset(std::shared_ptr<Dataset> input, const std::vector<std::string> &columns);
+  ~ProjectDataset() = default;
 };
 
+#ifndef ENABLE_ANDROID
 class RenameDataset : public Dataset {
  public:
   RenameDataset(std::shared_ptr<Dataset> input, const std::vector<std::string> &input_columns,
                 const std::vector<std::string> &output_columns);
+  ~RenameDataset() = default;
 };
+#endif
 
 class RepeatDataset : public Dataset {
  public:
   RepeatDataset(std::shared_ptr<Dataset> input, int32_t count);
+  ~RepeatDataset() = default;
 };
 
 class ShuffleDataset : public Dataset {
  public:
   ShuffleDataset(std::shared_ptr<Dataset> input, int32_t buffer_size);
+  ~ShuffleDataset() = default;
 };
 
+#ifndef ENABLE_ANDROID
 class SkipDataset : public Dataset {
  public:
   SkipDataset(std::shared_ptr<Dataset> input, int32_t count);
+  ~SkipDataset() = default;
 };
 
 class TakeDataset : public Dataset {
  public:
   TakeDataset(std::shared_ptr<Dataset> input, int32_t count);
+  ~TakeDataset() = default;
 };
 
 class ZipDataset : public Dataset {
  public:
   explicit ZipDataset(const std::vector<std::shared_ptr<Dataset>> &inputs);
+  ~ZipDataset() = default;
 };
-
+#endif
 /// \brief Function to create a SchemaObj
 /// \param[in] schema_file Path of schema file
 /// \return Shared pointer to the current schema
@@ -472,6 +582,7 @@ class AlbumDataset : public Dataset {
                const std::vector<std::string> &column_names = {}, bool decode = false,
                const std::shared_ptr<SamplerObj> &sampler = RandomSampler(),
                const std::shared_ptr<DatasetCache> &cache = nullptr);
+  ~AlbumDataset() = default;
 };
 
 /// \brief Function to create an AlbumDataset
@@ -484,19 +595,20 @@ class AlbumDataset : public Dataset {
 /// \param[in] sampler Object used to choose samples from the dataset. If sampler is not given,
 ///     a `RandomSampler` will be used to randomly iterate the entire dataset (default = RandomSampler())
 /// \param[in] cache Tensor cache to use. (default=nullptr which means no cache is used).
-///     The cache feature is under development and is not recommended.
 /// \return Shared pointer to the current Dataset
 std::shared_ptr<AlbumDataset> Album(const std::string &dataset_dir, const std::string &data_schema,
                                     const std::vector<std::string> &column_names = {}, bool decode = false,
                                     const std::shared_ptr<SamplerObj> &sampler = RandomSampler(),
                                     const std::shared_ptr<DatasetCache> &cache = nullptr);
 
+#ifndef ENABLE_ANDROID
 class CelebADataset : public Dataset {
  public:
   explicit CelebADataset(const std::string &dataset_dir, const std::string &usage = "all",
                          const std::shared_ptr<SamplerObj> &sampler = RandomSampler(), bool decode = false,
                          const std::set<std::string> &extensions = {},
                          const std::shared_ptr<DatasetCache> &cache = nullptr);
+  ~CelebADataset() = default;
 };
 
 /// \brief Function to create a CelebADataset
@@ -509,7 +621,6 @@ class CelebADataset : public Dataset {
 /// \param[in] decode Decode the images after reading (default=false).
 /// \param[in] extensions Set of file extensions to be included in the dataset (default={}).
 /// \param[in] cache Tensor cache to use. (default=nullptr which means no cache is used).
-///     The cache feature is under development and is not recommended.
 /// \return Shared pointer to the current Dataset
 std::shared_ptr<CelebADataset> CelebA(const std::string &dataset_dir, const std::string &usage = "all",
                                       const std::shared_ptr<SamplerObj> &sampler = RandomSampler(), bool decode = false,
@@ -521,6 +632,7 @@ class Cifar10Dataset : public Dataset {
   explicit Cifar10Dataset(const std::string &dataset_dir, const std::string &usage = "all",
                           const std::shared_ptr<SamplerObj> &sampler = RandomSampler(),
                           const std::shared_ptr<DatasetCache> &cache = nullptr);
+  ~Cifar10Dataset() = default;
 };
 
 /// \brief Function to create a Cifar10 Dataset
@@ -530,7 +642,6 @@ class Cifar10Dataset : public Dataset {
 /// \param[in] sampler Object used to choose samples from the dataset. If sampler is not given,
 ///     a `RandomSampler` will be used to randomly iterate the entire dataset (default = RandomSampler())
 /// \param[in] cache Tensor cache to use. (default=nullptr which means no cache is used).
-///     The cache feature is under development and is not recommended.
 /// \return Shared pointer to the current Dataset
 std::shared_ptr<Cifar10Dataset> Cifar10(const std::string &dataset_dir, const std::string &usage = "all",
                                         const std::shared_ptr<SamplerObj> &sampler = RandomSampler(),
@@ -541,6 +652,7 @@ class Cifar100Dataset : public Dataset {
   explicit Cifar100Dataset(const std::string &dataset_dir, const std::string &usage = "all",
                            const std::shared_ptr<SamplerObj> &sampler = RandomSampler(),
                            const std::shared_ptr<DatasetCache> &cache = nullptr);
+  ~Cifar100Dataset() = default;
 };
 
 /// \brief Function to create a Cifar100 Dataset
@@ -550,7 +662,6 @@ class Cifar100Dataset : public Dataset {
 /// \param[in] sampler Object used to choose samples from the dataset. If sampler is not given,
 ///     a `RandomSampler` will be used to randomly iterate the entire dataset (default = RandomSampler())
 /// \param[in] cache Tensor cache to use. (default=nullptr which means no cache is used).
-///     The cache feature is under development and is not recommended.
 /// \return Shared pointer to the current Dataset
 std::shared_ptr<Cifar100Dataset> Cifar100(const std::string &dataset_dir, const std::string &usage = "all",
                                           const std::shared_ptr<SamplerObj> &sampler = RandomSampler(),
@@ -562,6 +673,7 @@ class CLUEDataset : public Dataset {
                        const std::string &usage = "train", int64_t num_samples = 0,
                        ShuffleMode shuffle = ShuffleMode::kGlobal, int32_t num_shards = 1, int32_t shard_id = 0,
                        const std::shared_ptr<DatasetCache> &cache = nullptr);
+  ~CLUEDataset() = default;
 };
 
 /// \brief Function to create a CLUEDataset
@@ -581,7 +693,6 @@ class CLUEDataset : public Dataset {
 /// \param[in] shard_id The shard ID within num_shards. This argument should be
 ///     specified only when num_shards is also specified. (Default = 0)
 /// \param[in] cache Tensor cache to use. (default=nullptr which means no cache is used).
-///     The cache feature is under development and is not recommended.
 /// \return Shared pointer to the current CLUEDataset
 std::shared_ptr<CLUEDataset> CLUE(const std::vector<std::string> &dataset_files, const std::string &task = "AFQMC",
                                   const std::string &usage = "train", int64_t num_samples = 0,
@@ -593,6 +704,7 @@ class CocoDataset : public Dataset {
   CocoDataset(const std::string &dataset_dir, const std::string &annotation_file, const std::string &task = "Detection",
               const bool &decode = false, const std::shared_ptr<SamplerObj> &sampler = RandomSampler(),
               const std::shared_ptr<DatasetCache> &cache = nullptr);
+  ~CocoDataset() = default;
 };
 
 /// \brief Function to create a CocoDataset
@@ -611,7 +723,6 @@ class CocoDataset : public Dataset {
 /// \param[in] sampler Object used to choose samples from the dataset. If sampler is not given,
 ///     a `RandomSampler` will be used to randomly iterate the entire dataset (default = RandomSampler())
 /// \param[in] cache Tensor cache to use. (default=nullptr which means no cache is used).
-///     The cache feature is under development and is not recommended.
 /// \return Shared pointer to the current Dataset
 std::shared_ptr<CocoDataset> Coco(const std::string &dataset_dir, const std::string &annotation_file,
                                   const std::string &task = "Detection", const bool &decode = false,
@@ -625,6 +736,7 @@ class CSVDataset : public Dataset {
                       const std::vector<std::string> &column_names = {}, int64_t num_samples = 0,
                       ShuffleMode shuffle = ShuffleMode::kGlobal, int32_t num_shards = 1, int32_t shard_id = 0,
                       const std::shared_ptr<DatasetCache> &cache = nullptr);
+  ~CSVDataset() = default;
 };
 
 /// \brief Function to create a CSVDataset
@@ -647,7 +759,6 @@ class CSVDataset : public Dataset {
 /// \param[in] shard_id The shard ID within num_shards. This argument should be
 ///    specified only when num_shards is also specified. (Default = 0)
 /// \param[in] cache Tensor cache to use. (default=nullptr which means no cache is used).
-///     The cache feature is under development and is not recommended.
 /// \return Shared pointer to the current Dataset
 std::shared_ptr<CSVDataset> CSV(const std::vector<std::string> &dataset_files, char field_delim = ',',
                                 const std::vector<std::shared_ptr<CsvBase>> &column_defaults = {},
@@ -662,6 +773,7 @@ class ImageFolderDataset : public Dataset {
                               const std::set<std::string> &extensions = {},
                               const std::map<std::string, int32_t> &class_indexing = {},
                               const std::shared_ptr<DatasetCache> &cache = nullptr);
+  ~ImageFolderDataset() = default;
 };
 
 /// \brief Function to create an ImageFolderDataset
@@ -675,7 +787,6 @@ class ImageFolderDataset : public Dataset {
 /// \param[in] extensions File extensions to be read
 /// \param[in] class_indexing a class name to label map
 /// \param[in] cache Tensor cache to use. (default=nullptr which means no cache is used).
-///     The cache feature is under development and is not recommended.
 /// \return Shared pointer to the current ImageFolderDataset
 std::shared_ptr<ImageFolderDataset> ImageFolder(const std::string &dataset_dir, bool decode = false,
                                                 const std::shared_ptr<SamplerObj> &sampler = RandomSampler(),
@@ -683,13 +794,13 @@ std::shared_ptr<ImageFolderDataset> ImageFolder(const std::string &dataset_dir, 
                                                 const std::map<std::string, int32_t> &class_indexing = {},
                                                 const std::shared_ptr<DatasetCache> &cache = nullptr);
 
-#ifndef ENABLE_ANDROID
 class ManifestDataset : public Dataset {
  public:
   explicit ManifestDataset(const std::string &dataset_file, const std::string &usage = "train",
                            const std::shared_ptr<SamplerObj> &sampler = RandomSampler(),
                            const std::map<std::string, int32_t> &class_indexing = {}, bool decode = false,
                            const std::shared_ptr<DatasetCache> &cache = nullptr);
+  ~ManifestDataset() = default;
 };
 
 /// \brief Function to create a ManifestDataset
@@ -702,15 +813,12 @@ class ManifestDataset : public Dataset {
 ///     names will be sorted alphabetically and each class will be given a unique index starting from 0).
 /// \param[in] decode Decode the images after reading (default=false).
 /// \param[in] cache Tensor cache to use. (default=nullptr which means no cache is used).
-///     The cache feature is under development and is not recommended.
 /// \return Shared pointer to the current ManifestDataset
 std::shared_ptr<ManifestDataset> Manifest(const std::string &dataset_file, const std::string &usage = "train",
                                           const std::shared_ptr<SamplerObj> &sampler = RandomSampler(),
                                           const std::map<std::string, int32_t> &class_indexing = {},
                                           bool decode = false, const std::shared_ptr<DatasetCache> &cache = nullptr);
-#endif
 
-#ifndef ENABLE_ANDROID
 class MindDataDataset : public Dataset {
  public:
   explicit MindDataDataset(const std::string &dataset_file, const std::vector<std::string> &columns_list = {},
@@ -720,6 +828,7 @@ class MindDataDataset : public Dataset {
                            const std::vector<std::string> &columns_list = {},
                            const std::shared_ptr<SamplerObj> &sampler = RandomSampler(),
                            nlohmann::json padded_sample = nullptr, int64_t num_padded = 0);
+  ~MindDataDataset() = default;
 };
 
 /// \brief Function to create a MindDataDataset
@@ -757,6 +866,7 @@ class MnistDataset : public Dataset {
   explicit MnistDataset(const std::string &dataset_dir, const std::string &usage = "all",
                         const std::shared_ptr<SamplerObj> &sampler = RandomSampler(),
                         const std::shared_ptr<DatasetCache> &cache = nullptr);
+  ~MnistDataset() = default;
 };
 
 /// \brief Function to create a MnistDataset
@@ -766,12 +876,11 @@ class MnistDataset : public Dataset {
 /// \param[in] sampler Object used to choose samples from the dataset. If sampler is not given,
 ///     a `RandomSampler` will be used to randomly iterate the entire dataset (default = RandomSampler())
 /// \param[in] cache Tensor cache to use. (default=nullptr which means no cache is used).
-///     The cache feature is under development and is not recommended.
 /// \return Shared pointer to the current MnistDataset
 std::shared_ptr<MnistDataset> Mnist(const std::string &dataset_dir, const std::string &usage = "all",
                                     const std::shared_ptr<SamplerObj> &sampler = RandomSampler(),
                                     const std::shared_ptr<DatasetCache> &cache = nullptr);
-
+#ifndef ENABLE_ANDROID
 /// \brief Function to create a ConcatDataset
 /// \notes Reload "+" operator to concat two datasets
 /// \param[in] datasets1 Shared pointer to the first dataset to be concatenated
@@ -783,11 +892,12 @@ std::shared_ptr<ConcatDataset> operator+(const std::shared_ptr<Dataset> &dataset
 class RandomDataDataset : public Dataset {
  public:
   RandomDataDataset(const int32_t &total_rows, std::shared_ptr<SchemaObj> schema,
-                    const std::vector<std::string> &columns_list, const std::shared_ptr<SamplerObj> &sampler,
-                    std::shared_ptr<DatasetCache> cache);
+                    const std::vector<std::string> &columns_list, std::shared_ptr<DatasetCache> cache);
 
   RandomDataDataset(const int32_t &total_rows, std::string schema_path, const std::vector<std::string> &columns_list,
-                    const std::shared_ptr<SamplerObj> &sampler, std::shared_ptr<DatasetCache> cache);
+                    std::shared_ptr<DatasetCache> cache);
+
+  ~RandomDataDataset() = default;
 };
 
 /// \brief Function to create a RandomDataset
@@ -797,21 +907,17 @@ class RandomDataDataset : public Dataset {
 /// \param[in] sampler Object used to choose samples from the dataset. If sampler is not given,
 ///     a `RandomSampler` will be used to randomly iterate the entire dataset (default = RandomSampler())
 /// \param[in] cache Tensor cache to use. (default=nullptr which means no cache is used).
-///     The cache feature is under development and is not recommended.
 /// \return Shared pointer to the current Dataset
 template <typename T = std::shared_ptr<SchemaObj>>
 std::shared_ptr<RandomDataDataset> RandomData(const int32_t &total_rows = 0, const T &schema = nullptr,
                                               const std::vector<std::string> &columns_list = {},
-                                              const std::shared_ptr<SamplerObj> &sampler = RandomSampler(),
                                               const std::shared_ptr<DatasetCache> &cache = nullptr) {
   std::shared_ptr<RandomDataDataset> ds;
   if constexpr (std::is_same<T, std::nullptr_t>::value || std::is_same<T, std::shared_ptr<SchemaObj>>::value) {
     std::shared_ptr<SchemaObj> schema_obj = schema;
-    ds = std::make_shared<RandomDataDataset>(total_rows, std::move(schema_obj), std::move(columns_list),
-                                             std::move(sampler), cache);
+    ds = std::make_shared<RandomDataDataset>(total_rows, std::move(schema_obj), std::move(columns_list), cache);
   } else {
-    ds = std::make_shared<RandomDataDataset>(total_rows, std::move(schema), std::move(columns_list), std::move(sampler),
-                                             cache);
+    ds = std::make_shared<RandomDataDataset>(total_rows, std::move(schema), std::move(columns_list), cache);
   }
   return ds;
 }
@@ -821,6 +927,7 @@ class TextFileDataset : public Dataset {
   explicit TextFileDataset(const std::vector<std::string> &dataset_files, int64_t num_samples = 0,
                            ShuffleMode shuffle = ShuffleMode::kGlobal, int32_t num_shards = 1, int32_t shard_id = 0,
                            const std::shared_ptr<DatasetCache> &cache = nullptr);
+  ~TextFileDataset() = default;
 };
 
 /// \brief Function to create a TextFileDataset
@@ -838,13 +945,11 @@ class TextFileDataset : public Dataset {
 /// \param[in] shard_id The shard ID within num_shards. This argument should be
 ///     specified only when num_shards is also specified. (Default = 0)
 /// \param[in] cache Tensor cache to use. (default=nullptr which means no cache is used).
-///     The cache feature is under development and is not recommended.
 /// \return Shared pointer to the current TextFileDataset
 std::shared_ptr<TextFileDataset> TextFile(const std::vector<std::string> &dataset_files, int64_t num_samples = 0,
                                           ShuffleMode shuffle = ShuffleMode::kGlobal, int32_t num_shards = 1,
                                           int32_t shard_id = 0, const std::shared_ptr<DatasetCache> &cache = nullptr);
 
-#ifndef ENABLE_ANDROID
 class TFRecordDataset : public Dataset {
  public:
   TFRecordDataset(const std::vector<std::string> &dataset_files, std::string schema,
@@ -856,6 +961,8 @@ class TFRecordDataset : public Dataset {
   TFRecordDataset(const std::vector<std::string> &dataset_files, std::shared_ptr<SchemaObj> schema,
                   const std::vector<std::string> &columns_list, int64_t num_samples, ShuffleMode shuffle,
                   int32_t num_shards, int32_t shard_id, bool shard_equal_rows, std::shared_ptr<DatasetCache> cache);
+
+  ~TFRecordDataset() = default;
 };
 
 /// \brief Function to create a TFRecordDataset
@@ -880,7 +987,6 @@ class TFRecordDataset : public Dataset {
 /// \param[in] shard_equal_rows Get equal rows for all shards. (Default = False, number of rows of
 ///     each shard may be not equal)
 /// \param[in] cache Tensor cache to use. (default=nullptr which means no cache is used).
-///     The cache feature is under development and is not recommended.
 /// \return Shared pointer to the current TFRecordDataset
 template <typename T = std::shared_ptr<SchemaObj>>
 std::shared_ptr<TFRecordDataset> TFRecord(const std::vector<std::string> &dataset_files, const T &schema = nullptr,
@@ -896,8 +1002,12 @@ std::shared_ptr<TFRecordDataset> TFRecord(const std::vector<std::string> &datase
   } else {
     std::string schema_path = schema;
     if (!schema_path.empty()) {
-      Path schema_file(schema_path);
-      if (!schema_file.Exists()) {
+      struct stat sb;
+      int rc = stat(common::SafeCStr(schema_path), &sb);
+      if (rc == -1 && errno != ENOENT) {
+        MS_LOG(WARNING) << "Unable to query the status of [" << schema_path << "]. Errno = " << errno << ".";
+      }
+      if (rc != 0) {
         MS_LOG(ERROR) << "TFRecordDataset: schema path [" << schema_path << "] is invalid or does not exist.";
         return nullptr;
       }
@@ -914,6 +1024,7 @@ class VOCDataset : public Dataset {
                       const std::string &usage = "train", const std::map<std::string, int32_t> &class_indexing = {},
                       bool decode = false, const std::shared_ptr<SamplerObj> &sampler = RandomSampler(),
                       const std::shared_ptr<DatasetCache> &cache = nullptr);
+  ~VOCDataset() = default;
 };
 
 /// \brief Function to create a VOCDataset
@@ -929,7 +1040,6 @@ class VOCDataset : public Dataset {
 /// \param[in] sampler Object used to choose samples from the dataset. If sampler is not given,
 ///     a `RandomSampler` will be used to randomly iterate the entire dataset (default = RandomSampler())
 /// \param[in] cache Tensor cache to use. (default=nullptr which means no cache is used).
-///     The cache feature is under development and is not recommended.
 /// \return Shared pointer to the current Dataset
 std::shared_ptr<VOCDataset> VOC(const std::string &dataset_dir, const std::string &task = "Segmentation",
                                 const std::string &usage = "train",
@@ -938,26 +1048,27 @@ std::shared_ptr<VOCDataset> VOC(const std::string &dataset_dir, const std::strin
                                 const std::shared_ptr<DatasetCache> &cache = nullptr);
 
 /// \brief Function the create a cache to be attached to a dataset
-/// \param id A user assigned session id for the current pipeline
-/// \param mem_sz Size of the memory set aside for the row caching. 0 for unlimited
-/// \param spill Spill to disk if out of memory
-/// \param hostname optional host name
-/// \param port optional port
-/// \param num_connections optional number of connections
-/// \param prefetch_sz optional prefetch size
+/// \param id A user assigned session id for the current pipeline.
+/// \param mem_sz Size of the memory set aside for the row caching (default=0 which means unlimited,
+///     note that it might bring in the risk of running out of memory on the machine).
+/// \param spill Spill to disk if out of memory (default=False).
+/// \param hostname optional host name (default="127.0.0.1").
+/// \param port optional port (default=50052).
+/// \param num_connections optional number of connections (default=12).
+/// \param prefetch_sz optional prefetch size (default=20).
 /// \return Shared pointer to DatasetCache. If error, nullptr is returned.
 std::shared_ptr<DatasetCache> CreateDatasetCache(session_id_type id, uint64_t mem_sz, bool spill,
                                                  std::optional<std::string> hostname = std::nullopt,
                                                  std::optional<int32_t> port = std::nullopt,
                                                  std::optional<int32_t> num_connections = std::nullopt,
                                                  std::optional<int32_t> prefetch_sz = std::nullopt);
-#endif
 
 /// \brief Function to create a ZipDataset
 /// \notes Applies zip to the dataset
 /// \param[in] datasets List of shared pointers to the datasets that we want to zip
 /// \return Shared pointer to the current Dataset
 std::shared_ptr<ZipDataset> Zip(const std::vector<std::shared_ptr<Dataset>> &datasets);
+#endif
 }  // namespace dataset
 }  // namespace mindspore
 

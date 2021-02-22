@@ -56,7 +56,7 @@ static KernelGraphPtr CreateKernelGraph() {
    */
   KernelGraphPtr g = std::make_shared<KernelGraph>();
   std::vector<AnfNodePtr> inputs;
-  std::vector<int> shp = {1, 3, 3, 4};
+  std::vector<int64_t> shp = {1, 3, 3, 4};
   TensorTypePtr tensor_type = std::make_shared<TensorType>(kFloat32);
   tensor::DeviceInfo device_info{kOpFormat_NCHW, tensor_type};
 
@@ -152,7 +152,7 @@ static KernelGraphPtr CreateGraphWithExecOrder() {
    *              return
    */
   auto anf_graph = std::make_shared<FuncGraph>();
-  std::vector<int> shape = {2, 32, 224, 224};
+  std::vector<int64_t> shape = {2, 32, 224, 224};
   auto abstract = std::make_shared<abstract::AbstractTensor>(kFloat32, shape);
   EXPECT_NE(abstract, nullptr);
   auto original_x_parameter = anf_graph->add_parameter();
@@ -163,7 +163,7 @@ static KernelGraphPtr CreateGraphWithExecOrder() {
   EXPECT_NE(original_y_parameter, nullptr);
   original_y_parameter->set_name("original_y_parameter");
   original_y_parameter->set_abstract(abstract);
-  std::vector<AnfNodePtr> add_inputs = {NewValueNode(prim::kPrimTensorAdd), original_x_parameter, original_y_parameter};
+  std::vector<AnfNodePtr> add_inputs = {NewValueNode(prim::kPrimAdd), original_x_parameter, original_y_parameter};
   auto original_add = anf_graph->NewCNode(add_inputs);
   EXPECT_NE(original_add, nullptr);
   original_add->set_abstract(abstract);
@@ -198,7 +198,7 @@ static KernelGraphPtr CreateGraphWithExecOrder() {
   kernel_graph->SetExecOrderByDefault();
   auto execution_order = kernel_graph->execution_order();
   EXPECT_EQ(execution_order.size(), 2);
-  EXPECT_EQ(AnfAlgo::GetCNodeName(execution_order[0]), prim::kPrimTensorAdd->name());
+  EXPECT_EQ(AnfAlgo::GetCNodeName(execution_order[0]), prim::kPrimAdd->name());
   EXPECT_EQ(AnfAlgo::GetCNodeName(execution_order[1]), prim::kPrimMul->name());
   auto new_outputs = kernel_graph->outputs();
   EXPECT_EQ(new_outputs.size(), 1);

@@ -19,26 +19,39 @@
 
 #include <vector>
 #include "src/runtime/kernel/opencl/opencl_kernel.h"
-#include "src/runtime/kernel/arm/base/concat_base.h"
+#include "nnacl/concat_parameter.h"
 
 namespace mindspore::kernel {
 
 class ConcatOpenCLKernel : public OpenCLKernel {
  public:
-  ConcatOpenCLKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
-                     const std::vector<lite::Tensor *> &outputs)
-      : OpenCLKernel(parameter, inputs, outputs) {}
+  using OpenCLKernel::OpenCLKernel;
 
   ~ConcatOpenCLKernel() override = default;
 
-  int Init() override;
+  int Prepare() override;
 
+  int CheckSpecs() override;
+  void SetConstArgs() override;
+  void SetGlobalLocal() override;
   int Run() override;
 
  private:
-  int RunAxis0();
+  std::vector<size_t> local;
+  uint32_t OH = {1};
+  uint32_t OW = {1};
+  uint32_t OC = {1};
+  std::vector<size_t> global;
+  bool Align_{true};
+  std::vector<void *> weight_ptrs_;
+  cl_int stride_w{1};
+  cl_int4 in_shape_{};
+  cl_int4 out_shape_{};
+  int axis_{0};
 
-  cl::Kernel kernel_;
+ private:
+  int RunAxis0();
+  int ConvertWeightToTensor();
 };
 
 }  // namespace mindspore::kernel

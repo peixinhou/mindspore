@@ -16,7 +16,7 @@
 #include <iostream>
 #include "src/common/log_adapter.h"
 #include "common/common_test.h"
-#include "mindspore/lite/nnacl/fp32/gatherNd.h"
+#include "mindspore/lite/nnacl/fp32/gatherNd_fp32.h"
 #include "mindspore/lite/nnacl/int8/gatherNd_int8.h"
 #include "mindspore/lite/src/kernel_registry.h"
 #include "mindspore/lite/src/lite_kernel.h"
@@ -37,7 +37,6 @@ TEST_F(TestGatherNdInt8, GatherNdTest) {
 
   GatherNdParameter op_param;
   op_param.op_parameter_.type_ = schema::PrimitiveType_GatherNd;
-  op_param.batchDims_ = 1;
   std::vector<int> shape = {1, 2, 2, 5};
   std::vector<int> out_shape = {1, 3, 5};
 

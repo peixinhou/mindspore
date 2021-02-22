@@ -37,7 +37,8 @@ bool MemSwapManager::Init(const mindspore::session::KernelGraph *kernel_graph, s
     MS_EXCEPTION_IF_NULL(kernel_mod);
     auto output_sizes = kernel_mod->GetOutputSizeList();
 
-    for (size_t output_idx = 0; output_idx < AnfAlgo::GetOutputTensorNum(kernel); ++output_idx) {
+    size_t output_num = AnfAlgo::GetOutputTensorNum(kernel);
+    for (size_t output_idx = 0; output_idx < output_num; ++output_idx) {
       TensorInfo tensor_info = {output_sizes[output_idx], kernel, output_idx};
       ordered_tensors_.push_back(tensor_info);
     }
@@ -237,6 +238,10 @@ void MemSwapManager::SaveUserKernelTopoOrder() {
         continue;
       }
 
+      if (opt::IsNopNode(user_kernel)) {
+        continue;
+      }
+
       size_t user_kernel_topo_sort = SearchKernelExecutionInfo(user_kernel).topo_order_;
       auto kernel_with_index = AnfAlgo::GetPrevNodeOutput(user_kernel, node_pair.second - 1);
       auto &output_idx = kernel_with_index.second;
@@ -342,7 +347,6 @@ bool MemSwapManager::RetreatSwapInfo() {
     ResetSwapInfo();
     RetreatSwapThreshold();
     if (tensor_size_threshold_idx_ == ordered_tensors_.size() - 1 && distance_threshold_ < kDistanceLowerBound) {
-      MS_LOG(ERROR) << "Retreat swap info failed";
       return false;
     }
   } else {

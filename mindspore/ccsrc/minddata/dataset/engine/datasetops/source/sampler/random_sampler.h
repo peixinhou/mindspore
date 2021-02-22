@@ -31,8 +31,8 @@ class RandomSamplerRT : public SamplerRT {
   // @param bool replacement - put he id back / or not after a sample
   // @param reshuffle_each_epoch - T/F to reshuffle after epoch
   // @param int64_t samples_per_buffer - Num of Sampler Ids to fetch via 1 GetNextBuffer call
-  explicit RandomSamplerRT(int64_t num_samples, bool replacement, bool reshuffle_each_epoch,
-                           int64_t samples_per_buffer = std::numeric_limits<int64_t>::max());
+  RandomSamplerRT(int64_t num_samples, bool replacement, bool reshuffle_each_epoch,
+                  int64_t samples_per_buffer = std::numeric_limits<int64_t>::max());
 
   // Destructor.
   ~RandomSamplerRT() = default;
@@ -40,17 +40,22 @@ class RandomSamplerRT : public SamplerRT {
   // Op calls this to get next Buffer that contains all the sampleIds
   // @param std::unique_ptr<DataBuffer> pBuffer - Buffer to be returned to StorageOp
   // @param int32_t workerId - not meant to be used
-  // @return - The error code return
+  // @return Status The status code returned
   Status GetNextSample(std::unique_ptr<DataBuffer> *out_buffer) override;
 
   // meant to be called by base class or python
   Status InitSampler() override;
 
   // for next epoch of sampleIds
-  // @return - The error code return
+  // @return Status The status code returned
   Status ResetSampler() override;
 
-  virtual void Print(std::ostream &out, bool show_all) const;
+  void SamplerPrint(std::ostream &out, bool show_all) const override;
+
+  /// \brief Get the arguments of node
+  /// \param[out] out_json JSON string of all attributes
+  /// \return Status of the function
+  Status to_json(nlohmann::json *out_json) override;
 
  private:
   uint32_t seed_;

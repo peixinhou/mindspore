@@ -1,5 +1,5 @@
 /**
- * Copyright 2019-2020 Huawei Technologies Co., Ltd
+ * Copyright 2019-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,32 +14,39 @@
  * limitations under the License.
  */
 #include "backend/session/session_basic.h"
-#include <utility>
-#include <algorithm>
-#include <unordered_map>
 
-#include "c_ops/primitive_c.h"
+#include <algorithm>
+#include <set>
+#include <unordered_map>
+#include <utility>
+
+#include "ops/primitive_c.h"
 #include "ir/manager.h"
-#include "ir/param_info.h"
+#include "abstract/utils.h"
 #include "backend/kernel_compiler/common_utils.h"
 #include "base/core_ops.h"
+#include "base/base_ref_utils.h"
 #include "common/trans.h"
 #include "utils/config_manager.h"
 #include "backend/session/anf_runtime_algorithm.h"
-#include "backend/session/executor.h"
 #include "backend/session/executor_manager.h"
 #include "backend/optimizer/common/common_backend_optimization.h"
 #include "backend/optimizer/common/helper.h"
 #include "runtime/device/kernel_runtime_manager.h"
 #include "utils/ms_utils.h"
-#include "ir/dtype.h"
 #include "ir/anf.h"
 #include "ir/func_graph_cloner.h"
 #include "utils/utils.h"
+#include "debug/anf_ir_dump.h"
+#include "utils/trace_base.h"
+#ifdef ENABLE_DUMP_IR
+#include "debug/rdr/running_data_recorder.h"
+#endif
 #if (ENABLE_CPU && (ENABLE_D || ENABLE_GPU))
-#include "ps/worker.h"
+#include "ps/ps_cache/ps_cache_manager.h"
 #include "ps/common.h"
 #include "ps/util.h"
+#include "abstract/abstract_value.h"
 #endif
 
 namespace mindspore {
@@ -48,6 +55,56 @@ static std::shared_ptr<std::map<ValuePtr, ParameterPtr>> python_paras;
 void ClearPythonParasMap() { python_paras = nullptr; }
 namespace {
 const int kSummaryGetItem = 2;
+const size_t max_depth = 128;
+bool IsShapeDynamic(const abstract::ShapePtr &shape) {
+  if (shape == nullptr) {
+    return false;
+  }
+  return std::any_of(shape->shape().begin(), shape->shape().end(), [](int64_t s) { return s < 0; });
+}
+bool RecursiveCheck(const FuncGraphManagerPtr &manager, const AnfNodePtr &node, size_t *idx) {
+  MS_EXCEPTION_IF_NULL(manager);
+  MS_EXCEPTION_IF_NULL(node);
+  if (AnfAlgo::IsRealKernel(node)) {
+    return true;
+  }
+  (*idx) += 1;
+  // max recursion depth
+  if (*idx <= max_depth) {
+    auto users = manager->node_users()[node];
+    if (std::any_of(users.begin(), users.end(), [&](const std::pair<AnfNodePtr, int64_t> &kernel) {
+          return RecursiveCheck(manager, kernel.first, idx);
+        })) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool IsUsedByRealKernel(const FuncGraphManagerPtr &manager, const AnfNodePtr &node) {
+  MS_EXCEPTION_IF_NULL(manager);
+  MS_EXCEPTION_IF_NULL(node);
+  auto node_users = manager->node_users()[node];
+  size_t idx = 0;
+  if (std::any_of(node_users.begin(), node_users.end(), [&](const std::pair<AnfNodePtr, int64_t> &kernel) {
+        return RecursiveCheck(manager, kernel.first, &idx);
+      })) {
+    return true;
+  }
+  return false;
+}
+
+bool CheckIfNeedCreateOutputTensor(const AnfNodePtr &node) {
+  MS_EXCEPTION_IF_NULL(node);
+  if (node->isa<Parameter>()) {
+    auto node_ptr = node->cast<ParameterPtr>();
+    MS_EXCEPTION_IF_NULL(node_ptr);
+    if (!node_ptr->is_used_by_real_kernel()) {
+      return true;
+    }
+  }
+  return false;
+}
 
 ValuePtr GetParamDefaultValue(const AnfNodePtr &node) {
   if (node == nullptr) {
@@ -71,7 +128,7 @@ tensor::TensorPtr CreateCNodeOutputTensor(const session::KernelWithIndex &node_o
     type_id = AnfAlgo::GetOutputInferDataType(node, output_index);
   }
   tensor::TensorPtr tensor = nullptr;
-  std::vector<int> temp_shape;
+  std::vector<int64_t> temp_shape;
   if (graph->IsUniqueTargetInternalOutput(node, output_index)) {
     temp_shape.emplace_back(1);
     tensor = std::make_shared<tensor::Tensor>(type_id, temp_shape);
@@ -93,7 +150,7 @@ tensor::TensorPtr CreateCNodeOutputTensor(const session::KernelWithIndex &node_o
     }
   }
   tensor->set_padding_type(AnfAlgo::GetOutputReshapeType(node, output_index));
-  // if in paynative mode,data only copyed to host when user want to print data
+  // if in pynative mode,data only copied to host when user want to print data
   auto ms_context = MsContext::GetInstance();
   MS_EXCEPTION_IF_NULL(ms_context);
   if (ms_context->get_param<int>(MS_CTX_EXECUTION_MODE) != kPynativeMode &&
@@ -107,6 +164,12 @@ tensor::TensorPtr CreateCNodeOutputTensor(const session::KernelWithIndex &node_o
   return tensor;
 }
 
+static bool IsPynativeMode() {
+  auto ms_context = MsContext::GetInstance();
+  MS_EXCEPTION_IF_NULL(ms_context);
+  return ms_context->get_param<int>(MS_CTX_EXECUTION_MODE) == kPynativeMode;
+}
+
 BaseRef CreateNodeOutputTensor(const session::KernelWithIndex &node_output_pair, const KernelGraphPtr &graph,
                                const std::vector<tensor::TensorPtr> &input_tensors,
                                std::map<tensor::TensorPtr, session::KernelWithIndex> *tensor_to_node) {
@@ -116,13 +179,17 @@ BaseRef CreateNodeOutputTensor(const session::KernelWithIndex &node_output_pair,
   MS_EXCEPTION_IF_NULL(graph);
   MS_EXCEPTION_IF_NULL(tensor_to_node);
   MS_LOG(INFO) << "Create tensor for output[" << node->DebugString() << "] index[" << node_output_pair.second << "]";
+  if (HasAbstractMonad(node)) {
+    return std::make_shared<tensor::Tensor>(int64_t(0), kBool);
+  }
   // if node is a value node, no need sync addr from device to host
   if (node->isa<ValueNode>()) {
     auto value_node = node->cast<ValueNodePtr>();
     MS_EXCEPTION_IF_NULL(value_node);
     return value_node->value();
   }
-  if (!AnfAlgo::OutputAddrExist(node, output_index)) {
+  bool output_addr_exist = AnfAlgo::OutputAddrExist(node, output_index);
+  if (!output_addr_exist || (CheckIfNeedCreateOutputTensor(node) && !IsPynativeMode())) {
     if (node->isa<Parameter>()) {
       for (size_t input_idx = 0; input_idx < graph->inputs().size(); input_idx++) {
         if (input_idx >= input_tensors.size()) {
@@ -132,7 +199,9 @@ BaseRef CreateNodeOutputTensor(const session::KernelWithIndex &node_output_pair,
           return input_tensors[input_idx];
         }
       }
-      MS_LOG(EXCEPTION) << "Parameter : " << node->DebugString() << " has no output addr";
+      if (!output_addr_exist) {
+        MS_LOG(EXCEPTION) << "Parameter : " << node->DebugString() << " has no output addr";
+      }
     }
   }
   auto tensor = CreateCNodeOutputTensor(node_output_pair, graph);
@@ -155,8 +224,10 @@ BaseRef CreateNodeOutputTensors(const AnfNodePtr &anf, const KernelGraphPtr &gra
     MS_EXCEPTION_IF_NULL(cnode);
     VectorRef ret;
     for (size_t i = 1; i < cnode->inputs().size(); ++i) {
-      auto out = CreateNodeOutputTensors(cnode->input(i), graph, input_tensors, tensor_to_node);
-      ret.push_back(out);
+      if (!AnfAlgo::CheckPrimitiveType(cnode->input(i), prim::kPrimControlDepend)) {
+        auto out = CreateNodeOutputTensors(cnode->input(i), graph, input_tensors, tensor_to_node);
+        ret.push_back(out);
+      }
     }
     return ret;
   }
@@ -247,7 +318,7 @@ ValueNodePtr ConstructRunOpValueNode(const std::shared_ptr<KernelGraph> &graph, 
 }
 
 ParameterPtr ConstructRunOpParameter(const std::shared_ptr<KernelGraph> &graph, const tensor::TensorPtr &input_tensor,
-                                     int tensor_mask) {
+                                     int64_t tensor_mask) {
   MS_EXCEPTION_IF_NULL(graph);
   auto param = graph->NewParameter();
   MS_EXCEPTION_IF_NULL(param);
@@ -331,23 +402,240 @@ bool IgnoreCreateParameterForMakeTuple(const AnfNodePtr &node) {
   }
   return true;
 }
+
+void GetParameterIndex(KernelGraph *graph, const std::vector<tensor::TensorPtr> &inputs,
+                       std::map<AnfNodePtr, size_t> *parameter_index) {
+  size_t index = 0;
+  for (const auto &input_node : graph->inputs()) {
+    auto params = AnfAlgo::GetAllOutput(input_node);
+    for (const auto &param : params) {
+      if (index >= inputs.size()) {
+        MS_LOG(EXCEPTION) << "Parameter size out of range. Parameter index: " << index
+                          << ", input size: " << inputs.size();
+      }
+      const auto &input = inputs[index];
+      // Check shape of input and parameter
+      const auto &input_shape = input->shape();
+      const auto &param_shape = AnfAlgo::GetOutputInferShape(param, 0);
+      if (input_shape.size() != param_shape.size()) {
+        MS_LOG(EXCEPTION) << "Shapes of input and parameter are different, input index: " << index
+                          << ", parameter: " << param->fullname_with_scope();
+      }
+      for (size_t i = 0; i < input_shape.size(); i += 1) {
+        if (input_shape[i] < 0 || static_cast<size_t>(input_shape[i]) != param_shape[i]) {
+          MS_LOG(EXCEPTION) << "Shapes of input and parameter are different, input index: " << index
+                            << ", parameter: " << param->fullname_with_scope();
+        }
+      }
+      parameter_index->emplace(param, index++);
+    }
+  }
+}
+
+BaseRef CreateNodeOutputPlaceholder(const session::KernelWithIndex &node_output_pair, const KernelGraphPtr &graph,
+                                    const std::vector<tensor::TensorPtr> &input_tensors,
+                                    const std::vector<size_t> &indexes,
+                                    std::map<KernelWithIndex, std::vector<std::vector<size_t>>> *output_indexes) {
+  auto &node = node_output_pair.first;
+  MS_EXCEPTION_IF_NULL(node);
+  MS_EXCEPTION_IF_NULL(graph);
+  MS_EXCEPTION_IF_NULL(output_indexes);
+  MS_LOG(INFO) << "Create placeholder for output[" << node->DebugString() << "] index[" << node_output_pair.second
+               << "]";
+  // if node is a value node, no need sync addr from device to host
+  if (node->isa<ValueNode>()) {
+    auto value_node = node->cast<ValueNodePtr>();
+    MS_EXCEPTION_IF_NULL(value_node);
+    return value_node->value();
+  }
+  if (node->isa<Parameter>()) {
+    for (size_t input_idx = 0; input_idx < graph->inputs().size(); input_idx++) {
+      if (input_idx >= input_tensors.size()) {
+        MS_LOG(EXCEPTION) << "Input idx:" << input_idx << "out of range:" << input_tensors.size();
+      }
+      if (graph->inputs()[input_idx] == node) {
+        return input_tensors[input_idx];
+      }
+    }
+    MS_LOG(EXCEPTION) << "Parameter: " << node->DebugString() << " has no output addr";
+  }
+  (*output_indexes)[node_output_pair].emplace_back(indexes);
+  BaseRef output_placeholder = std::make_shared<BaseRef>();
+  return output_placeholder;
+}
+
+BaseRef CreateNodeOutputPlaceholder(const AnfNodePtr &anf, const KernelGraphPtr &graph,
+                                    const std::vector<tensor::TensorPtr> &input_tensors,
+                                    const std::vector<size_t> &indexes,
+                                    std::map<KernelWithIndex, std::vector<std::vector<size_t>>> *output_indexes) {
+  MS_EXCEPTION_IF_NULL(anf);
+  MS_EXCEPTION_IF_NULL(output_indexes);
+  MS_LOG(INFO) << "Create placeholder for output[" << anf->DebugString() << "]";
+  auto item_with_index = AnfAlgo::VisitKernelWithReturnType(anf, 0);
+  MS_EXCEPTION_IF_NULL(item_with_index.first);
+  MS_LOG(INFO) << "Create placeholder for output after visit:" << item_with_index.first->DebugString();
+  // special handle for maketuple
+  if (AnfAlgo::CheckPrimitiveType(item_with_index.first, prim::kPrimMakeTuple)) {
+    auto cnode = item_with_index.first->cast<CNodePtr>();
+    MS_EXCEPTION_IF_NULL(cnode);
+    VectorRef ret;
+    for (size_t i = 1; i < cnode->inputs().size(); ++i) {
+      std::vector<size_t> cur_index = indexes;
+      cur_index.emplace_back(i - 1);
+      auto out = CreateNodeOutputPlaceholder(cnode->input(i), graph, input_tensors, cur_index, output_indexes);
+      ret.push_back(out);
+    }
+    return ret;
+  }
+  // if is graph return nothing ,the function should return a null anylist
+  size_t size = AnfAlgo::GetOutputTensorNum(item_with_index.first);
+  if (size == 0) {
+    return VectorRef();
+  }
+  return CreateNodeOutputPlaceholder(item_with_index, graph, input_tensors, indexes, output_indexes);
+}
+
+void CreateOutputPlaceholder(const KernelGraphPtr &kernel_graph, const std::vector<tensor::TensorPtr> &input_tensors,
+                             VectorRef *outputs,
+                             std::map<KernelWithIndex, std::vector<std::vector<size_t>>> *output_indexes) {
+  MS_EXCEPTION_IF_NULL(kernel_graph);
+  MS_EXCEPTION_IF_NULL(outputs);
+  MS_EXCEPTION_IF_NULL(output_indexes);
+  auto anf_outputs = kernel_graph->outputs();
+  size_t index = 0;
+  for (auto &item : anf_outputs) {
+    MS_EXCEPTION_IF_NULL(item);
+    MS_LOG(INFO) << "Create node output placeholder[" << item->DebugString() << "]";
+    std::vector<size_t> indexes{index++};
+    outputs->emplace_back(CreateNodeOutputPlaceholder(item, kernel_graph, input_tensors, indexes, output_indexes));
+  }
+}
+
+void GetRefCount(KernelGraph *graph, std::map<KernelWithIndex, size_t> *ref_count) {
+  MS_EXCEPTION_IF_NULL(graph);
+  for (const auto &kernel : graph->execution_order()) {
+    for (size_t i = 1; i < kernel->inputs().size(); i += 1) {
+      const auto &input = kernel->input(i);
+      auto kernel_with_index = AnfAlgo::VisitKernel(input, 0);
+      const auto &node = kernel_with_index.first;
+      if (node->isa<CNode>()) {
+        (*ref_count)[kernel_with_index] += 1;
+      }
+    }
+  }
+}
+
+void HandleOpInputs(const std::set<KernelWithIndex> &input_kernel, std::map<KernelWithIndex, size_t> *ref_count,
+                    std::map<KernelWithIndex, tensor::TensorPtr> *op_output_map) {
+  MS_EXCEPTION_IF_NULL(ref_count);
+  MS_EXCEPTION_IF_NULL(op_output_map);
+  for (auto &kernel_with_index : input_kernel) {
+    MS_EXCEPTION_IF_NULL(kernel_with_index.first);
+    if (!kernel_with_index.first->isa<CNode>()) {
+      continue;
+    }
+    auto ref_iter = ref_count->find(kernel_with_index);
+    if (ref_iter == ref_count->end()) {
+      MS_LOG(EXCEPTION) << "Can not find input KernelWithIndex in cnode reference count map, input cnode = "
+                        << kernel_with_index.first->DebugString() << ", index = " << kernel_with_index.second;
+    }
+    // Reduce reference count number, when it was reduced to zero, release the useless output of pre node.
+    ref_iter->second -= 1;
+    if (ref_iter->second != 0) {
+      continue;
+    }
+    ref_count->erase(ref_iter);
+    auto output_iter = op_output_map->find(kernel_with_index);
+    if (output_iter == op_output_map->end()) {
+      MS_LOG(EXCEPTION) << "Can not find input KernelWithIndex in op_output map, input cnode = "
+                        << kernel_with_index.first->DebugString() << ", index = " << kernel_with_index.second;
+    }
+    op_output_map->erase(output_iter);
+  }
+}
+
+void HandleOpOutputs(const AnfNodePtr &kernel, const VectorRef &op_outputs,
+                     const std::map<KernelWithIndex, std::vector<std::vector<size_t>>> &output_indexes,
+                     const std::map<KernelWithIndex, size_t> &ref_count,
+                     std::map<KernelWithIndex, tensor::TensorPtr> *op_output_map, VectorRef *outputs) {
+  MS_EXCEPTION_IF_NULL(kernel);
+  MS_EXCEPTION_IF_NULL(op_output_map);
+  MS_EXCEPTION_IF_NULL(outputs);
+  auto output_tensors = TransformVectorRefToMultiTensor(op_outputs);
+  if (output_tensors.size() > op_outputs.size()) {
+    MS_LOG(EXCEPTION) << "Op output contains tuple, node = " << kernel->DebugString();
+  }
+  size_t out_index = 0;
+  for (const auto &output_tensor : output_tensors) {
+    auto kernel_with_index = make_pair(kernel, out_index++);
+    if (ref_count.find(kernel_with_index) != ref_count.end()) {
+      (*op_output_map)[kernel_with_index] = output_tensor;
+    }
+    const auto &iter = output_indexes.find(kernel_with_index);
+    if (iter == output_indexes.end()) {
+      continue;
+    }
+    const std::vector<std::vector<size_t>> &multiple_ref_indexes = iter->second;
+    for (const auto &ref_indexes : multiple_ref_indexes) {
+      size_t n = 0;
+      const VectorRef *cur_vector_ref = outputs;
+      for (; n < ref_indexes.size() - 1; n += 1) {
+        size_t index = ref_indexes.at(n);
+        if (index >= cur_vector_ref->size()) {
+          MS_LOG(EXCEPTION) << "Get invalid output ref index: " << index << ", size of vertor ref is "
+                            << cur_vector_ref->size();
+        }
+        const BaseRef &base_ref = (*cur_vector_ref)[index];
+        if (!utils::isa<VectorRef>(base_ref)) {
+          MS_LOG(EXCEPTION) << "Get none VectorRef by ref index, index: " << index << "cur n: " << n;
+        }
+        cur_vector_ref = &utils::cast<VectorRef>(base_ref);
+      }
+      BaseRef &tensor_ref = (*const_cast<VectorRef *>(cur_vector_ref))[ref_indexes.at(n)];
+      tensor_ref = output_tensor;
+    }
+  }
+}
 }  // namespace
 
 GraphId SessionBasic::graph_sum_ = 0;
 
-void SessionBasic::InitDevice(const std::string &device_name, uint32_t device_id) {
+void SessionBasic::InitExecutor(const std::string &device_name, uint32_t device_id) {
   device_id_ = device_id;
   context_ = std::make_shared<Context>(device_name, device_id);
   executor_ = ExecutorManager::Instance().GetExecutor(device_name, device_id);
 }
 
+GraphId SessionBasic::GetGraphIdByNode(const AnfNodePtr &front_anf) const {
+  for (const auto &graph_item : graphs_) {
+    auto graph = graph_item.second;
+    MS_EXCEPTION_IF_NULL(graph);
+    // if front_anf is a parameter,the backend parameter may have two
+    if (graph->GetBackendAnfByFrontAnf(front_anf) != nullptr) {
+      return graph_item.first;
+    }
+  }
+  MS_EXCEPTION_IF_NULL(front_anf);
+  MS_LOG(DEBUG) << "Front_anf " << front_anf->DebugString() << " is not exist in any graph";
+  return kInvalidGraphId;
+}
+
 KernelGraphPtr SessionBasic::GetGraph(mindspore::GraphId graph_id) const {
   auto it = graphs_.find(graph_id);
   if (it == graphs_.end()) {
-    MS_LOG(WARNING) << "Can't find graph " << graph_id;
+    MS_LOG(INFO) << "Can't find graph " << graph_id;
     return nullptr;
   }
   return it->second;
+}
+
+void SessionBasic::ClearGraph() {
+  auto graph_iter = graphs_.begin();
+  while (graph_iter != graphs_.end()) {
+    graph_iter->second.reset();
+    graphs_.erase(graph_iter++);
+  }
+  graph_sum_ = 0;
 }
 
 void SessionBasic::InitInternalOutputParameter(const AnfNodePtr &out_node, const AnfNodePtr &parameter) {
@@ -393,7 +681,9 @@ void SessionBasic::InitInternalOutputParameter(const AnfNodePtr &out_node, const
     builder.SetOutputsFormat({format});
     d_kernel_info->set_select_kernel_build_info(builder.Build());
     AnfAlgo::SetOutputAddr(address, 0, parameter.get());
-    AnfAlgo::SetOutputInferTypeAndShape({type}, {AnfAlgo::GetOutputInferShape(parameter, 0)}, parameter.get());
+    auto abstract = std::make_shared<abstract::AbstractTensor>(TypeIdToType(type),
+                                                               parameter->Shape()->cast<abstract::BaseShapePtr>());
+    parameter->set_abstract(abstract);
   }
 }
 
@@ -407,17 +697,14 @@ std::vector<AnfNodePtr> SessionBasic::CreateParameterFromTuple(const AnfNodePtr 
   }
   // If a cnode is a call, it's input0 is a cnode too, so it doesn't have primitive
   if (!pre_graph_out.empty() && !AnfAlgo::IsRealKernel(node)) {
-    pre_graph_out = AnfAlgo::GetAllOutput(node, {prim::kPrimTupleGetItem});
+    pre_graph_out = AnfAlgo::GetAllOutput(node, {prim::kPrimTupleGetItem, prim::kPrimUpdateState});
   }
   auto valid_inputs = graph->MutableValidInputs();
   MS_EXCEPTION_IF_NULL(valid_inputs);
   auto graph_inputs = graph->MutableInputs();
   MS_EXCEPTION_IF_NULL(graph_inputs);
   auto create_parameter = [&](const AbstractBasePtr &abstract) -> void {
-    auto parameter = graph->NewParameter();
-    MS_EXCEPTION_IF_NULL(parameter);
-    parameter->set_abstract(abstract);
-    auto new_parameter = graph->NewParameter(parameter);
+    auto new_parameter = graph->NewParameter(abstract);
     parameters.push_back(new_parameter);
     valid_inputs->push_back(true);
     graph_inputs->push_back(new_parameter);
@@ -463,12 +750,11 @@ ParameterPtr SessionBasic::CreateNewParameterFromParameter(const AnfNodePtr &anf
   if (iter != python_paras->end()) {
     new_parameter = iter->second;
   } else {
-    TraceManager::DebugTrace(std::make_shared<TraceCopy>(anf->debug_info()));
+    TraceGuard trace_guard(std::make_shared<TraceCopy>(anf->debug_info()));
     new_parameter = graph->NewParameter(anf->cast<ParameterPtr>());
     if (param_value != nullptr) {
       (*python_paras)[param_value] = new_parameter;
     }
-    TraceManager::EndTrace();
   }
   new_parameter->IncreaseUsedGraphCount();
   graph_inputs->push_back(new_parameter);
@@ -518,8 +804,7 @@ void SessionBasic::GetNewCNodeInputs(const CNodePtr &cnode, KernelGraph *graph, 
   MS_EXCEPTION_IF_NULL(other_graph_cnode);
   MS_EXCEPTION_IF_NULL(cnode_inputs);
   auto origin_inputs = cnode->inputs();
-  bool optimize_depend = IsPrimitiveCNode(cnode, prim::kPrimDepend) && origin_inputs.size() == 3;
-  bool optimize_control_depend = IsPrimitiveCNode(cnode, prim::kPrimControlDepend) && origin_inputs.size() == 3;
+  bool optimize_depend = IsPrimitiveCNode(cnode, prim::kPrimDepend) && origin_inputs.size() >= 3;
   // if has multiple depends,only select first depend as parameter
   for (size_t input_idx = 1; input_idx < origin_inputs.size(); input_idx++) {
     auto anf = origin_inputs[input_idx];
@@ -528,7 +813,7 @@ void SessionBasic::GetNewCNodeInputs(const CNodePtr &cnode, KernelGraph *graph, 
     if (graph->GetBackendAnfByFrontAnf(anf) != nullptr) {
       cnode_inputs->emplace_back(graph->GetBackendAnfByFrontAnf(anf));
       continue;
-    } else if (optimize_depend && input_idx == kDependAttachNodeIndex) {
+    } else if (optimize_depend && input_idx > 1) {
       cnode_inputs->push_back(NewValueNode(MakeValue(SizeToInt(input_idx))));
       continue;
     } else if (other_graph_cnode->find(anf) != other_graph_cnode->end()) {
@@ -550,13 +835,16 @@ void SessionBasic::GetNewCNodeInputs(const CNodePtr &cnode, KernelGraph *graph, 
         (*other_graph_cnode)[anf] = new_parameter;
       }
       continue;
-    } else if (optimize_control_depend) {
-      cnode_inputs->push_back(NewValueNode(MakeValue(SizeToInt(input_idx))));
     } else {
       // the input node is a cnode from other graph
       auto parameter_from_cnode = CreateNewParameterFromCNode(anf, graph);
       if (parameter_from_cnode == nullptr) {
-        parameter_from_cnode = NewValueNode(MakeValue(SizeToInt(input_idx)));
+        parameter_from_cnode = NewValueNode(MakeValue(SizeToLong(input_idx)));
+      }
+      if (parameter_from_cnode->isa<Parameter>() && IsPrimitiveCNode(anf, prim::kPrimLoad)) {
+        auto para = parameter_from_cnode->cast<ParameterPtr>();
+        auto load_cnode = anf->cast<CNodePtr>();
+        para->set_name(load_cnode->input(kFirstDataInputIndex)->fullname_with_scope());
       }
       cnode_inputs->push_back(parameter_from_cnode);
       (*other_graph_cnode)[anf] = parameter_from_cnode;
@@ -573,13 +861,12 @@ CNodePtr SessionBasic::CreateNewCNode(const CNodePtr &cnode, KernelGraph *graph,
   std::vector<AnfNodePtr> cnode_inputs;
   GetCNodeInfo(cnode, &cnode_inputs);
   GetNewCNodeInputs(cnode, graph, &cnode_inputs, other_graph_cnode);
-  TraceManager::DebugTrace(std::make_shared<TraceCopy>(cnode->debug_info()));
+  TraceGuard trace_guard(std::make_shared<TraceCopy>(cnode->debug_info()));
   auto new_cnode = graph->NewCNode(cnode_inputs);
-  TraceManager::EndTrace();
   return new_cnode;
 }
 
-CNodePtr SessionBasic::CreateSwitchInput(const AnfNodePtr &node_input, KernelGraph *graph) {
+CNodePtr SessionBasic::CreateSwitchInput(const CNodePtr &cnode, const AnfNodePtr &node_input, KernelGraph *graph) {
   MS_EXCEPTION_IF_NULL(node_input);
   MS_EXCEPTION_IF_NULL(graph);
   // switch input generalizes partial
@@ -592,9 +879,11 @@ CNodePtr SessionBasic::CreateSwitchInput(const AnfNodePtr &node_input, KernelGra
   } else {
     KernelGraphPtr kernel_graph = NewKernelGraph();
     MS_EXCEPTION_IF_NULL(kernel_graph);
-    auto parameter = CreateNewParameterFromCNode(graph->GetBackendAnfByFrontAnf(node_input), kernel_graph.get());
+    auto parameter = CreateNewParameterFromCNode(cnode, kernel_graph.get());
+    parameter->set_abstract(cnode->abstract());
     auto primitive = NewValueNode(std::make_shared<Primitive>(prim::kPrimReturn->name()));
     auto return_node = kernel_graph->NewCNode({primitive, parameter});
+    return_node->set_abstract(cnode->abstract());
     kernel_graph->set_return(return_node);
     partial_inputs.emplace_back(std::make_shared<ValueNode>(kernel_graph));
     partial_inputs.emplace_back(graph->GetBackendAnfByFrontAnf(node_input));
@@ -626,7 +915,10 @@ std::vector<AnfNodePtr> SessionBasic::CreateCallSwitchInputs(const CNodePtr &cno
       auto partial_node = node->cast<CNodePtr>();
       MS_EXCEPTION_IF_NULL(partial_node);
       std::vector<AnfNodePtr> partial_inputs = partial_node->inputs();
-      partial_inputs.emplace_back(graph->GetBackendAnfByFrontAnf(cnode->input(kFirstDataInputIndex)));
+      // Put all call args at the end of partial inputs.
+      for (size_t i = kFirstDataInputIndex; i < cnode->size(); ++i) {
+        partial_inputs.emplace_back(graph->GetBackendAnfByFrontAnf(cnode->input(i)));
+      }
       auto new_partial = graph->NewCNode(partial_inputs);
       switch_inputs.emplace_back(new_partial);
     }
@@ -639,18 +931,105 @@ std::vector<AnfNodePtr> SessionBasic::CreateCallSwitchInputs(const CNodePtr &cno
   return cnode_inputs;
 }
 
+void SessionBasic::CreateCallNodeReturnFunction(const CNodePtr &cnode, const AnfNodePtr &real_input) {
+  MS_EXCEPTION_IF_NULL(cnode);
+  MS_EXCEPTION_IF_NULL(real_input);
+  if (!(AnfAlgo::CheckPrimitiveType(cnode, prim::kPrimPartial))) {
+    MS_LOG(EXCEPTION) << "Node: " << cnode->DebugString() << "is not a partial node.";
+  }
+  auto partial_input = cnode->input(kFirstDataInputIndex);
+  KernelGraphPtr partial_kernel_graph = GetValueNode<KernelGraphPtr>(partial_input);
+  MS_EXCEPTION_IF_NULL(partial_kernel_graph);
+  auto ret = partial_kernel_graph->get_return();
+  MS_EXCEPTION_IF_NULL(ret);
+  auto return_input = ret->input(kFirstDataInputIndex);
+  // if kernel graph return node is a function
+  if (AnfAlgo::CheckPrimitiveType(return_input, prim::kPrimPartial)) {
+    std::vector<AnfNodePtr> call_inputs = {
+      partial_kernel_graph->NewValueNode(NewValueNode(std::make_shared<Primitive>(prim::kPrimCall->name())))};
+    auto return_input_cnode = return_input->cast<CNodePtr>();
+
+    auto partial_inputs = return_input_cnode->inputs();
+    call_inputs.insert(call_inputs.end(), partial_inputs.begin() + kFirstDataInputIndex, partial_inputs.end());
+    auto parameter_for_input = CreateNewParameterFromCNode(real_input, partial_kernel_graph.get());
+    call_inputs.emplace_back(parameter_for_input);
+    auto call_node = partial_kernel_graph->NewCNode(call_inputs);
+    // update abstract
+    KernelGraphPtr sub_partial_kernel_graph = GetValueNode<KernelGraphPtr>(partial_inputs[kFirstDataInputIndex]);
+    auto ret_partial = sub_partial_kernel_graph->get_return();
+    call_node->set_abstract(ret_partial->abstract());
+    // update return input
+    ret->set_input(kFirstDataInputIndex, call_node);
+  }
+}
+
+std::vector<AnfNodePtr> SessionBasic::CreateCallSwitchLayerInputs(const CNodePtr &cnode, KernelGraph *graph) {
+  MS_EXCEPTION_IF_NULL(cnode);
+  MS_EXCEPTION_IF_NULL(graph);
+  std::vector<AnfNodePtr> cnode_inputs = {
+    graph->NewValueNode(NewValueNode(std::make_shared<Primitive>(prim::kPrimCall->name())))};
+  auto attr_input = cnode->input(kAnfPrimitiveIndex);
+  MS_EXCEPTION_IF_NULL(attr_input);
+  auto cnode_input = graph->GetBackendAnfByFrontAnf(attr_input);
+  auto switch_layer_cnode = cnode_input->cast<CNodePtr>();
+  MS_EXCEPTION_IF_NULL(switch_layer_cnode);
+  std::vector<AnfNodePtr> switch_layer_inputs = {switch_layer_cnode->input(kAnfPrimitiveIndex),
+                                                 switch_layer_cnode->input(kFirstDataInputIndex)};
+  auto make_tuple_node = switch_layer_cnode->input(kMakeTupleInSwitchLayerIndex);
+  MS_EXCEPTION_IF_NULL(make_tuple_node);
+  auto node = make_tuple_node->cast<CNodePtr>();
+  MS_EXCEPTION_IF_NULL(node);
+  auto make_tuple_inputs = node->inputs();
+  // there is real input in call, should put it to make_tuple in switch_layer
+  auto real_input = cnode->input(kFirstDataInputIndex);
+  auto real_input_back = graph->GetBackendAnfByFrontAnf(real_input);
+  std::vector<AnfNodePtr> new_make_tuple_inputs = {
+    graph->NewValueNode(NewValueNode(std::make_shared<Primitive>(prim::kPrimMakeTuple->name())))};
+  for (size_t idx = kFirstDataInputIndex; idx < make_tuple_inputs.size(); idx++) {
+    auto partial_idx = make_tuple_inputs[idx];
+    MS_EXCEPTION_IF_NULL(cnode->abstract());
+    // switch_layer node input is partial cnode
+    if (AnfAlgo::CheckPrimitiveType(partial_idx, prim::kPrimPartial)) {
+      auto partial_node = partial_idx->cast<CNodePtr>();
+      MS_EXCEPTION_IF_NULL(partial_node);
+      // update kernel graph when switch_layer node return function
+      CreateCallNodeReturnFunction(partial_node, real_input_back);
+
+      std::vector<AnfNodePtr> new_partial_inputs = partial_node->inputs();
+      new_partial_inputs.emplace_back(real_input_back);
+      auto new_partial = graph->NewCNode(new_partial_inputs);
+      new_make_tuple_inputs.emplace_back(new_partial);
+    }
+    // switch_layer node input is kernel graph value node
+    if (IsValueNode<KernelGraph>(partial_idx)) {
+      // make_tuple inputs is KernelGraph
+      std::vector<AnfNodePtr> new_partial_inputs;
+      new_partial_inputs.emplace_back(NewValueNode(std::make_shared<Primitive>(prim::kPrimPartial->name())));
+      new_partial_inputs.emplace_back(partial_idx);
+      new_partial_inputs.emplace_back(real_input_back);
+      auto new_partial = graph->NewCNode(new_partial_inputs);
+      new_make_tuple_inputs.emplace_back(new_partial);
+    }
+  }
+  auto new_make_tuple = graph->NewCNode(new_make_tuple_inputs);
+  switch_layer_inputs.emplace_back(new_make_tuple);
+  auto new_switch_layer = graph->NewCNode(switch_layer_inputs);
+  cnode_inputs.emplace_back(new_switch_layer);
+  return cnode_inputs;
+}
+
 std::vector<AnfNodePtr> SessionBasic::CreateSwitchOrPartialNode(const CNodePtr &cnode, KernelGraph *graph) {
   MS_EXCEPTION_IF_NULL(cnode);
   MS_EXCEPTION_IF_NULL(graph);
-  // create primitive of cnode:call(partial or switch)
+  // create primitive of cnode:call(partial or switch or switch_layer)
   std::vector<AnfNodePtr> cnode_inputs = {
     graph->NewValueNode(NewValueNode(std::make_shared<Primitive>(prim::kPrimCall->name())))};
   auto attr_input = cnode->input(kAnfPrimitiveIndex);
   MS_EXCEPTION_IF_NULL(attr_input);
   auto cnode_input = graph->GetBackendAnfByFrontAnf(attr_input);
   if (cnode_input == nullptr) {
-    MS_LOG(EXCEPTION) << "CNode input[0] is CNode:" << attr_input->DebugString()
-                      << ", but input[0] has not been created.";
+    MS_LOG(ERROR) << "CNode input[0] is CNode:" << attr_input->DebugString() << ", but input[0] has not been created.";
+    return {};
   }
   // if the node is partial, insert the inputs of partial to the call
   if (AnfAlgo::CheckPrimitiveType(cnode_input, prim::kPrimPartial)) {
@@ -665,8 +1044,12 @@ std::vector<AnfNodePtr> SessionBasic::CreateSwitchOrPartialNode(const CNodePtr &
     return cnode_inputs;
   } else if (AnfAlgo::CheckPrimitiveType(cnode_input, prim::kPrimSwitch)) {
     return CreateCallSwitchInputs(cnode, graph);
+  } else if (AnfAlgo::CheckPrimitiveType(cnode_input, prim::kPrimSwitchLayer)) {
+    return CreateCallSwitchLayerInputs(cnode, graph);
   }
-  MS_LOG(EXCEPTION) << "CNode input[0] must be partial or switch.";
+  MS_LOG(ERROR) << "CNode:" << cnode->DebugString() << " input[0]" << cnode_input->DebugString()
+                << "must be partial or switch or switch_layer.";
+  return {};
 }
 
 std::vector<AnfNodePtr> SessionBasic::CreateValueNode(const CNodePtr &cnode, KernelGraph *graph) {
@@ -703,7 +1086,7 @@ void SessionBasic::CreateCNodeInputs(const CNodePtr &cnode, KernelGraph *graph, 
     cnode_inputs->emplace_back(graph->GetBackendAnfByFrontAnf(cnode->input(kFirstDataInputIndex)));
     for (size_t index = kFirstBranchInSwitch; index < cnode->inputs().size(); index++) {
       auto node_input = cnode->input(index);
-      auto switch_input = CreateSwitchInput(node_input, graph);
+      auto switch_input = CreateSwitchInput(cnode, node_input, graph);
       cnode_inputs->emplace_back(switch_input);
     }
   } else {
@@ -736,6 +1119,10 @@ CNodePtr SessionBasic::CreateNewCNode(CNodePtr cnode, KernelGraph *graph) {
     // 1. take the args of call to the partial node, as the real_args to call switch's or switch_layer's child graph
     // 2. the call in frontend is map to the partial/switch/switch_layer in backend and haven't been created
     cnode_inputs = CreateSwitchOrPartialNode(cnode, graph);
+    if (cnode_inputs.empty()) {
+      MS_LOG_ERROR << "Create switch or partial failed, cnode:" << cnode->DebugString();
+      return nullptr;
+    }
   } else {
     // get primitive of old node
     auto prim = AnfAlgo::GetCNodePrimitive(cnode);
@@ -746,16 +1133,22 @@ CNodePtr SessionBasic::CreateNewCNode(CNodePtr cnode, KernelGraph *graph) {
   // handle inputs of cnode except primitive
   CreateCNodeInputs(cnode, graph, &cnode_inputs);
 
-  TraceManager::DebugTrace(std::make_shared<TraceCopy>(cnode->debug_info()));
+  TraceGuard trace_guard(std::make_shared<TraceCopy>(cnode->debug_info()));
   auto new_cnode = graph->NewCNode(cnode_inputs);
-  TraceManager::EndTrace();
 
   // if the cnode is call switch, remove call
   if (new_cnode->inputs().size() > 1) {
     auto first_input = new_cnode->input(kFirstDataInputIndex);
+    MS_EXCEPTION_IF_NULL(first_input);
     if (AnfAlgo::CheckPrimitiveType(new_cnode, prim::kPrimCall) &&
         AnfAlgo::CheckPrimitiveType(first_input, prim::kPrimSwitch)) {
       new_cnode = first_input->cast<CNodePtr>();
+    }
+    if (AnfAlgo::CheckPrimitiveType(new_cnode, prim::kPrimCall) &&
+        AnfAlgo::CheckPrimitiveType(first_input, prim::kPrimSwitchLayer)) {
+      auto abstract = cnode->abstract();
+      new_cnode = first_input->cast<CNodePtr>();
+      new_cnode->set_abstract(abstract);
     }
   }
 
@@ -778,7 +1171,6 @@ ValueNodePtr SessionBasic::CreateValueNodeKernelGraph(const AnfNodePtr &anf, Ker
   new_value_node->set_abstract(value_node->abstract());
   // create new kernel_info of new value_node
   auto kernel_info = std::make_shared<device::KernelInfo>();
-  kernel_info->SetFeatureMapFlag(false);
   new_value_node->set_kernel_info(kernel_info);
   // create kernel_build_info for new value node
   auto kernel_build_info_builder = std::make_shared<kernel::KernelBuildInfo::KernelBuildInfoBuilder>();
@@ -806,12 +1198,11 @@ ParameterPtr SessionBasic::CreateNewParameter(const AnfNodePtr &anf, KernelGraph
   if (iter != python_paras->end()) {
     new_parameter = iter->second;
   } else {
-    TraceManager::DebugTrace(std::make_shared<TraceCopy>(anf->debug_info()));
+    TraceGuard trace_guard(std::make_shared<TraceCopy>(anf->debug_info()));
     new_parameter = graph->NewParameter(anf->cast<ParameterPtr>());
     if (param_value != nullptr) {
       (*python_paras)[param_value] = new_parameter;
     }
-    TraceManager::EndTrace();
   }
   new_parameter->IncreaseUsedGraphCount();
 
@@ -836,6 +1227,9 @@ KernelGraphPtr SessionBasic::ConstructKernelGraph(const AnfNodePtrList &lst, con
     MS_EXCEPTION_IF_NULL(new_cnode);
     new_cnode->set_abstract(cnode->abstract());
     new_cnode->set_scope(cnode->scope());
+    if (IsPrimitiveCNode(cnode, prim::kPrimLoad)) {
+      new_cnode->set_fullname_with_scope(cnode->input(kFirstDataInputIndex)->fullname_with_scope());
+    }
     // record map relations between anf from ME and new anf node used in backend
     graph->FrontBackendlMapAdd(node, new_cnode);
   }
@@ -851,24 +1245,191 @@ KernelGraphPtr SessionBasic::ConstructKernelGraph(const AnfNodePtrList &lst, con
   if (ExistSummaryNode(graph.get())) {
     graph->set_summary_node_exist(true);
   }
+
+  // Update Graph Dynamic Shape Attr
+  UpdateGraphDynamicShapeAttr(NOT_NULL(graph));
+  UnifyMindIR(graph);
   opt::BackendCommonOptimization(graph);
   graph->SetInputNodes();
+  auto input_nodes = graph->input_nodes();
+  for (auto input_node : input_nodes) {
+    if (input_node->isa<Parameter>()) {
+      auto node_ptr = input_node->cast<ParameterPtr>();
+      MS_EXCEPTION_IF_NULL(node_ptr);
+      if (!IsUsedByRealKernel(manager, input_node)) {
+        node_ptr->set_used_by_real_kernel(false);
+      }
+      auto shape = node_ptr->Shape();
+      if (IsShapeDynamic(shape->cast<abstract::ShapePtr>())) {
+        node_ptr->set_used_by_dynamic_kernel(true);
+      }
+    }
+  }
   graph->SetOptimizerFlag();
   return graph;
 }
 
-void SessionBasic::CreateCNodeKernelGraph(const AnfNodePtr node, KernelGraphPtr graph) {
+GraphInfo SessionBasic::GetSingleOpGraphInfo(const CNodePtr &kernel,
+                                             const std::vector<tensor::TensorPtr> &input_tensors) {
+  MS_EXCEPTION_IF_NULL(kernel);
+  auto prim = AnfAlgo::GetCNodePrimitive(kernel);
+  MS_EXCEPTION_IF_NULL(prim);
+  const AbstractBasePtr &abstract = kernel->abstract();
+  MS_EXCEPTION_IF_NULL(abstract);
+  size_t output_num = AnfAlgo::GetOutputTensorNum(kernel);
+  GraphInfo graph_info;
+  // get input tensor info
+  for (const auto &tensor : input_tensors) {
+    MS_EXCEPTION_IF_NULL(tensor);
+    auto tensor_shape = tensor->shape();
+    (void)std::for_each(tensor_shape.begin(), tensor_shape.end(),
+                        [&](const auto &dim) { (void)graph_info.append(std::to_string(dim) + "_"); });
+    (void)graph_info.append(std::to_string(tensor->data_type()) + "_");
+    if (tensor->device_address() != nullptr) {
+      const auto type_id = std::dynamic_pointer_cast<device::DeviceAddress>(tensor->device_address())->type_id();
+      (void)graph_info.append(std::to_string(type_id) + "_");
+      const auto format = std::dynamic_pointer_cast<device::DeviceAddress>(tensor->device_address())->format();
+      (void)graph_info.append(format + "_");
+    }
+  }
+  // get attr info
+  const auto &attr_map = prim->attrs();
+  (void)std::for_each(attr_map.begin(), attr_map.end(), [&](const auto &element) {
+    if (element.second->ToString().empty()) {
+      return;
+    }
+    (void)graph_info.append(element.second->ToString() + "_");
+  });
+  auto build_shape = abstract->BuildShape();
+  MS_EXCEPTION_IF_NULL(build_shape);
+  (void)graph_info.append(build_shape->ToString() + "_");
+  for (size_t output_index = 0; output_index < output_num; output_index += 1) {
+    const auto output_type = AnfAlgo::GetOutputInferDataType(kernel, output_index);
+    (void)graph_info.append(std::to_string(output_type) + "_");
+  }
+  graph_info.append(prim->id());
+  return graph_info;
+}
+
+void SessionBasic::GetSingleOpRunInfo(const CNodePtr cnode, OpRunInfo *run_info) {
+  MS_EXCEPTION_IF_NULL(cnode);
+  MS_EXCEPTION_IF_NULL(run_info);
+  auto primitive = AnfAlgo::GetCNodePrimitive(cnode);
+  run_info->primitive = primitive;
+  run_info->op_name = primitive->name();
+  if (cnode->abstract() == nullptr) {
+    MS_LOG(EXCEPTION) << "Abstract is nullptr, node = " << cnode->DebugString();
+  }
+  run_info->abstract = cnode->abstract();
+}
+
+TensorPtr SessionBasic::GetValueNodeOutputTensor(const AnfNodePtr &node, size_t output_index) {
+  MS_EXCEPTION_IF_NULL(node);
+  if (!node->isa<ValueNode>()) {
+    return nullptr;
+  }
+  auto value_node = node->cast<ValueNodePtr>();
+  MS_EXCEPTION_IF_NULL(value_node);
+  auto value = GetValueNode(value_node);
+  MS_EXCEPTION_IF_NULL(value);
+  if (value->isa<ValueTuple>()) {
+    auto value_tuple = value->cast<ValueTuplePtr>();
+    MS_EXCEPTION_IF_NULL(value_tuple);
+    if (output_index >= value_tuple->size()) {
+      MS_LOG(EXCEPTION) << "Index " << output_index << "is out of value tuple range";
+    }
+    auto tensor_value = value_tuple->value()[output_index];
+    if (tensor_value->isa<tensor::Tensor>()) {
+      return tensor_value->cast<tensor::TensorPtr>();
+    }
+  } else if (value->isa<tensor::Tensor>()) {
+    if (output_index != 0) {
+      MS_LOG(EXCEPTION) << "Index should be 0 for Tensor ValueNode, but is " << output_index;
+    }
+    return value->cast<TensorPtr>();
+  }
+  return nullptr;
+}
+
+TensorPtr SessionBasic::GetParameterOutputTensor(const AnfNodePtr &node,
+                                                 const std::map<AnfNodePtr, size_t> &parameter_index,
+                                                 const std::vector<tensor::TensorPtr> &graph_inputs) {
+  MS_EXCEPTION_IF_NULL(node);
+  if (!node->isa<Parameter>()) {
+    return nullptr;
+  }
+  const auto &iter = parameter_index.find(node);
+  if (iter == parameter_index.end()) {
+    MS_LOG(EXCEPTION) << "Can not find parameter input of cnode, parameter = " << node->DebugString();
+  }
+  const size_t index = iter->second;
+  if (index >= graph_inputs.size()) {
+    MS_LOG(EXCEPTION) << "Parameter index is greater than size of graph's input tensor, parameter index = " << index
+                      << ", input tensor size = " << graph_inputs.size();
+  }
+  return graph_inputs[index];
+}
+
+TensorPtr SessionBasic::GetCNodeOutputTensor(const KernelWithIndex &kernel_with_index,
+                                             const std::map<KernelWithIndex, tensor::TensorPtr> &op_output) {
+  const auto &iter = op_output.find(kernel_with_index);
+  if (iter == op_output.end()) {
+    MS_LOG(EXCEPTION) << "Can not find output tensor of cnode, node = " << kernel_with_index.first->DebugString();
+  }
+  return iter->second;
+}
+
+void SessionBasic::GetOpInputTensors(const CNodePtr &cnode,
+                                     const std::map<KernelWithIndex, tensor::TensorPtr> &op_output,
+                                     const std::map<AnfNodePtr, size_t> &parameter_index,
+                                     const std::vector<tensor::TensorPtr> &graph_inputs,
+                                     InputTensorInfo *input_tensor_info) {
+  MS_EXCEPTION_IF_NULL(cnode);
+  MS_EXCEPTION_IF_NULL(input_tensor_info);
+  for (size_t i = 1; i < cnode->inputs().size(); i += 1) {
+    const auto &input = cnode->input(i);
+    auto kernel_with_index = AnfAlgo::VisitKernel(input, 0);
+    auto real_input = kernel_with_index.first;
+    MS_EXCEPTION_IF_NULL(real_input);
+    tensor::TensorPtr tensor = nullptr;
+    if (real_input->isa<ValueNode>()) {
+      if (HasAbstractMonad(real_input)) {
+        continue;
+      }
+      tensor = GetValueNodeOutputTensor(real_input, kernel_with_index.second);
+    } else if (real_input->isa<Parameter>()) {
+      tensor = GetParameterOutputTensor(real_input, parameter_index, graph_inputs);
+    } else if (real_input->isa<CNode>()) {
+      tensor = GetCNodeOutputTensor(kernel_with_index, op_output);
+      input_tensor_info->input_kernel.insert(kernel_with_index);
+    } else {
+      MS_LOG(EXCEPTION) << "Invalid input node, node = " << real_input->DebugString();
+    }
+    MS_EXCEPTION_IF_NULL(tensor);
+    MS_LOG(DEBUG) << "Get" << i << "th input tensor of " << cnode->fullname_with_scope() << " from "
+                  << real_input->fullname_with_scope() << "-" << kernel_with_index.second;
+    input_tensor_info->input_tensors_mask.emplace_back(tensor->is_parameter() ? kParameterWeightTensorMask
+                                                                              : kParameterDataTensorMask);
+    input_tensor_info->input_tensors.emplace_back(tensor);
+  }
+}
+
+bool SessionBasic::CreateCNodeOfKernelGraph(const AnfNodePtr &node, KernelGraph *graph) {
   MS_EXCEPTION_IF_NULL(node);
   MS_EXCEPTION_IF_NULL(graph);
   auto cnode = node->cast<CNodePtr>();
   MS_EXCEPTION_IF_NULL(cnode);
   // create a new cnode object
-  auto new_cnode = CreateNewCNode(cnode, graph.get());
-  MS_EXCEPTION_IF_NULL(new_cnode);
+  auto new_cnode = CreateNewCNode(cnode, graph);
+  if (new_cnode == nullptr) {
+    return false;
+  }
   new_cnode->set_abstract(cnode->abstract());
   std::string fullname;
   if (cnode->input(kAnfPrimitiveIndex)->isa<CNode>()) {
     fullname = cnode->input(kAnfPrimitiveIndex)->fullname_with_scope();
+  } else if (IsPrimitiveCNode(cnode, prim::kPrimLoad)) {
+    fullname = cnode->input(kFirstDataInputIndex)->fullname_with_scope();
   } else {
     fullname = cnode->fullname_with_scope();
   }
@@ -878,6 +1439,7 @@ void SessionBasic::CreateCNodeKernelGraph(const AnfNodePtr node, KernelGraphPtr 
   if (AnfAlgo::CheckPrimitiveType(new_cnode, prim::kPrimReturn)) {
     graph->set_return(new_cnode);
   }
+  return true;
 }
 
 std::shared_ptr<KernelGraph> SessionBasic::ConstructKernelGraph(const FuncGraphPtr &func_graph,
@@ -887,13 +1449,17 @@ std::shared_ptr<KernelGraph> SessionBasic::ConstructKernelGraph(const FuncGraphP
   auto node_list = TopoSort(func_graph->get_return());
   auto graph = NewKernelGraph();
   MS_EXCEPTION_IF_NULL(graph);
+#ifdef ENABLE_DUMP_IR
+  std::string tag = "constructed_kernel_graph";
+  std::string file_type = ".ir;.pb";
+  mindspore::RDR::RecordAnfGraph(SubModuleId::SM_SESSION, tag, graph, false, file_type);
+#endif
   front_backend_graph_map_[func_graph] = graph;
   MS_LOG(INFO) << "Create graph: " << graph->graph_id();
-
-  bool is_trace_back = false;
   for (const auto &node : node_list) {
     MS_EXCEPTION_IF_NULL(node);
     MS_LOG(DEBUG) << "Start create new cnode, node = " << node->DebugString();
+    // Create parameter
     if (node->isa<Parameter>()) {
       auto graph_inputs = graph->MutableInputs();
       MS_EXCEPTION_IF_NULL(graph_inputs);
@@ -901,28 +1467,52 @@ std::shared_ptr<KernelGraph> SessionBasic::ConstructKernelGraph(const FuncGraphP
       graph_inputs->push_back(new_parameter);
       graph->FrontBackendlMapAdd(node, new_parameter);
       continue;
-    } else if (node->isa<ValueNode>()) {
+    }
+    // Create value node
+    if (node->isa<ValueNode>()) {
+      // Create common value node
       if (!IsValueNode<FuncGraph>(node)) {
-        // if input is a common value node,
         (void)CreateNewValueNode(node, graph.get());
-      } else {
-        // if input is a ValueNode<FuncGraph>
-        FuncGraphPtr child_graph = AnfAlgo::GetValueNodeFuncGraph(node);
-        if (front_backend_graph_map_.find(child_graph) != front_backend_graph_map_.end()) {
-          is_trace_back = true;
-        } else {
-          (void)ConstructKernelGraph(child_graph, all_out_graph);
-        }
-        (void)CreateValueNodeKernelGraph(node, graph.get());
+        continue;
+      }
+      // Create child kernel graph according ValueNode<FuncGraph>
+      FuncGraphPtr child_graph = AnfAlgo::GetValueNodeFuncGraph(node);
+      if (front_backend_graph_map_.find(child_graph) == front_backend_graph_map_.end()) {
+        (void)ConstructKernelGraph(child_graph, all_out_graph);
+      }
+      (void)CreateValueNodeKernelGraph(node, graph.get());
+      auto &parent_graph = parent_graphs_[front_backend_graph_map_[child_graph]->graph_id()];
+      auto parent_graph_it =
+        std::find(parent_graph.begin(), parent_graph.end(), front_backend_graph_map_[func_graph]->graph_id());
+      if (parent_graph_it == parent_graph.end()) {
+        parent_graph.push_back(front_backend_graph_map_[func_graph]->graph_id());
       }
       continue;
-    } else {
-      CreateCNodeKernelGraph(node, graph);
+    }
+    // Create cnode
+    if (!CreateCNodeOfKernelGraph(node, graph.get())) {
+      DumpIR("construct_kernel_graph_fail.ir", func_graph);
+      MS_LOG(EXCEPTION) << "Construct func graph " << func_graph->ToString() << " failed."
+                        << trace::DumpSourceLines(node);
     }
   }
-  // if a graph jump back unconditionally, return op of this graph will never be executed, so output is null.
-  graph->set_output_null(is_trace_back);
+
   AddParameterToGraphInputs(func_graph->parameters(), graph.get());
+  FuncGraphManagerPtr manager = MakeManager({graph});
+  auto input_nodes = graph->inputs();
+  for (auto input_node : input_nodes) {
+    if (input_node->isa<Parameter>()) {
+      auto node_ptr = input_node->cast<ParameterPtr>();
+      MS_EXCEPTION_IF_NULL(node_ptr);
+      if (!IsUsedByRealKernel(manager, input_node)) {
+        node_ptr->set_used_by_real_kernel(false);
+      }
+      auto shape = node_ptr->Shape();
+      if (IsShapeDynamic(shape->cast<abstract::ShapePtr>())) {
+        node_ptr->set_used_by_dynamic_kernel(true);
+      }
+    }
+  }
   graph->SetExecOrderByDefault();
   if (ExistSummaryNode(graph.get())) {
     graph->set_summary_node_exist(true);
@@ -946,7 +1536,6 @@ void SessionBasic::AddParameterToGraphInputs(const std::vector<AnfNodePtr> &para
       MS_LOG(INFO) << "Can't find parameter:" << parameter->DebugString();
       continue;
     }
-    MS_LOG(INFO) << "Graph[" << graph->graph_id() << "],parameter:" << parameter->DebugString();
     graph_inputs->push_back(backend_parameter);
   }
 }
@@ -981,10 +1570,10 @@ void SessionBasic::LoadInputData(const std::shared_ptr<KernelGraph> &kernel_grap
     input_ctrl_size = LoadCtrlInputTensor(kernel_graph, &inputs);
   }
   auto &input_nodes = kernel_graph->input_nodes();
-
-  if ((inputs.size() + input_ctrl_size) - 3 != input_nodes.size()) {
+  auto extra_param_size = kernel_graph->GetExtraParamAndTensor().size();
+  if ((inputs.size() + input_ctrl_size) - 3 != input_nodes.size() - extra_param_size) {
     MS_LOG(EXCEPTION) << "Tensor input:" << inputs.size() << " is not equal graph inputs:" << input_nodes.size()
-                      << ", input_ctrl_size:" << input_ctrl_size;
+                      << ", input_ctrl_size:" << input_ctrl_size << ", extra_param_size:" << extra_param_size;
   }
   auto ms_context = MsContext::GetInstance();
   MS_EXCEPTION_IF_NULL(ms_context);
@@ -993,17 +1582,32 @@ void SessionBasic::LoadInputData(const std::shared_ptr<KernelGraph> &kernel_grap
     MS_EXCEPTION_IF_NULL(tensor);
     auto input_node = input_nodes[i];
     MS_EXCEPTION_IF_NULL(input_node);
+    auto size = LongToSize(tensor->data().nbytes());
+    if (input_node->isa<Parameter>() && input_node->cast<ParameterPtr>()->is_used_by_dynamic_kernel()) {
+      auto tensor_shape = tensor->shape();
+      std::vector<size_t> shape_tmp;
+      (void)std::transform(tensor_shape.begin(), tensor_shape.end(), std::back_inserter(shape_tmp), IntToSize);
+      AnfAlgo::SetOutputInferTypeAndShape({AnfAlgo::GetOutputInferDataType(input_node, 0)}, {shape_tmp},
+                                          input_node.get());
+      size = abstract::ShapeSize(shape_tmp) * abstract::TypeIdSize(tensor->data_type());
+    }
     if (input_node->isa<Parameter>() && AnfAlgo::OutputAddrExist(input_node, 0) && TensorNeedSync(input_node, tensor)) {
+#if (ENABLE_CPU && (ENABLE_D || ENABLE_GPU))
+      const std::string &param_name = input_node->fullname_with_scope();
+      if (ps::ps_cache_instance.IsHashTable(param_name)) {
+        continue;
+      }
+#endif
       auto device_address = AnfAlgo::GetMutableOutputAddr(input_node, 0);
+      MS_EXCEPTION_IF_NULL(device_address);
+      if (size != 0 && !device_address->SyncHostToDevice(trans::GetRuntimePaddingShape(input_node, 0), size,
+                                                         tensor->data_type(), tensor->data_c())) {
+        MS_LOG(EXCEPTION) << "SyncHostToDevice failed.";
+      }
+
       if (ms_context->get_param<int>(MS_CTX_EXECUTION_MODE) == kPynativeMode ||
           AnfAlgo::IsParameterWeight(input_node->cast<ParameterPtr>())) {
         tensor->set_device_address(device_address);
-      }
-      MS_EXCEPTION_IF_NULL(device_address);
-      if (!device_address->SyncHostToDevice(trans::GetRuntimePaddingShape(input_node, 0),
-                                            LongToSize(tensor->data().nbytes()), tensor->data_type(),
-                                            tensor->data_c())) {
-        MS_LOG(EXCEPTION) << "SyncHostToDevice failed.";
       }
     }
     tensor->set_sync_status(kNoNeedSync);
@@ -1022,13 +1626,41 @@ void SessionBasic::UpdateOutputs(const std::shared_ptr<KernelGraph> &kernel_grap
     outputs->emplace_back(CreateNodeOutputTensors(item, kernel_graph, input_tensors, &tensor_to_node));
   }
 
+  auto ms_context = MsContext::GetInstance();
+  MS_EXCEPTION_IF_NULL(ms_context);
   for (auto &item : tensor_to_node) {
     auto &tensor = item.first;
     auto &node = item.second.first;
     auto &output_index = item.second.second;
-    auto address = AnfAlgo::GetMutableOutputAddr(node, output_index);
+    DeviceAddressPtr address = nullptr;
+    if (ms_context->get_param<int>(MS_CTX_EXECUTION_MODE) == kPynativeMode &&
+        ms_context->get_param<bool>(MS_CTX_ENABLE_PYNATIVE_INFER)) {
+      address = AnfAlgo::GetMutableOutputAddr(node, output_index, false);
+    } else {
+      address = AnfAlgo::GetMutableOutputAddr(node, output_index);
+    }
+    MS_EXCEPTION_IF_NULL(tensor);
     tensor->set_device_address(address);
     tensor->SetNeedWait(false);
+    MS_LOG(DEBUG) << "Debug address: Output tensor obj " << tensor.get() << ", tensor id " << tensor->id()
+                  << ", device address " << tensor->device_address().get();
+    if (ms_context->get_param<int>(MS_CTX_EXECUTION_MODE) != kPynativeMode) {
+      tensor->data_sync(false);
+      tensor->set_sync_status(kNeedSyncHostToDevice);
+    }
+  }
+}
+
+void SessionBasic::UpdateOutputAbstract(const std::shared_ptr<KernelGraph> &kernel_graph,
+                                        OpRunInfo *op_run_info) const {
+  MS_EXCEPTION_IF_NULL(kernel_graph);
+  MS_EXCEPTION_IF_NULL(op_run_info);
+  const auto &kernels = kernel_graph->execution_order();
+  for (const auto &kernel : kernels) {
+    MS_EXCEPTION_IF_NULL(kernel);
+    if (AnfAlgo::GetCNodeName(kernel) == op_run_info->op_name) {
+      op_run_info->abstract = kernel->abstract();
+    }
   }
 }
 
@@ -1063,12 +1695,65 @@ void SessionBasic::CreateOutputTensors(const GraphId &graph_id, const std::vecto
   }
 }
 
+void SessionBasic::GetModelInputsInfo(uint32_t graph_id, std::vector<tensor::TensorPtr> *inputs,
+                                      std::vector<std::string> *inputs_name) const {
+  MS_LOG(INFO) << "Start get model inputs, graph id : " << graph_id;
+  auto kernel_graph = GetGraph(graph_id);
+  MS_EXCEPTION_IF_NULL(kernel_graph);
+  MS_EXCEPTION_IF_NULL(inputs);
+  MS_EXCEPTION_IF_NULL(inputs_name);
+  auto kernel_graph_inputs = kernel_graph->inputs();
+  vector<ParameterPtr> paras;
+  // find parameters of graph inputs
+  for (size_t i = 0; i < kernel_graph_inputs.size(); ++i) {
+    if (!kernel_graph_inputs[i]->isa<Parameter>()) {
+      MS_LOG(ERROR) << "Kernel graph inputs have anfnode which is not Parameter.";
+      continue;
+    }
+    auto parameter = kernel_graph_inputs[i]->cast<ParameterPtr>();
+    if (!AnfAlgo::IsParameterWeight(parameter)) {
+      vector<int64_t> input_shape;
+      auto parameter_shape = AnfAlgo::GetOutputDeviceShape(parameter, 0);
+      (void)std::transform(parameter_shape.begin(), parameter_shape.end(), std::back_inserter(input_shape),
+                           [](const size_t dim) { return SizeToLong(dim); });
+      auto kernel_build_info = AnfAlgo::GetSelectKernelBuildInfo(parameter);
+      auto data_type = kernel_build_info->GetOutputDeviceType(0);
+      auto ms_tensor = std::make_shared<tensor::Tensor>(data_type, input_shape);
+      inputs->push_back(ms_tensor);
+      inputs_name->push_back(parameter->name());
+    }
+  }
+}
+
+void SessionBasic::GetModelOutputsInfo(uint32_t graph_id, std::vector<tensor::TensorPtr> *outputs,
+                                       std::vector<std::string> *output_names) const {
+  std::vector<tensor::TensorPtr> inputs;
+  std::vector<std::string> input_names;
+  GetModelInputsInfo(graph_id, &inputs, &input_names);
+
+  auto kernel_graph = GetGraph(graph_id);
+  MS_EXCEPTION_IF_NULL(kernel_graph);
+  MS_EXCEPTION_IF_NULL(outputs);
+  MS_EXCEPTION_IF_NULL(output_names);
+
+  VectorRef vector_outputs;
+  std::map<tensor::TensorPtr, session::KernelWithIndex> tensor_to_node;
+  auto anf_outputs = kernel_graph->outputs();
+  for (auto &item : anf_outputs) {
+    MS_EXCEPTION_IF_NULL(item);
+    MS_LOG(INFO) << "Create node output[" << item->DebugString() << "]";
+    vector_outputs.emplace_back(CreateNodeOutputTensors(item, kernel_graph, inputs, &tensor_to_node));
+  }
+  *outputs = TransformVectorRefToMultiTensor(vector_outputs);
+  for (size_t i = 0; i < outputs->size(); i++) {
+    output_names->push_back("output" + std::to_string(i));
+  }
+}
+
 void SessionBasic::RegisterSummaryCallBackFunc(const CallBackFunc &callback) {
   MS_EXCEPTION_IF_NULL(callback);
   summary_callback_ = callback;
 }
-
-void SessionBasic::Reorder(std::vector<CNodePtr> *node_list) { AnfAlgo::ReorderExecList(NOT_NULL(node_list)); }
 
 void SessionBasic::RunInfer(NotNull<FuncGraphPtr> func_graph, const std::vector<tensor::TensorPtr> &inputs) {
   auto node_list = TopoSort(func_graph->get_return());
@@ -1077,7 +1762,8 @@ void SessionBasic::RunInfer(NotNull<FuncGraphPtr> func_graph, const std::vector<
     MS_EXCEPTION_IF_NULL(node);
     if (node->isa<CNode>()) {
       AbstractBasePtrList input_abstracts;
-      for (size_t index = 0; index < AnfAlgo::GetInputTensorNum(node); ++index) {
+      size_t input_num = AnfAlgo::GetInputTensorNum(node);
+      for (size_t index = 0; index < input_num; ++index) {
         auto input_node = AnfAlgo::GetInputNode(node->cast<CNodePtr>(), index);
         MS_EXCEPTION_IF_NULL(input_node);
         auto abstract = input_node->abstract();
@@ -1085,14 +1771,11 @@ void SessionBasic::RunInfer(NotNull<FuncGraphPtr> func_graph, const std::vector<
         input_abstracts.emplace_back(abstract);
       }
       auto prim = AnfAlgo::GetCNodePrimitive(node);
-      if (prim->isa<PrimitiveC>()) {
-        auto prim_c = prim->cast<std::shared_ptr<PrimitiveC>>();
+      if (prim->isa<ops::PrimitiveC>()) {
+        auto prim_c = prim->cast<std::shared_ptr<ops::PrimitiveC>>();
         MS_EXCEPTION_IF_NULL(prim_c);
         auto abstract = prim_c->Infer(input_abstracts);
         node->set_abstract(abstract);
-      } else {
-        node->set_abstract(
-          std::make_shared<tensor::Tensor>(kNumberTypeFloat32, std::vector<int>{32, 64, 218, 218})->ToAbstract());
       }
     } else if (node->isa<Parameter>()) {
       if (tensor_index > inputs.size()) {
@@ -1149,6 +1832,11 @@ void SessionBasic::Summary(KernelGraph *graph) {
   if (!exist_summary) {
     return;
   }
+
+  if (!IsSupportSummary()) {
+    MS_LOG(ERROR) << "The Summary operator can not collect data correctly. Detail: the data sink mode is used and the"
+                     " sink size(in model.train() python api) is not equal to 1.";
+  }
   SetSummaryNodes(graph);
   auto summary_outputs = graph->summary_nodes();
   std::map<std::string, tensor::TensorPtr> params_list;
@@ -1159,7 +1847,7 @@ void SessionBasic::Summary(KernelGraph *graph) {
     auto address = AnfAlgo::GetOutputAddr(node, index);
     auto shape = AnfAlgo::GetOutputInferShape(node, index);
     TypeId type_id = AnfAlgo::GetOutputInferDataType(node, index);
-    std::vector<int> temp_shape;
+    std::vector<int64_t> temp_shape;
     (void)std::copy(shape.begin(), shape.end(), std::back_inserter(temp_shape));
     tensor::TensorPtr tensor = std::make_shared<tensor::Tensor>(type_id, temp_shape);
     MS_EXCEPTION_IF_NULL(address);
@@ -1203,6 +1891,13 @@ std::vector<AnfNodePtr> ExtendNodeUsers(const FuncGraphManagerPtr &front_func_gr
       continue;
     }
     if (IsPrimitiveCNode(user.first, prim::kPrimDepend)) {
+      auto depend_cnode = user.first->cast<CNodePtr>();
+      if (depend_cnode == nullptr) {
+        continue;
+      }
+      if (front_node != depend_cnode->input(1)) {
+        continue;
+      }
       auto res = ExtendNodeUsers(front_func_graph_manager, user.first);
       result.insert(result.end(), res.begin(), res.end());
       continue;
@@ -1212,16 +1907,41 @@ std::vector<AnfNodePtr> ExtendNodeUsers(const FuncGraphManagerPtr &front_func_gr
   return result;
 }
 
-void HandleInternalOutput(const AnfNodePtr &front_node, const AnfNodePtr &backend_node,
+AnfNodePtr GetSupportedInternalNode(const AnfNodePtr &front_node) {
+  MS_EXCEPTION_IF_NULL(front_node);
+  if (!front_node->isa<CNode>()) {
+    return nullptr;
+  }
+  if (AnfAlgo::IsRealKernel(front_node)) {
+    return front_node;
+  }
+  if (AnfAlgo::CheckPrimitiveType(front_node, prim::kPrimTupleGetItem)) {
+    return front_node;
+  }
+  if (AnfAlgo::CheckPrimitiveType(front_node, prim::kPrimDepend)) {
+    auto cnode = front_node->cast<CNodePtr>();
+    MS_EXCEPTION_IF_NULL(cnode);
+    auto &inputs = cnode->inputs();
+    if (inputs.size() > 2) {
+      return GetSupportedInternalNode(inputs[1]);
+    }
+  }
+  return nullptr;
+}
+
+void HandleInternalOutput(const AnfNodePtr &input_front_node, const AnfNodePtr &backend_node,
                           const FuncGraphManagerPtr &front_func_graph_manager,
                           const std::shared_ptr<KernelGraph> &backend_graph) {
-  // When init parameter from cnode of other graphs, the cnode will not be real kernel except for tuple_getitem.
-  if (!AnfAlgo::IsRealKernel(front_node) && !AnfAlgo::CheckPrimitiveType(front_node, prim::kPrimTupleGetItem)) {
+  auto front_node = GetSupportedInternalNode(input_front_node);
+  if (front_node == nullptr) {
     return;
   }
   auto front_real_kernel_pair = AnfAlgo::VisitKernel(front_node, 0);
   auto backend_real_kernel_pair = AnfAlgo::VisitKernel(backend_node, 0);
-
+  auto backend_real_kernel = backend_real_kernel_pair.first;
+  if (backend_real_kernel == nullptr || !backend_real_kernel->isa<CNode>()) {
+    return;
+  }
   auto front_real_kernel = front_real_kernel_pair.first;
   std::string kernel_target = GetCNodeTarget(front_real_kernel);
   bool internal_output = CNodeFirstInputIsPrimitive(front_real_kernel);
@@ -1250,10 +1970,9 @@ void HandleInternalOutput(const AnfNodePtr &front_node, const AnfNodePtr &backen
     }
   }
   if (internal_output) {
-    MS_LOG(INFO) << "Internal output: " << front_node->DebugString() << " To "
-                 << backend_real_kernel_pair.first->DebugString() << ", unique_target: " << unique_target;
-    backend_graph->AddInternalOutput(front_node, backend_real_kernel_pair.first, backend_real_kernel_pair.second,
-                                     unique_target);
+    MS_LOG(INFO) << "AddInternalOutput: " << front_node->DebugString() << " To " << backend_real_kernel->DebugString()
+                 << ", unique_target: " << unique_target;
+    backend_graph->AddInternalOutput(front_node, backend_real_kernel, backend_real_kernel_pair.second, unique_target);
   }
 }
 }  // namespace
@@ -1299,9 +2018,9 @@ void SessionBasic::CreateOutputNode(const CNodePtr &cnode, const std::shared_ptr
   MS_EXCEPTION_IF_NULL(graph);
   if (AnfRuntimeAlgorithm::GetOutputTensorNum(cnode) > 1) {
     for (size_t output_index = 0; output_index < AnfRuntimeAlgorithm::GetOutputTensorNum(cnode); output_index++) {
-      auto idx = NewValueNode(SizeToInt(output_index));
+      auto idx = NewValueNode(SizeToLong(output_index));
       MS_EXCEPTION_IF_NULL(idx);
-      auto imm = std::make_shared<Int32Imm>(output_index);
+      auto imm = std::make_shared<Int64Imm>(output_index);
       idx->set_abstract(std::make_shared<abstract::AbstractScalar>(imm));
       auto getitem = graph->NewCNode({NewValueNode(prim::kPrimTupleGetItem), cnode, idx});
       std::vector<TypeId> types = {AnfAlgo::GetOutputInferDataType(cnode, output_index)};
@@ -1320,10 +2039,11 @@ void SessionBasic::CreateOutputNode(const CNodePtr &cnode, const std::shared_ptr
 
 std::shared_ptr<KernelGraph> SessionBasic::ConstructSingleOpGraph(const OpRunInfo &op_run_info,
                                                                   const std::vector<tensor::TensorPtr> &input_tensors,
-                                                                  const std::vector<int> &tensors_mask) {
+                                                                  const std::vector<int64_t> &tensors_mask,
+                                                                  bool is_ascend) {
   auto graph = std::make_shared<KernelGraph>();
-  graph->set_graph_id(run_op_graph_id_);
-  run_op_graph_id_++;
+  graph->set_graph_id(graph_sum_);
+  graph_sum_++;
   std::vector<AnfNodePtr> inputs;
   // set input[0]
   PrimitivePtr op_prim = op_run_info.primitive;
@@ -1354,13 +2074,31 @@ std::shared_ptr<KernelGraph> SessionBasic::ConstructSingleOpGraph(const OpRunInf
   cnode->set_abstract(op_run_info.abstract);
   // get output dynamic shape info
   AnfAlgo::SetNodeAttr(kAttrOutputIsDynamicShape, MakeValue(op_run_info.is_dynamic_shape), cnode);
+  if (op_run_info.is_auto_mixed_precision) {
+    AnfAlgo::SetNodeAttr(kAttrPynativeNextOpName, MakeValue(op_run_info.next_op_name), cnode);
+    AnfAlgo::SetNodeAttr(kAttrPynativeNextIndex, MakeValue(op_run_info.next_input_index), cnode);
+  }
   // set execution order
   std::vector<CNodePtr> exe_order = {cnode};
   graph->set_execution_order(exe_order);
   graph->UpdateGraphDynamicAttr();
   // set output
-  CreateOutputNode(cnode, graph);
+  if (is_ascend) {
+    graph->set_output(cnode);
+  } else {
+    CreateOutputNode(cnode, graph);
+  }
   graph->SetInputNodes();
+  auto manager = MakeManager({graph});
+  if (manager != nullptr) {
+    manager->AddFuncGraph(graph);
+    graph->set_manager(manager);
+  }
+  auto ms_context = MsContext::GetInstance();
+  MS_EXCEPTION_IF_NULL(ms_context);
+  if (ms_context->get_param<bool>(MS_CTX_ENABLE_PYNATIVE_INFER)) {
+    UnifyMindIR(graph);
+  }
   return graph;
 }
 
@@ -1388,9 +2126,9 @@ AnfNodePtr SessionBasic::FindPullNode(const AnfNodePtr &push_node, const std::ve
   return nullptr;
 }
 
-GraphId SessionBasic::CompileGraph(const AnfNodePtrList &lst, const AnfNodePtrList &outputs) {
+GraphId SessionBasic::CompileGraph(const GraphSegmentPtr &segment, const AnfNodePtrList &outputs) {
   MS_EXCEPTION_IF_NULL(executor_);
-  return executor_->CompileGraph(shared_from_this(), lst, outputs);
+  return executor_->CompileGraph(shared_from_this(), segment, outputs);
 }
 
 GraphId SessionBasic::CompileGraph(NotNull<FuncGraphPtr> func_graph) {
@@ -1403,16 +2141,17 @@ void SessionBasic::BuildGraph(GraphId graph_id) {
   executor_->BuildGraph(shared_from_this(), graph_id);
 }
 
-void SessionBasic::BuildOp(OpRunInfo *op_run_info, const GraphInfo &graph_info,
-                           const std::vector<tensor::TensorPtr> &input_tensors, const std::vector<int> &tensors_mask) {
+void SessionBasic::RunOp(OpRunInfo *op_run_info, const GraphInfo &graph_info,
+                         std::vector<tensor::TensorPtr> *input_tensors, VectorRef *outputs,
+                         const std::vector<int64_t> &tensors_mask) {
   MS_EXCEPTION_IF_NULL(executor_);
-  executor_->BuildOp(shared_from_this(), op_run_info, graph_info, input_tensors, tensors_mask);
+  executor_->RunOp(shared_from_this(), op_run_info, graph_info, input_tensors, outputs, tensors_mask);
 }
 
-void SessionBasic::RunOp(OpRunInfo *op_run_info, const GraphInfo &graph_info,
-                         const std::vector<tensor::TensorPtr> &input_tensors, VectorRef *outputs) {
+void SessionBasic::RunOpsInGraph(const GraphId &graph_id, const std::vector<tensor::TensorPtr> &inputs,
+                                 VectorRef *outputs) {
   MS_EXCEPTION_IF_NULL(executor_);
-  executor_->RunOp(shared_from_this(), op_run_info, graph_info, input_tensors, outputs);
+  executor_->RunOpsInGraph(shared_from_this(), graph_id, inputs, outputs);
 }
 
 void SessionBasic::RunGraph(const GraphId &graph_id, const std::vector<tensor::TensorPtr> &inputs, VectorRef *outputs) {
@@ -1426,99 +2165,153 @@ void SessionBasic::RunGraphAsync(const GraphId &graph_id, const std::vector<tens
   executor_->RunGraphAsync(shared_from_this(), graph_id, inputs, outputs);
 }
 
-bool IsDynamicShape(const NotNull<abstract::ShapePtr> &shape) {
-  return !std::all_of(shape->shape().begin(), shape->shape().end(), [](int s) { return s > 0; });
+void SessionBasic::RunOpsInGraphImpl(const GraphId &graph_id, const std::vector<tensor::TensorPtr> &inputs,
+                                     VectorRef *outputs) {
+  MS_LOG(INFO) << "Start!";
+  auto kernel_graph = GetGraph(graph_id);
+  MS_EXCEPTION_IF_NULL(kernel_graph);
+  std::map<AnfNodePtr, size_t> parameter_index;
+  GetParameterIndex(kernel_graph.get(), inputs, &parameter_index);
+  std::map<KernelWithIndex, std::vector<std::vector<size_t>>> output_indexes;
+  CreateOutputPlaceholder(kernel_graph, inputs, outputs, &output_indexes);
+  std::map<KernelWithIndex, size_t> cnode_refcount;
+  GetRefCount(kernel_graph.get(), &cnode_refcount);
+  BuildOpsInGraph(graph_id, parameter_index, inputs, cnode_refcount);
+
+  std::map<KernelWithIndex, tensor::TensorPtr> op_output_map;
+  for (const auto &kernel : kernel_graph->execution_order()) {
+    // Generate input tensors, tensor masks and input kernel with index
+    InputTensorInfo input_tensor_info;
+    GetOpInputTensors(kernel, op_output_map, parameter_index, inputs, &input_tensor_info);
+
+    // Get OpRunInfo and GraphInfo
+    OpRunInfo run_info;
+    GetSingleOpRunInfo(kernel, &run_info);
+    GraphInfo graph_info = GetSingleOpGraphInfo(kernel, input_tensor_info.input_tensors);
+
+    // Build and run current single op
+    VectorRef op_outputs;
+    RunOpImpl(graph_info, &run_info, &input_tensor_info.input_tensors, &op_outputs,
+              input_tensor_info.input_tensors_mask);
+
+    // Handle inputs and outputs of current op
+    HandleOpInputs(input_tensor_info.input_kernel, &cnode_refcount, &op_output_map);
+    HandleOpOutputs(kernel, op_outputs, output_indexes, cnode_refcount, &op_output_map, outputs);
+  }
+  MS_LOG(INFO) << "Finish!";
 }
 
-bool IsNodeOutputDynamicShape(const CNodePtr &anf_node_ptr) {
-  MS_EXCEPTION_IF_NULL(anf_node_ptr);
-  auto base_shape = anf_node_ptr->Shape();
-  if (base_shape == nullptr) {
-    MS_LOG(INFO) << "Invalid bash shape ptr, node:" << anf_node_ptr->fullname_with_scope();
-    return false;
+void SessionBasic::EraseValueNodeTensor(const std::vector<int64_t> &tensors_mask,
+                                        std::vector<tensor::TensorPtr> *input_tensors) {
+  MS_EXCEPTION_IF_NULL(input_tensors);
+  if (input_tensors->size() != tensors_mask.size()) {
+    MS_LOG(EXCEPTION) << "Input tensors size " << input_tensors->size() << " should be equal to tensors mask size "
+                      << tensors_mask.size();
   }
-  if (base_shape->isa<abstract::Shape>()) {
-    if (IsDynamicShape(NOT_NULL(base_shape->cast<abstract::ShapePtr>()))) {
-      return true;
-    }
-  } else if (base_shape->isa<abstract::TupleShape>()) {
-    auto tuple_shape = base_shape->cast<abstract::TupleShapePtr>();
-    MS_EXCEPTION_IF_NULL(tuple_shape);
-
-    for (size_t i = 0; i < tuple_shape->size(); ++i) {
-      auto b_shp = (*tuple_shape)[i];
-      if (!b_shp->isa<abstract::Shape>()) {
-        continue;
-      }
-      if (IsDynamicShape(NOT_NULL(b_shp->cast<abstract::ShapePtr>()))) {
-        return true;
-      }
+  std::vector<tensor::TensorPtr> new_input_tensors;
+  for (size_t index = 0; index < tensors_mask.size(); ++index) {
+    if (tensors_mask[index] != kValueNodeTensorMask) {
+      new_input_tensors.emplace_back(input_tensors->at(index));
     }
   }
-  return false;
+  *input_tensors = new_input_tensors;
 }
 
-bool IsNodeInputDynamicShape(const CNodePtr &anf_node_ptr) {
-  MS_EXCEPTION_IF_NULL(anf_node_ptr);
-  auto input_num = AnfAlgo::GetInputTensorNum(anf_node_ptr);
-  for (size_t i = 0; i < input_num; ++i) {
-    auto input_with_index = AnfAlgo::GetPrevNodeOutput(anf_node_ptr, i);
-    auto input = input_with_index.first;
-    auto index = input_with_index.second;
-    MS_EXCEPTION_IF_NULL(input);
-
-    auto base_shape = input->Shape();
-    if (base_shape == nullptr) {
-      MS_LOG(INFO) << "Invalid shape ptr, node:" << input->fullname_with_scope();
-      continue;
-    }
-    if (base_shape->isa<abstract::Shape>()) {
-      if (IsDynamicShape(NOT_NULL(base_shape->cast<abstract::ShapePtr>()))) {
-        return true;
-      }
-    } else if (base_shape->isa<abstract::TupleShape>()) {
-      auto tuple_shape = base_shape->cast<abstract::TupleShapePtr>();
-      MS_EXCEPTION_IF_NULL(tuple_shape);
-
-      if (index >= tuple_shape->size()) {
-        MS_LOG(INFO) << "Node:" << anf_node_ptr->fullname_with_scope() << "Invalid index:" << index
-                     << " and tuple_shape size:" << tuple_shape->size();
-        continue;
-      }
-
-      auto b_shp = (*tuple_shape)[index];
-      if (!b_shp->isa<abstract::Shape>()) {
-        continue;
-      }
-      if (IsDynamicShape(NOT_NULL(b_shp->cast<abstract::ShapePtr>()))) {
-        return true;
-      }
-    }
+void SessionBasic::UpdateAllGraphDynamicShapeAttr(const std::vector<KernelGraphPtr> &all_graphs) {
+  bool is_dynamic = false;
+  for (const auto &graph : all_graphs) {
+    UpdateGraphDynamicShapeAttr(NOT_NULL(graph));
+    is_dynamic = graph->is_dynamic_shape() || is_dynamic;
   }
-  return false;
+  if (is_dynamic && all_graphs.size() > 1) {
+    MS_LOG(EXCEPTION) << "Dynamic shape is not supported with control flow.";
+  }
 }
 
 void SessionBasic::UpdateGraphDynamicShapeAttr(const NotNull<KernelGraphPtr> &root_graph) {
   for (const auto &cnode : root_graph->execution_order()) {
-    auto output_dynamic = IsNodeOutputDynamicShape(NOT_NULL(cnode));
-    auto input_dynamic = IsNodeInputDynamicShape(NOT_NULL(cnode));
-    if (output_dynamic || input_dynamic) {
+    if (AnfAlgo::IsNodeDynamicShape(cnode)) {
       AnfAlgo::SetNodeAttr(kAttrIsDynamicShape, MakeValue(true), cnode);
       MS_LOG(INFO) << "Set Dynamic Shape Attr to Node:" << cnode->fullname_with_scope();
     }
-    if (output_dynamic) {
-      AnfAlgo::SetNodeAttr(kAttrOutputIsDynamicShape, MakeValue(true), cnode);
-      MS_LOG(INFO) << "Set Output Dynamic Shape Attr to Node:" << cnode->fullname_with_scope();
+  }
+  root_graph->UpdateGraphDynamicAttr();
+}
+
+bool SessionBasic::IsGetNextGraph(const GraphId &graph_id, std::string *channel_name) {
+  auto kernel_graph = graphs_[graph_id];
+  MS_EXCEPTION_IF_NULL(kernel_graph);
+  for (const auto &kernel_node : kernel_graph->execution_order()) {
+    auto kernel_name = AnfAlgo::GetCNodeName(kernel_node);
+    if (kernel_name == kGetNextOpName) {
+      auto prim = AnfAlgo::GetCNodePrimitive(kernel_node);
+      MS_EXCEPTION_IF_NULL(prim);
+      *channel_name = GetValue<std::string>(prim->GetAttr("shared_name"));
+      return true;
     }
-    if (input_dynamic) {
-      AnfAlgo::SetNodeAttr(kAttrInputIsDynamicShape, MakeValue(true), cnode);
-      MS_LOG(INFO) << "Set Input Dynamic Shape Attr to Node:" << cnode->fullname_with_scope();
-    }
+  }
+  return false;
+}
+
+void SessionBasic::RunOpRemoveNopNode(const KernelGraphPtr &kernel_graph) const {
+  auto ms_context = MsContext::GetInstance();
+  MS_EXCEPTION_IF_NULL(ms_context);
+  if (!ms_context->get_param<bool>(MS_CTX_ENABLE_PYNATIVE_INFER)) {
+    opt::RemoveNopNode(kernel_graph.get());
+  }
+}
+
+void SessionBasic::RunOpHideNopNode(const KernelGraphPtr &kernel_graph) const {
+  auto ms_context = MsContext::GetInstance();
+  MS_EXCEPTION_IF_NULL(ms_context);
+  if (!ms_context->get_param<bool>(MS_CTX_ENABLE_PYNATIVE_INFER)) {
+    opt::HideNopNode(kernel_graph.get());
   }
 }
 
 #if (ENABLE_CPU && (ENABLE_D || ENABLE_GPU))
-void SessionBasic::CheckPSModeConsistence(const KernelGraphPtr &kernel_graph) {
+void SessionBasic::InitPsWorker(const KernelGraphPtr &kernel_graph) {
+  if (!ps::Util::IsRoleOfWorker()) {
+    return;
+  }
+  CheckPSModeConsistence(kernel_graph);
+  if (ps::PsDataPrefetch::GetInstance().cache_enable()) {
+    if (!ps::ps_cache_instance.initialized_ps_cache()) {
+      auto context_ptr = MsContext::GetInstance();
+      MS_EXCEPTION_IF_NULL(context_ptr);
+      auto devcie_target = context_ptr->get_param<std::string>(MS_CTX_DEVICE_TARGET);
+      auto runtime_instance = device::KernelRuntimeManager::Instance().GetKernelRuntime(devcie_target, device_id_);
+      MS_EXCEPTION_IF_NULL(runtime_instance);
+      auto context = runtime_instance->context();
+      const auto &kernels = kernel_graph->execution_order();
+      if (kernels.size() > 0 && AnfAlgo::GetCNodeName(kernels[0]) == "InitDataSetQueue") {
+        GetBatchElements(kernels[0]);
+        ps::ps_cache_instance.Initialize();
+      }
+      ps::ps_cache_instance.DoProcessData(device_id_, context);
+    }
+  } else {
+    // Assign parameter keys.
+    AssignParamKey(kernel_graph);
+  }
+}
+
+void SessionBasic::GetBatchElements(const AnfNodePtr &kernel_node) const {
+  auto shapes = AnfAlgo::GetNodeAttr<std::vector<std::vector<int64_t>>>(kernel_node, "shapes");
+  auto types = AnfAlgo::GetNodeAttr<std::vector<TypePtr>>(kernel_node, "types");
+  if (shapes.size() != types.size() || shapes.size() == 0 || types.size() == 0) {
+    MS_LOG(EXCEPTION) << "Invalid shapes of op[InitDataSetQueue]: shapes size " << shapes.size() << ", types size "
+                      << types;
+  }
+  size_t batch_elements = 1;
+  const auto &shape = shapes[0];
+  for (size_t i = 0; i < shape.size(); ++i) {
+    batch_elements *= shape[i];
+  }
+  ps::ps_cache_instance.set_batch_elements(batch_elements);
+}
+
+void SessionBasic::CheckPSModeConsistence(const KernelGraphPtr &kernel_graph) const {
   auto input_nodes = kernel_graph->inputs();
   for (const auto &input_node : input_nodes) {
     if (!input_node->isa<Parameter>()) {
@@ -1527,8 +2320,9 @@ void SessionBasic::CheckPSModeConsistence(const KernelGraphPtr &kernel_graph) {
     auto pk_node = input_node->cast<ParameterPtr>();
     MS_EXCEPTION_IF_NULL(pk_node);
     auto param_info_ptr = pk_node->param_info();
-    if (param_info_ptr != nullptr && param_info_ptr->init_in_server()) {
-      const std::string &param_name = pk_node->fullname_with_scope();
+    const std::string &param_name = pk_node->fullname_with_scope();
+    if (param_info_ptr != nullptr && param_info_ptr->init_in_server() &&
+        !ps::ps_cache_instance.IsHashTable(param_name)) {
       MS_LOG(EXCEPTION) << "Can not initialize the parameter[" << param_name
                         << "] in server, this parameter is used by kernel which executes in device";
     }
@@ -1536,11 +2330,12 @@ void SessionBasic::CheckPSModeConsistence(const KernelGraphPtr &kernel_graph) {
 }
 
 void SessionBasic::AssignParamKey(const KernelGraphPtr &kernel_graph) {
-  if (!ps::Util::IsRoleOfWorker()) {
-    MS_LOG(INFO) << "Not parameter server mode.";
-    return;
-  }
   MS_EXCEPTION_IF_NULL(kernel_graph);
+  // PS embeddingLookup cache check.
+  if (ps::PsDataPrefetch::GetInstance().cache_enable()) {
+    MS_LOG(EXCEPTION) << "The other parameter can't set ps mode when the embeddingLookup cache is enabled in "
+                         "parameter server training mode.";
+  }
   std::vector<AnfNodePtr> node_list = TopoSort(kernel_graph->get_return());
   for (auto &node : node_list) {
     if (node != nullptr && node->isa<CNode>()) {
@@ -1577,16 +2372,8 @@ void SessionBasic::InitPSParamAndOptim(const KernelGraphPtr &kernel_graph,
     return;
   }
   std::vector<tensor::TensorPtr> inputs(inputs_const);
-  size_t input_ctrl_size = 1;
   MS_EXCEPTION_IF_NULL(kernel_graph);
-  if (kernel_graph->input_ctrl_tensors()) {
-    input_ctrl_size = LoadCtrlInputTensor(kernel_graph, &inputs);
-  }
   auto input_nodes = kernel_graph->inputs();
-  if ((inputs.size() + input_ctrl_size) - 1 != input_nodes.size()) {
-    MS_LOG(EXCEPTION) << "Tensor input:" << inputs.size() << " is not equal graph inputs:" << input_nodes.size()
-                      << ", input_ctrl_size:" << input_ctrl_size;
-  }
   auto ms_context = MsContext::GetInstance();
   MS_EXCEPTION_IF_NULL(ms_context);
   for (size_t i = 0; i < inputs.size(); ++i) {

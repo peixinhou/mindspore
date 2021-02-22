@@ -23,6 +23,7 @@
 #include "backend/optimizer/common/helper.h"
 #include "runtime/device/kernel_info.h"
 #include "backend/session/anf_runtime_algorithm.h"
+#include "utils/trace_base.h"
 
 namespace mindspore {
 namespace opt {
@@ -31,8 +32,8 @@ bool CreateOutputsOfBNTrainingReduce(const FuncGraphPtr &graph, const CNodePtr &
                                      std::vector<AnfNodePtr> *bn_training_reduce_outputs) {
   MS_EXCEPTION_IF_NULL(graph);
   MS_EXCEPTION_IF_NULL(bn_cnode);
-  if (bn_cnode->inputs().size() != kBnInputNum) {
-    MS_LOG(INFO) << "FusedbatchNorm's input size less than " << kBnInputNum << ". " << bn_cnode->DebugString();
+  if (AnfAlgo::GetInputTensorNum(bn_cnode) != kBnInputTensorNum) {
+    MS_LOG(INFO) << "FusedbatchNorm's input size less than " << kBnInputTensorNum << ". " << bn_cnode->DebugString();
     return false;
   }
   std::vector<AnfNodePtr> bn_training_reduce_inputs = {
@@ -63,11 +64,10 @@ AnfNodePtr CreateOutputsOfBNTrainingUpdate(const FuncGraphPtr &graph, const CNod
                                            const std::vector<AnfNodePtr> &bn_training_reduce_outputs) {
   MS_EXCEPTION_IF_NULL(graph);
   MS_EXCEPTION_IF_NULL(bn_cnode);
-  if (bn_cnode->inputs().size() != kBnInputNum) {
-    MS_LOG(EXCEPTION) << "BN node has wrong input size";
-  }
+  CheckCNodeInputSize(bn_cnode, kBnInputTensorNum);
   if (bn_training_reduce_outputs.size() != kBNTrainingReduceOutputNum) {
-    MS_LOG(EXCEPTION) << "BN1 outputs has wrong input size";
+    MS_LOG(EXCEPTION) << "BN1 outputs has wrong input size"
+                      << " trace: " << trace::DumpSourceLines(bn_cnode);
   }
   // the inputs of BNTrainingUpdate are from the outputs of BNTrainingReduce and the inputs of BN
   std::vector<AnfNodePtr> bn_training_update_inputs = {
@@ -93,14 +93,14 @@ AnfNodePtr CreateOutputsOfBNTrainingUpdate(const FuncGraphPtr &graph, const CNod
   return bn_training_update;
 }
 
-AnfNodePtr SplitFusedBatchNormForTBE(const FuncGraphPtr &func_graph, const AnfNodePtr &node) {
+AnfNodePtr SplitBatchNormForTBE(const FuncGraphPtr &func_graph, const AnfNodePtr &node) {
   MS_EXCEPTION_IF_NULL(func_graph);
   MS_EXCEPTION_IF_NULL(node);
 
   auto cnode = node->cast<CNodePtr>();
   MS_EXCEPTION_IF_NULL(cnode);
-  if (cnode->inputs().size() < kBnInputNum) {
-    MS_LOG(INFO) << "op[FusedBatchNorm] has less than " << kBnInputNum << " inputs.";
+  if (AnfAlgo::GetInputTensorNum(cnode) < kBnInputTensorNum) {
+    MS_LOG(INFO) << "op[" << cnode->DebugString() << "] has less input than " << kBnInputTensorNum << " inputs.";
     return nullptr;
   }
   // Create BNTrainingReduce node and get outputs of BNTrainingReduce
@@ -110,7 +110,8 @@ AnfNodePtr SplitFusedBatchNormForTBE(const FuncGraphPtr &func_graph, const AnfNo
     return nullptr;
   }
   if (bn_training_reduce_outputs.size() != kBN1OutputNum) {
-    MS_LOG(EXCEPTION) << "make outputs of op BNTrainingReduce fail";
+    MS_LOG(EXCEPTION) << "make outputs of op BNTrainingReduce fail"
+                      << " trace: " << trace::DumpSourceLines(node);
   }
 
   // Create BNTrainingUpdate node
@@ -121,11 +122,15 @@ AnfNodePtr SplitFusedBatchNormForTBE(const FuncGraphPtr &func_graph, const AnfNo
 const BaseRef BnSplit::DefinePattern() const {
   VarPtr Xs = std::make_shared<SeqVar>();
   MS_EXCEPTION_IF_NULL(Xs);
-  return VectorRef({prim::kPrimFusedBatchNorm, Xs});
+  return VectorRef({prim::kPrimBatchNorm, Xs});
 }
 
 const AnfNodePtr BnSplit::Process(const FuncGraphPtr &func_graph, const AnfNodePtr &node, const EquivPtr &) const {
-  return SplitFusedBatchNormForTBE(func_graph, node);
+  if (!GetBoolAttr(node, kAttrIsTraining)) {
+    MS_LOG(INFO) << "is training should be true if do fusion";
+    return nullptr;
+  }
+  return SplitBatchNormForTBE(func_graph, node);
 }
 }  // namespace opt
 }  // namespace mindspore

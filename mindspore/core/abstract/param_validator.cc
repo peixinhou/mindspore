@@ -16,6 +16,8 @@
 
 #include "abstract/param_validator.h"
 
+#include <algorithm>
+#include <set>
 #include <string>
 #include <sstream>
 #include <memory>
@@ -119,14 +121,14 @@ TypePtr CheckDtypeSame(const std::string &op, const AbstractTensorPtr &tensor_ba
   return type_base;
 }
 
-int CheckAxis(const std::string &op, const ValuePtr &axis, int minimum, int max) {
+int64_t CheckAxis(const std::string &op, const ValuePtr &axis, int64_t minimum, int64_t max) {
   if (axis == nullptr) {
     MS_LOG(EXCEPTION) << op << " evaluator axis is null";
   }
-  if (!axis->isa<Int32Imm>()) {
-    MS_LOG(EXCEPTION) << op << " evaluator axis should be int, but got " << axis->type_name();
+  if (!axis->isa<Int64Imm>()) {
+    MS_LOG(EXCEPTION) << op << " evaluator axis should be int64_t, but got " << axis->type_name();
   }
-  int axis_value = GetValue<int>(axis);
+  int64_t axis_value = GetValue<int64_t>(axis);
   if (axis_value > max || axis_value < minimum) {
     MS_LOG(EXCEPTION) << op << " evaluator axis value should be in the range [" << minimum << ", " << max
                       << "], but get " << axis_value;
@@ -143,5 +145,79 @@ void CheckArgsSize(const std::string &op, const mindspore::abstract::AbstractBas
     MS_EXCEPTION_IF_NULL(args_spec_list[i]);
   }
 }
+
+void CheckShapeAllPositive(const std::string &op, const ShapeVector &shape) {
+  for (size_t i = 0; i < shape.size(); ++i) {
+    if (shape[i] < 0) {
+      MS_LOG(EXCEPTION) << op << " shape element [" << i << "] must be positive integer, but got " << shape[i];
+    }
+  }
+}
+
+void CheckShapeAnyAndPositive(const std::string &op, const ShapeVector &shape) {
+  for (size_t i = 0; i < shape.size(); ++i) {
+    if ((shape[i] < 0) && (shape[i] != Shape::SHP_ANY)) {
+      MS_LOG(EXCEPTION) << op << " shape element [" << i << "] must be positive integer or SHP_ANY, but got "
+                        << shape[i];
+    }
+  }
+}
+
+int64_t CheckAttrPositiveInt64(const std::string &op, const ValuePtr &attr, const std::string &attr_name) {
+  int64_t attr_val = attr->cast<Int64ImmPtr>()->value();
+  if (attr_val <= 0) {
+    MS_LOG(EXCEPTION) << "Invalid " << attr_name << " value: " << attr_val << ", should be greater then 0";
+  }
+  return attr_val;
+}
+
+std::vector<int64_t> CheckAttrIntOrTuple(const std::string &op, const ValuePtr &attr, const size_t start_idx,
+                                         const size_t num_element) {
+  std::vector<int64_t> result;
+  MS_EXCEPTION_IF_NULL(attr);
+  if (attr->isa<ValueTuple>()) {
+    std::vector<ValuePtr> attr_vec = attr->cast<ValueTuplePtr>()->value();
+    auto it_start = attr_vec.begin() + start_idx;
+    (void)std::transform(it_start, it_start + num_element, std::back_inserter(result),
+                         [](const ValuePtr &e) -> int64_t { return GetValue<int64_t>(e); });
+  } else {
+    int64_t attr_val = attr->cast<Int64ImmPtr>()->value();
+    result.insert(result.begin(), num_element, attr_val);
+  }
+  return result;
+}
+
+std::string CheckAttrStringSet(const std::string &op, const ValuePtr &attr, const std::string &attr_name,
+                               const std::set<std::string> &val_set) {
+  MS_EXCEPTION_IF_NULL(attr);
+  std::string attr_val = attr->cast<StringImmPtr>()->value();
+  if (val_set.find(attr_val) == val_set.end()) {
+    std::ostringstream buffer;
+    bool f_begin = true;
+    buffer << "{";
+    for (auto &x : val_set) {
+      if (!f_begin) {
+        buffer << ", ";
+      } else {
+        f_begin = false;
+      }
+      buffer << x;
+    }
+    buffer << "}";
+    MS_LOG(EXCEPTION) << op << "Unsupported " << attr_name << ": " << attr_val << ". use " << buffer.str();
+  }
+  return attr_val;
+}
+
+void CheckRequiredArgsSize(const std::string &op, const mindspore::abstract::AbstractBasePtrList &args_spec_list,
+                           size_t size_expect) {
+  if (args_spec_list.size() < size_expect) {
+    MS_LOG(EXCEPTION) << op << " required input args size " << size_expect << ", but got " << args_spec_list.size();
+  }
+  for (size_t i = 0; i < size_expect; i++) {
+    MS_EXCEPTION_IF_NULL(args_spec_list[i]);
+  }
+}
+
 }  // namespace abstract
 }  // namespace mindspore

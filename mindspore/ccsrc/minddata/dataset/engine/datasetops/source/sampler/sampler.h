@@ -35,18 +35,22 @@ class RandomAccessOp {
  public:
   // Sampler get number of rows in the dataset
   // @param int64_t num - return number of rows for this dataset
-  // @return - The error code return
+  // @return Status The status code returned
   Status GetNumRowsInDataset(int64_t *num_rows) const;
 
   // sampler gets label , imageIds from corresponding Dataset Op, this function is unique to PK
   // @param std::map<int64_t, std::vector<int64_t>> * map
-  // @return - The error code return
+  // @return Status The status code returned
   virtual Status GetClassIds(std::map<int32_t, std::vector<int64_t>> *map) const {
     RETURN_STATUS_UNEXPECTED("GetClassIds needs to be override to support PK");
   }
 
   // default destructor
   virtual ~RandomAccessOp() = default;
+
+  /// Set num_rows
+  /// \param num_rows
+  void SetNumRows(int64_t num_rows) { num_rows_ = num_rows; }
 
  protected:
   // The amount of rows in the dataset itself. This is the before-sampling value, the
@@ -60,7 +64,7 @@ class SamplerRT {
   // @param int64_t num_samples: the user-requested number of samples ids to generate. A value of 0
   //                indicates that the sampler should produce the complete set of ids.
   // @param int64_t samplesPerBuffer: Num of Sampler Ids to fetch via 1 GetNextBuffer call
-  explicit SamplerRT(int64_t num_samples, int64_t samples_per_buffer);
+  SamplerRT(int64_t num_samples, int64_t samples_per_buffer);
 
   SamplerRT(const SamplerRT &s) : SamplerRT(s.num_samples_, s.samples_per_buffer_) {}
 
@@ -71,7 +75,7 @@ class SamplerRT {
   // @note It is Sampler responsibility to make sure that the id is not out of bound.
   // @param std::unique_ptr<DataBuffer> pBuffer - Buffer to be returned to StorageOp
   // @param int32_t workerId - not meant to be used
-  // @return - The error code return
+  // @return Status The status code returned
   virtual Status GetNextSample(std::unique_ptr<DataBuffer> *out_buffer) = 0;
 
 // This function only called by python layer. Not needed by Android.
@@ -81,7 +85,7 @@ class SamplerRT {
 #endif
 
   // for next epoch of sampleIds
-  // @return - The error code return
+  // @return Status The status code returned
   virtual Status ResetSampler() = 0;
 
   // first handshake between leaf source op and Sampler. This func will determine the amount of data
@@ -99,9 +103,13 @@ class SamplerRT {
   Status SetNumSamples(int64_t num_samples);
 
   // getter for num samples
-  // @param num_samples - the number of samples to return.
-  // @return status error code
+  // @return number of samples
   int64_t GetNumSamples();
+
+  // Calculate num samples. Unlike GetNumSamples, it is not a getter and doesn't necessarily return the value of
+  // num_samples_
+  // @return number of samples
+  virtual int64_t CalculateNumSamples(int64_t num_rows);
 
   // setter for num or records in the dataset
   // @param num_rows - the number of records
@@ -110,19 +118,19 @@ class SamplerRT {
 
   // Adds a sampler to become our child.
   // @param std::shared_ptr<DatasetOp> - The sampler to add as a child.
-  // @return - The error code returned.
+  // @return Status The status code returned
   Status AddChild(std::shared_ptr<SamplerRT> child);
 
   // A helper function to create a int64_t 1-D Tensor specifically used to hold sampleIds for Sampler
   // @param std::shared_ptr<Tensor>* sampleIds
   // @param int64_t numElements - must be a non 0 number
-  // @return - The error code returned.
+  // @return Status The status code returned
   Status CreateSamplerTensor(std::shared_ptr<Tensor> *sample_ids, int64_t num_elements);
 
   // A print method typically used for debugging
   // @param out - The output stream to write output to
   // @param show_all - A bool to control if you want to show all info or just a summary
-  virtual void Print(std::ostream &out, bool show_all) const;
+  virtual void SamplerPrint(std::ostream &out, bool show_all) const;
 
   // << Stream output operator overload
   // @notes This allows you to write the debug print info using stream operators
@@ -130,7 +138,7 @@ class SamplerRT {
   // @param sampler - reference to teh sampler to print
   // @return - the output stream must be returned
   friend std::ostream &operator<<(std::ostream &out, const SamplerRT &sampler) {
-    sampler.Print(out, false);
+    sampler.SamplerPrint(out, false);
     return out;
   }
 
@@ -142,8 +150,13 @@ class SamplerRT {
   // associated id.
   // @param int64_t* out_associated_id - Out parameter, contains the associated id.
   // @param int64_t id - The id used as an index to get the associated child id.
-  // @return - The error code returned.
+  // @return Status The status code returned
   Status GetAssociatedChildId(int64_t *out_associated_id, int64_t id);
+
+  /// \brief Get the arguments of node
+  /// \param[out] out_json JSON string of all attributes
+  /// \return Status of the function
+  virtual Status to_json(nlohmann::json *out_json) { return Status::OK(); }
 
  protected:
   // Number of rows of data from the place this sampler is sampling from. If this sampler
@@ -156,6 +169,7 @@ class SamplerRT {
   // amount.
   int64_t num_samples_;
 
+  bool is_initialized;
   int64_t samples_per_buffer_;
   std::unique_ptr<ColDescriptor> col_desc_;
   std::vector<std::shared_ptr<SamplerRT>> child_;  // Child nodes

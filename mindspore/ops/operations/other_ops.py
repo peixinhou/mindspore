@@ -1,4 +1,4 @@
-# Copyright 2020 Huawei Technologies Co., Ltd
+# Copyright 2020-2021 Huawei Technologies Co., Ltd
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
 
 """Other operators."""
 import functools
+from mindspore.common import monad
 from .. import signature as sig
 from ..._checkparam import Validator as validator, Rel
 from ...common import dtype as mstype
@@ -37,33 +38,101 @@ class Assign(PrimitiveWithCheck):
     Outputs:
         Tensor, has the same type as original `variable`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> class Net(nn.Cell):
-        >>>     def __init__(self):
-        >>>         super(Net, self).__init__()
-        >>>         self.y = mindspore.Parameter(Tensor([1.0], mindspore.float32), name="y")
-        >>>
-        >>>     def construct(self, x):
-        >>>         P.Assign()(self.y, x)
-        >>>         return self.y
+        ...     def __init__(self):
+        ...         super(Net, self).__init__()
+        ...         self.y = mindspore.Parameter(Tensor([1.0], mindspore.float32), name="y")
+        ...
+        ...     def construct(self, x):
+        ...         ops.Assign()(self.y, x)
+        ...         return self.y
+        ...
         >>> x = Tensor([2.0], mindspore.float32)
         >>> net = Net()
-        >>> net(x)
+        >>> output = net(x)
+        >>> print(output)
+        Parameter (name=y, shape=(1,), dtype=Float32, requires_grad=True)
     """
     __mindspore_signature__ = (
         sig.make_sig('variable', sig.sig_rw.RW_WRITE, dtype=sig.sig_dtype.T),
-        sig.make_sig('value', dtype=sig.sig_dtype.T)
+        sig.make_sig('value', dtype=sig.sig_dtype.T),
+        sig.make_sig('u', default=monad.U, dtype=sig.sig_dtype.T1)
     )
 
     @prim_attr_register
     def __init__(self):
         self.init_prim_io_names(inputs=['ref', 'value'], outputs=['output'])
+        self.add_prim_attr('side_effect_mem', True)
 
     def check_dtype(self, variable, value):
+        types = mstype.number_type + (mstype.bool_,)
         if variable != mstype.type_refkey:
-            validator.check_tensor_dtype_valid("variable", variable, mstype.number_type, self.name)
-        validator.check_scalar_or_tensor_types_same({"value": value}, mstype.number_type, self.name)
+            validator.check_tensor_dtype_valid("variable", variable, types, self.name)
+        validator.check_scalar_or_tensor_types_same({"value": value}, types, self.name)
 
+
+class InplaceAssign(PrimitiveWithInfer):
+    """
+    Inplace assign `Parameter` with a value.
+    This primitive can only use in graph kernel.
+    Inputs:
+        - **variable** (Parameter) - The `Parameter`.
+        - **value** (Tensor) - The value to be assigned.
+        - **depend** (Tensor) - The dependent tensor to keep this op connected in graph.
+    Outputs:
+        Tensor, has the same type as original `variable`.
+    Examples:
+        >>> class Net(nn.Cell):
+        ...     def __init__(self):
+        ...         super(Net, self).__init__()
+        ...         self.inplace_assign = ops.InplaceAssign()
+        ...
+        ...     def construct(self, x):
+        ...         val = x - 1.0
+        ...         ret = x + 2.0
+        ...         return self.inplace_assign(x, val, ret)
+        ...
+        >>> x = Tensor([2.0], mindspore.float32)
+        >>> net = Net()
+        >>> output = net(x)
+        >>> print(output)
+   """
+    @ prim_attr_register
+    def __init__(self):
+        self.init_prim_io_names(inputs=['x', 'y', 'z'], outputs=['output'])
+
+    def infer_shape(self, x, y, z):
+        return z
+
+    def infer_dtype(self, x, y, z):
+        return z
+
+class Load(PrimitiveWithCheck):
+    """
+    Load `Parameter` to a value.
+
+    Inputs:
+        - **variable** (Parameter) - The `Parameter`.
+
+    Outputs:
+        Tensor - The loaded parameter tensor value.
+    """
+    __mindspore_signature__ = (
+        sig.make_sig('variable', sig.sig_rw.RW_READ, dtype=sig.sig_dtype.T),
+        sig.make_sig('u', dtype=sig.sig_dtype.T1)
+    )
+
+    @prim_attr_register
+    def __init__(self):
+        self.init_prim_io_names(inputs=['ref', 'u'], outputs=['output'])
+
+    def check_dtype(self, variable):
+        if variable != mstype.type_refkey:
+            validator.check_tensor_type_same({"variable": variable}, mstype.number_type, self.name)
 
 class BoundingBoxEncode(PrimitiveWithInfer):
     """
@@ -80,14 +149,17 @@ class BoundingBoxEncode(PrimitiveWithInfer):
     Outputs:
         Tensor, encoded bounding boxes.
 
-    Examples:
-        >>> anchor_box = Tensor([[4,1,2,1],[2,2,2,3]],mindspore.float32)
-        >>> groundtruth_box = Tensor([[3,1,2,2],[1,2,1,4]],mindspore.float32)
-        >>> boundingbox_encode = P.BoundingBoxEncode(means=(0.0, 0.0, 0.0, 0.0), stds=(1.0, 1.0, 1.0, 1.0))
-        >>> boundingbox_encode(anchor_box, groundtruth_box)
-        [[5.0000000e-01  5.0000000e-01  -6.5504000e+04  6.9335938e-01]
-         [-1.0000000e+00  2.5000000e-01  0.0000000e+00  4.0551758e-01]]
+    Supported Platforms:
+        ``Ascend`` ``GPU``
 
+    Examples:
+        >>> anchor_box = Tensor([[2, 2, 2, 3], [2, 2, 2, 3]], mindspore.float32)
+        >>> groundtruth_box = Tensor([[1, 2, 1, 4], [1, 2, 1, 4]], mindspore.float32)
+        >>> boundingbox_encode = ops.BoundingBoxEncode(means=(0.0, 0.0, 0.0, 0.0), stds=(1.0, 1.0, 1.0, 1.0))
+        >>> output = boundingbox_encode(anchor_box, groundtruth_box)
+        >>> print(output)
+        [[ -1.  0.25  0.  0.40551758]
+         [ -1.  0.25  0.  0.40551758]]
     """
 
     @prim_attr_register
@@ -133,14 +205,18 @@ class BoundingBoxDecode(PrimitiveWithInfer):
     Outputs:
         Tensor, decoded boxes.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
-        >>> anchor_box = Tensor([[4,1,2,1],[2,2,2,3]],mindspore.float32)
-        >>> deltas = Tensor([[3,1,2,2],[1,2,1,4]],mindspore.float32)
-        >>> boundingbox_decode = P.BoundingBoxDecode(means=(0.0, 0.0, 0.0, 0.0), stds=(1.0, 1.0, 1.0, 1.0),
-        >>>                                          max_shape=(768, 1280), wh_ratio_clip=0.016)
-        >>> boundingbox_decode(anchor_box, deltas)
-        [[4.1953125  0.  0.  5.1953125]
-         [2.140625  0.  3.859375  60.59375]]
+        >>> anchor_box = Tensor([[4, 1, 2, 1], [2, 2, 2, 3]], mindspore.float32)
+        >>> deltas = Tensor([[3, 1, 2, 2], [1, 2, 1, 4]], mindspore.float32)
+        >>> boundingbox_decode = ops.BoundingBoxDecode(means=(0.0, 0.0, 0.0, 0.0), stds=(1.0, 1.0, 1.0, 1.0),
+        ...                                          max_shape=(768, 1280), wh_ratio_clip=0.016)
+        >>> output = boundingbox_decode(anchor_box, deltas)
+        >>> print(output)
+        [[ 4.1953125  0.         0.         5.1953125]
+         [ 2.140625   0.         3.859375  60.59375  ]]
 
     """
 
@@ -185,27 +261,31 @@ class CheckValid(PrimitiveWithInfer):
           Data type must be float16 or float32.
 
     Outputs:
-        Tensor, the valided tensor.
+        Tensor, with shape of (N,) and dtype of bool.
+
+    Supported Platforms:
+        ``Ascend`` ``GPU``
 
     Examples:
         >>> import mindspore
         >>> import mindspore.nn as nn
         >>> import numpy as np
         >>> from mindspore import Tensor
-        >>> from mindspore.ops import operations as P
+        >>> from mindspore.ops import operations as ops
         >>> class Net(nn.Cell):
-        >>>     def __init__(self):
-        >>>         super(Net, self).__init__()
-        >>>         self.check_valid = P.CheckValid()
-        >>>     def construct(self, x, y):
-        >>>         valid_result = self.check_valid(x, y)
-        >>>         return valid_result
-        >>>
+        ...     def __init__(self):
+        ...         super(Net, self).__init__()
+        ...         self.check_valid = ops.CheckValid()
+        ...     def construct(self, x, y):
+        ...         valid_result = self.check_valid(x, y)
+        ...         return valid_result
+        ...
         >>> bboxes = Tensor(np.linspace(0, 6, 12).reshape(3, 4), mindspore.float32)
         >>> img_metas = Tensor(np.array([2, 1, 3]), mindspore.float32)
         >>> net = Net()
-        >>> result = net(bboxes, img_metas)
-        [True   False   False]
+        >>> output = net(bboxes, img_metas)
+        >>> print(output)
+        [ True False False]
     """
 
     @prim_attr_register
@@ -255,14 +335,16 @@ class IOU(PrimitiveWithInfer):
     Raises:
         KeyError: When `mode` is not 'iou' or 'iof'.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
-        >>> iou = P.IOU()
+        >>> iou = ops.IOU()
         >>> anchor_boxes = Tensor(np.random.randint(1.0, 5.0, [3, 4]), mindspore.float16)
         >>> gt_boxes = Tensor(np.random.randint(1.0, 5.0, [3, 4]), mindspore.float16)
-        >>> iou(anchor_boxes, gt_boxes)
-        [[0.0, 65504, 65504],
-         [0.0, 0.0, 0.0],
-         [0.22253, 0.0, 0.0]]
+        >>> output = iou(anchor_boxes, gt_boxes)
+        >>> print(output.shape)
+        (3, 3)
     """
 
     @prim_attr_register
@@ -286,46 +368,6 @@ class IOU(PrimitiveWithInfer):
         return anchor_boxes
 
 
-class MakeRefKey(Primitive):
-    """
-    Makes a RefKey instance by string. RefKey stores the name of Parameter, can be passed through the functions,
-    and used for Assign target.
-
-    Args:
-        tag (str): Parameter name to make the RefKey.
-
-    Inputs:
-        No inputs.
-
-    Outputs:
-        RefKeyType, made from the Parameter name.
-
-    Examples:
-        >>> from mindspore.ops import functional as F
-        >>> class Net(nn.Cell):
-        >>>     def __init__(self):
-        >>>         super(Net, self).__init__()
-        >>>         self.y = mindspore.Parameter(Tensor(np.ones([6, 8, 10]), mindspore.int32), name="y")
-        >>>         self.make_ref_key = P.MakeRefKey("y")
-        >>>
-        >>>     def construct(self, x):
-        >>>         key = self.make_ref_key()
-        >>>         ref = F.make_ref(key, x, self.y)
-        >>>         return ref * x
-        >>>
-        >>> x = Tensor(np.ones([3, 4, 5]), mindspore.int32)
-        >>> net = Net()
-        >>> net(x)
-    """
-
-    @prim_attr_register
-    def __init__(self, tag):
-        validator.check_value_type('tag', tag, (str,), self.name)
-
-    def __call__(self):
-        pass
-
-
 class Partial(Primitive):
     """
     Makes a partial function instance, used for pynative mode.
@@ -337,9 +379,12 @@ class Partial(Primitive):
         FunctionType, partial function binded with arguments.
     """
 
+    # Side effect will propagated from the first argument to return value.
+    side_effect_propagate = 1
+
     @prim_attr_register
     def __init__(self):
-        pass
+        self.add_prim_attr('side_effect_propagate', 1)
 
     def __call__(self, *args):
         func = args[0].__call__
@@ -349,7 +394,19 @@ class Partial(Primitive):
 
 class Depend(Primitive):
     """
-    Depend is used for processing side-effect operations.
+    Depend is used for processing dependency operations.
+
+    In some side-effect scenarios, we need to ensure the execution order of operators.
+    In order to ensure that operator A is executed before operator B, it is recommended
+    to insert the Depend operator between operators A and B.
+
+    Previously, the ControlDepend operator was used to control the execution order.
+    Since the ControlDepend operator is deprecated from version 1.1, it is recommended
+    to use the Depend operator instead. The replacement method is as follows::
+
+        a = A(x)                --->        a = A(x)
+        b = B(y)                --->        y = Depend(y, a)
+        ControlDepend(a, b)     --->        b = B(y)
 
     Inputs:
         - **value** (Tensor) - the real value to return for depend operator.
@@ -357,15 +414,67 @@ class Depend(Primitive):
 
     Outputs:
         Tensor, the value passed by last operator.
+
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
+    Examples:
+        >>> import numpy as np
+        >>> import mindspore
+        >>> import mindspore.nn as nn
+        >>> import mindspore.ops.operations as P
+        >>> from mindspore import Tensor
+        >>> class Net(nn.Cell):
+        ...     def __init__(self):
+        ...         super(Net, self).__init__()
+        ...         self.softmax = P.Softmax()
+        ...         self.depend = P.Depend()
+        ...
+        ...     def construct(self, x, y):
+        ...         mul = x * y
+        ...         y = self.depend(y, mul)
+        ...         ret = self.softmax(y)
+        ...         return ret
+        ...
+        >>> x = Tensor(np.ones([4, 5]), dtype=mindspore.float32)
+        >>> y = Tensor(np.ones([4, 5]), dtype=mindspore.float32)
+        >>> net = Net()
+        >>> output = net(x, y)
+        >>> print(output)
+        [[0.2 0.2 0.2 0.2 0.2]
+         [0.2 0.2 0.2 0.2 0.2]
+         [0.2 0.2 0.2 0.2 0.2]
+         [0.2 0.2 0.2 0.2 0.2]]
+    """
+
+    # Side effect will propagated from the first argument to return value.
+    side_effect_propagate = 1
+
+    @prim_attr_register
+    def __init__(self):
+        self.add_prim_attr('side_effect_propagate', 1)
+
+    def __call__(self, value, expr):
+        return value
+
+class UpdateState(Primitive):
+    """
+    UpdateState is used for update side-effect state.
+
+    Inputs:
+        - **value** (State) - the state value to be updated.
+        - **expr** (Expression) - the expression to evaluate before state changes.
+
+    Outputs:
+        State, the updated state value.
     """
 
     @prim_attr_register
     def __init__(self):
         pass
 
-    def __call__(self, value, expr):
-        return value
-
+    def __call__(self, state, expr):
+        return state
 
 class CheckBprop(PrimitiveWithInfer):
     """
@@ -385,7 +494,7 @@ class CheckBprop(PrimitiveWithInfer):
     Examples:
         >>> input_x = (Tensor(np.array([[2, 2], [2, 2]]), mindspore.float32),)
         >>> input_y = (Tensor(np.array([[2, 2], [2, 2]]), mindspore.float32),)
-        >>> out = P.CheckBprop()(input_x, input_y)
+        >>> out = ops.CheckBprop()(input_x, input_y)
     """
 
     @prim_attr_register
@@ -453,10 +562,15 @@ class ConfusionMatrix(PrimitiveWithInfer):
         Tensor, the confusion matrix, with shape (`num_classes`, `num_classes`).
 
     Examples:
-        >>> confusion_matrix = P.ConfusionMatrix(4)
+        >>> confusion_matrix = ops.ConfusionMatrix(4)
         >>> labels = Tensor([0, 1, 1, 3], mindspore.int32)
         >>> predictions = Tensor([1, 2, 1, 3], mindspore.int32)
-        >>> confusion_matrix(labels, predictions)
+        >>> output = confusion_matrix(labels, predictions)
+        >>> print(output)
+        [[0 1 0 0]
+         [0 1 1 0]
+         [0 0 0 0]
+         [0 0 0 1]]
     """
 
     @prim_attr_register
@@ -490,12 +604,17 @@ class PopulationCount(PrimitiveWithInfer):
         - **input** (Tensor) -  The data type must be int16 or uint16.
 
     Outputs:
-        Tensor, with the sam  shape as the input.
+        Tensor, with the same shape as the input.
+
+    Supported Platforms:
+        ``Ascend``
 
     Examples:
-        >>> population_count = P.PopulationCount()
+        >>> population_count = ops.PopulationCount()
         >>> x_input = Tensor([0, 1, 3], mindspore.int16)
-        >>> population_count(x_input)
+        >>> output = population_count(x_input)
+        >>> print(output)
+        [0 1 2]
     """
 
     @prim_attr_register
@@ -508,6 +627,7 @@ class PopulationCount(PrimitiveWithInfer):
     def infer_dtype(self, x_dtype):
         validator.check_tensor_dtype_valid("x", x_dtype, (mstype.int16, mstype.uint16,), self.name)
         return mstype.tensor_type(mstype.uint8)
+
 
 class Push(PrimitiveWithInfer):
     """
@@ -539,6 +659,7 @@ class Push(PrimitiveWithInfer):
     def infer_dtype(self, inputs, shapes):
         return mstype.uint64
 
+
 class Pull(PrimitiveWithInfer):
     """
     Pulls weight from parameter server.
@@ -563,6 +684,7 @@ class Pull(PrimitiveWithInfer):
     def infer_dtype(self, key_dtype, weight_dtype):
         return mstype.float32
 
+
 class identity(Primitive):
     """
     Makes a identify primitive, used for pynative mode.
@@ -574,9 +696,12 @@ class identity(Primitive):
         The same as input.
     """
 
+    # Side effect will propagated from the first argument to return value.
+    side_effect_propagate = 1
+
     @prim_attr_register
     def __init__(self):
-        pass
+        self.add_prim_attr('side_effect_propagate', 1)
 
     def __call__(self, x):
         return x

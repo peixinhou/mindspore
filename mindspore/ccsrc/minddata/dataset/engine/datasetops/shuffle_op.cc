@@ -1,5 +1,5 @@
 /**
- * Copyright 2019 Huawei Technologies Co., Ltd
+ * Copyright 2019-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,12 +16,9 @@
 #if defined(_WIN32) || defined(_WIN64)
 #include <stdlib.h>
 #endif
-#include <securec.h>
-#include <algorithm>
 #include <chrono>
 #include <iomanip>
 #include <iostream>
-#include <limits>
 #include <random>
 #include <utility>
 
@@ -30,15 +27,9 @@
 #include "minddata/dataset/engine/dataset_iterator.h"
 #include "minddata/dataset/engine/data_buffer.h"
 #include "minddata/dataset/engine/db_connector.h"
-#include "minddata/dataset/engine/opt/pass.h"
+#include "minddata/dataset/util/log_adapter.h"
 #include "minddata/dataset/util/random.h"
 #include "minddata/dataset/util/status.h"
-
-#ifndef ENABLE_ANDROID
-#include "utils/log_adapter.h"
-#else
-#include "mindspore/lite/src/common/log_adapter.h"
-#endif
 
 namespace mindspore {
 namespace dataset {
@@ -131,7 +122,7 @@ Status ShuffleOp::AddRowToShuffleBuffer(TensorRow new_shuffle_row) {
     shuffle_last_row_idx_ = (shuffle_buffer_->size()) - 1;
   } else {
     if (!(*shuffle_buffer_)[shuffle_last_row_idx_].empty()) {
-      return Status(StatusCode::kUnexpectedError, __LINE__, __FILE__,
+      return Status(StatusCode::kMDUnexpectedError, __LINE__, __FILE__,
                     "Last row of shuffle buffer should not be occupied!");
     }
     (*shuffle_buffer_)[shuffle_last_row_idx_] = std::move(new_shuffle_row);
@@ -225,7 +216,7 @@ Status ShuffleOp::operator()() {
     }
 
     // Since we overloaded eoeReceived function, we are responsible to flow the EOE up the
-    // pipepline manually now that we are done draining the shuffle buffer
+    // pipeline manually now that we are done draining the shuffle buffer
     MS_LOG(DEBUG) << "Shuffle operator sending EOE.";
     auto eoe_buffer = std::make_unique<DataBuffer>(0, DataBuffer::kDeBFlagEOE);
     RETURN_IF_NOT_OK(out_connector_->Add(0, std::move(eoe_buffer)));
@@ -250,7 +241,7 @@ Status ShuffleOp::InitShuffleBuffer() {
   // shuffle buffer to it's max size, or the dataset below us is not providing any more
   // rows.
   if (shuffle_buffer_state_ != kShuffleStateInit) {
-    return Status(StatusCode::kUnexpectedError, __LINE__, __FILE__,
+    return Status(StatusCode::kMDUnexpectedError, __LINE__, __FILE__,
                   "Invalid shuffle buffer state (SHUFFLE_STATE_INIT expected)");
   }
 
@@ -288,19 +279,13 @@ Status ShuffleOp::InitShuffleBuffer() {
     shuffle_buffer_state_ = kShuffleStateDrain;
   }
 
-  MS_LOG(DEBUG) << "Shuffle operator finished intializing the shuffle buffer.";
+  MS_LOG(DEBUG) << "Shuffle operator finished initializing the shuffle buffer.";
   return Status::OK();
 }
 
 Status ShuffleOp::EoeReceived(int32_t worker_id) {
   state_ = OpState::kDeOpIdle;
   return Status::OK();
-}
-
-// Visitor accept method for NodePass
-Status ShuffleOp::Accept(NodePass *p, bool *modified) {
-  // Downcast shared pointer then call visitor
-  return p->RunOnNode(shared_from_base<ShuffleOp>(), modified);
 }
 }  // namespace dataset
 }  // namespace mindspore

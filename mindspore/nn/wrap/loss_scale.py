@@ -22,8 +22,7 @@ from ...common.parameter import Parameter
 from ...ops import functional as F
 from ...ops import composite as C
 from ...ops import operations as P
-from ...ops.operations import NPUGetFloatStatus, NPUAllocFloatStatus, NPUClearFloatStatus, ReduceSum, LessEqual, \
-    ControlDepend
+from ...ops.operations import NPUGetFloatStatus, NPUAllocFloatStatus, NPUClearFloatStatus, ReduceSum, LessEqual
 from ...common import dtype as mstype
 
 _grad_scale = C.MultitypeFuncGraph("grad_scale")
@@ -75,17 +74,36 @@ class DynamicLossScaleUpdateCell(Cell):
     Outputs:
         Tensor, a scalar Tensor with shape :math:`()`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
-        >>> net_with_loss = Net()
-        >>> optimizer = nn.Momentum(net_with_loss.trainable_params(), learning_rate=0.1, momentum=0.9)
-        >>> manager = nn.DynamicLossScaleUpdateCell(loss_scale_value=2**12, scale_factor=2, scale_window=1000)
-        >>> train_network = nn.TrainOneStepWithLossScaleCell(net_with_loss, optimizer, scale_update_cell=manager)
-        >>> train_network.set_train()
+        >>> import numpy as np
+        >>> from mindspore import Tensor, Parameter, nn
+        >>> from mindspore.ops import operations as P
+        >>> from mindspore.nn.wrap.cell_wrapper import WithLossCell
         >>>
-        >>> inputs = Tensor(np.ones([16, 16]).astype(np.float32))
-        >>> label = Tensor(np.zeros([16, 16]).astype(np.float32))
-        >>> scaling_sens = Tensor(np.full((1), np.finfo(np.float32).max), dtype=mindspore.float32)
-        >>> output = train_network(inputs, label, scaling_sens)
+        >>> class Net(nn.Cell):
+        ...     def __init__(self, in_features, out_features):
+        ...         super(Net, self).__init__()
+        ...         self.weight = Parameter(Tensor(np.ones([in_features, out_features]).astype(np.float32)),
+        ...                                 name='weight')
+        ...         self.matmul = P.MatMul()
+        ...
+        ...     def construct(self, x):
+        ...         output = self.matmul(x, self.weight)
+        ...         return output
+        ...
+        >>> in_features, out_features = 16, 10
+        >>> net = Net(in_features, out_features)
+        >>> loss = nn.MSELoss()
+        >>> optimizer = nn.Momentum(net.trainable_params(), learning_rate=0.1, momentum=0.9)
+        >>> net_with_loss = WithLossCell(net, loss)
+        >>> manager = nn.DynamicLossScaleUpdateCell(loss_scale_value=2**12, scale_factor=2, scale_window=1000)
+        >>> train_network = nn.TrainOneStepWithLossScaleCell(net_with_loss, optimizer, scale_sense=manager)
+        >>> input = Tensor(np.ones([out_features, in_features]), mindspore.float32)
+        >>> labels = Tensor(np.ones([out_features,]), mindspore.float32)
+        >>> output = train_network(input, labels)
     """
 
     def __init__(self,
@@ -120,16 +138,15 @@ class DynamicLossScaleUpdateCell(Cell):
         should_inc = self.less_equal(self.scale_window, self.cur_iter - self.last_overflow_iter)
         last_iter_cond = self.logic_or(overflow_cond, should_inc)
         last_overflow_iter = self.select(last_iter_cond, self.cur_iter, self.last_overflow_iter)
-        assign_last_iter = F.assign(self.last_overflow_iter, last_overflow_iter)
+        last_iter = F.assign(self.last_overflow_iter, last_overflow_iter)
         update_scale_cond = self.logic_and(should_inc, self.logic_not(overflow_cond))
         scale_mul_res = loss_scale_on_overflow * self.scale_factor
         scaled_loss_scale = self.select(update_scale_cond, scale_mul_res, loss_scale_on_overflow)
-        assign_scaled_loss_scale = F.assign(loss_scale, scaled_loss_scale)
+        F.assign(loss_scale, scaled_loss_scale)
         inc_cur_iter = self.cur_iter + 1
-        assing_cur_iter = F.assign(self.cur_iter, inc_cur_iter)
-        t = (assign_last_iter, assign_scaled_loss_scale, assing_cur_iter)
-        F.control_depend(assign_last_iter, assing_cur_iter)
-        return F.depend(overflow, t)
+        inc_cur_iter = F.depend(inc_cur_iter, last_iter)
+        F.assign(self.cur_iter, inc_cur_iter)
+        return overflow
 
 
 class FixedLossScaleUpdateCell(Cell):
@@ -141,17 +158,36 @@ class FixedLossScaleUpdateCell(Cell):
     Args:
         loss_scale_value (float): Initializes loss scale.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
-        >>> net_with_loss = Net()
-        >>> optimizer = nn.Momentum(net_with_loss.trainable_params(), learning_rate=0.1, momentum=0.9)
-        >>> manager = nn.FixedLossScaleUpdateCell(loss_scale_value=2**12)
-        >>> train_network = nn.TrainOneStepWithLossScaleCell(net_with_loss, optimizer, scale_update_cell=manager)
-        >>> train_network.set_train()
+        >>> import numpy as np
+        >>> from mindspore import Tensor, Parameter, nn
+        >>> from mindspore.ops import operations as P
+        >>> from mindspore.nn.wrap.cell_wrapper import WithLossCell
         >>>
-        >>> inputs = Tensor(np.ones([16, 16]).astype(np.float32))
-        >>> label = Tensor(np.zeros([16, 16]).astype(np.float32))
-        >>> scaling_sens = Tensor(np.full((1), np.finfo(np.float32).max), dtype=mindspore.float32)
-        >>> output = train_network(inputs, label, scaling_sens)
+        >>> class Net(nn.Cell):
+        ...     def __init__(self, in_features, out_features):
+        ...         super(Net, self).__init__()
+        ...         self.weight = Parameter(Tensor(np.ones([in_features, out_features]).astype(np.float32)),
+        ...                                 name='weight')
+        ...         self.matmul = P.MatMul()
+        ...
+        ...     def construct(self, x):
+        ...         output = self.matmul(x, self.weight)
+        ...         return output
+        ...
+        >>> in_features, out_features = 16, 10
+        >>> net = Net(in_features, out_features)
+        >>> loss = nn.MSELoss()
+        >>> optimizer = nn.Momentum(net.trainable_params(), learning_rate=0.1, momentum=0.9)
+        >>> net_with_loss = WithLossCell(net, loss)
+        >>> manager = nn.FixedLossScaleUpdateCell(loss_scale_value=2**12)
+        >>> train_network = nn.TrainOneStepWithLossScaleCell(net_with_loss, optimizer, scale_sense=manager)
+        >>> input = Tensor(np.ones([out_features, in_features]), mindspore.float32)
+        >>> labels = Tensor(np.ones([out_features,]), mindspore.float32)
+        >>> output = train_network(input, labels)
     """
 
     def __init__(self, loss_scale_value):
@@ -192,20 +228,47 @@ class TrainOneStepWithLossScaleCell(TrainOneStepCell):
         - **overflow** (Tensor) -  Tensor with shape :math:`()`, type is bool.
         - **loss scaling value** (Tensor) -  Tensor with shape :math:`()`
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
-        >>> #1) when the type scale_sense is Cell:
-        >>> net_with_loss = Net()
-        >>> optimizer = nn.Momentum(net_with_loss.trainable_params(), learning_rate=0.1, momentum=0.9)
+        >>> import numpy as np
+        >>> from mindspore import Tensor, Parameter, nn
+        >>> from mindspore.ops import operations as P
+        >>> from mindspore.nn.wrap.cell_wrapper import WithLossCell
+        >>> from mindspore.common import dtype as mstype
+        >>>
+        >>> class Net(nn.Cell):
+        ...     def __init__(self, in_features, out_features):
+        ...         super(Net, self).__init__()
+        ...         self.weight = Parameter(Tensor(np.ones([in_features, out_features]).astype(np.float32)),
+        ...                                 name='weight')
+        ...         self.matmul = P.MatMul()
+        ...
+        ...     def construct(self, x):
+        ...         output = self.matmul(x, self.weight)
+        ...         return output
+        ...
+        >>> size, in_features, out_features = 16, 16, 10
+        >>> #1) when the type of scale_sense is Cell:
+        >>> net = Net(in_features, out_features)
+        >>> loss = nn.MSELoss()
+        >>> optimizer = nn.Momentum(net.trainable_params(), learning_rate=0.1, momentum=0.9)
+        >>> net_with_loss = WithLossCell(net, loss)
         >>> manager = nn.DynamicLossScaleUpdateCell(loss_scale_value=2**12, scale_factor=2, scale_window=1000)
         >>> train_network = nn.TrainOneStepWithLossScaleCell(net_with_loss, optimizer, scale_sense=manager)
-        >>> train_network.set_train()
+        >>> input = Tensor(np.ones([out_features, in_features]), mindspore.float32)
+        >>> labels = Tensor(np.ones([out_features,]), mindspore.float32)
+        >>> output = train_network(input, labels)
         >>>
-        >>> #2) when the type scale_sense is Tensor:
-        >>> net_with_loss = Net()
-        >>> optimizer = nn.Momentum(net_with_loss.trainable_params(), learning_rate=0.1, momentum=0.9)
-        >>> inputs = Tensor(np.ones([16, 16]).astype(np.float32))
-        >>> label = Tensor(np.zeros([16, 16]).astype(np.float32))
-        >>> scaling_sens = Tensor(np.full((1), np.finfo(np.float32).max), dtype=mindspore.float32)
+        >>> #2) when the type of scale_sense is Tensor:
+        >>> net = Net(in_features, out_features)
+        >>> loss = nn.MSELoss()
+        >>> optimizer = nn.Momentum(net.trainable_params(), learning_rate=0.1, momentum=0.9)
+        >>> net_with_loss = WithLossCell(net, loss)
+        >>> inputs = Tensor(np.ones([size, in_features]).astype(np.float32))
+        >>> label = Tensor(np.zeros([size, out_features]).astype(np.float32))
+        >>> scaling_sens = Tensor(np.full((1), np.finfo(np.float32).max), dtype=mstype.float32)
         >>> train_network = nn.TrainOneStepWithLossScaleCell(net_with_loss, optimizer, scale_sense=scaling_sens)
         >>> output = train_network(inputs, label)
     """
@@ -225,7 +288,6 @@ class TrainOneStepWithLossScaleCell(TrainOneStepCell):
         self.reduce_sum = ReduceSum(keep_dims=False)
         self.base = Tensor(1, mstype.float32)
         self.less_equal = LessEqual()
-        self.depend_parameter_use = ControlDepend(depend_mode=1)
         self.allreduce = P.AllReduce()
         self.is_distributed = self.parallel_mode != ParallelMode.STAND_ALONE
 
@@ -242,7 +304,6 @@ class TrainOneStepWithLossScaleCell(TrainOneStepCell):
         else:
             raise TypeError("The scale_sense must be Cell or Tensor, but got {}".format(type(scale_sense)))
 
-    @C.add_flags(has_effect=True)
     def construct(self, *inputs):
         weights = self.weights
         loss = self.network(*inputs)
@@ -250,8 +311,10 @@ class TrainOneStepWithLossScaleCell(TrainOneStepCell):
         if not self.gpu_target:
             # init overflow buffer
             init = self.alloc_status()
-            # clear overflow buffer
-            self.clear_status(init)
+            # clear overflow buffer after loss calculated
+            init = F.depend(init, loss)
+            clear_status = self.clear_status(init)
+            loss = F.depend(loss, clear_status)
 
         scaling_sens = self.scale_sense
         scaling_sens_filled = C.ones_like(loss) * F.cast(scaling_sens, F.dtype(loss))
@@ -261,7 +324,10 @@ class TrainOneStepWithLossScaleCell(TrainOneStepCell):
         grads = self.grad_reducer(grads)
         # get the overflow buffer
         if not self.gpu_target:
-            self.get_status(init)
+            # get overflow status after grads calculated
+            init = F.depend(init, grads)
+            get_status = self.get_status(init)
+            init = F.depend(init, get_status)
             # sum overflow buffer elements, 0:not overflow , >0:overflow
             flag_sum = self.reduce_sum(init, (0,))
         else:
@@ -279,12 +345,9 @@ class TrainOneStepWithLossScaleCell(TrainOneStepCell):
         if self.loss_scaling_manager is not None:
             overflow = self.loss_scaling_manager(self.scale_sense, cond)
         # if there is no overflow, do optimize
-        if overflow:
-            opt = False
-        else:
-            opt = self.optimizer(grads)
-        ret = (loss, cond, scaling_sens)
-        return F.depend(ret, opt)
+        if not overflow:
+            loss = F.depend(loss, self.optimizer(grads))
+        return loss, cond, scaling_sens
 
     def set_sense_scale(self, sens):
         """If the user has set the sens in the training process and wants to reassign the value, he can call

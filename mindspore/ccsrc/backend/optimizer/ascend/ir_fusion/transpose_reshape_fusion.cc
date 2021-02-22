@@ -46,9 +46,9 @@ const AnfNodePtr TransposeReshapeFusion::Process(const FuncGraphPtr &func_graph,
                                                  const EquivPtr &equiv) const {
   MS_EXCEPTION_IF_NULL(func_graph);
   MS_EXCEPTION_IF_NULL(equiv);
-  auto reshape_cnode = CheckAnfNodeIfCNodeAndInputSize(node, kBackendReshapeInputNum);
+  auto reshape_cnode = CheckAnfNodeIfCNodeAndInputSize(node, kBackendReshapeInputTensorNum);
   MS_EXCEPTION_IF_NULL(reshape_cnode);
-  auto transpose_cnode = CheckAnfNodeIfCNodeAndInputSize(reshape_cnode->input(1), kBackendReshapeInputNum);
+  auto transpose_cnode = CheckAnfNodeIfCNodeAndInputSize(reshape_cnode->input(1), kBackendReshapeInputTensorNum);
   MS_EXCEPTION_IF_NULL(transpose_cnode);
   if (AnfAlgo::IsDynamicShape(transpose_cnode) || AnfAlgo::IsDynamicShape(reshape_cnode)) {
     return nullptr;
@@ -68,7 +68,7 @@ const AnfNodePtr TransposeReshapeFusion::Process(const FuncGraphPtr &func_graph,
   AnfAlgo::CopyNodeAttr(kAttrPerm, transpose_cnode, new_node);
   AnfAlgo::SetNodeAttr(kAttrTransposeFirst, MakeValue(true), new_node);
   auto reshape_output_shape = AnfAlgo::GetOutputInferShape(reshape_cnode, 0);
-  AnfAlgo::SetNodeAttr(kAttrShape, MakeValue(Convert2Int(reshape_output_shape)), new_node);
+  AnfAlgo::SetNodeAttr(kAttrShape, MakeValue(Convert2Long(reshape_output_shape)), new_node);
 
   return new_node;
 }

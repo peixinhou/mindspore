@@ -17,7 +17,6 @@
 #include "src/runtime/kernel/arm/fp32/deconvolution_fp32.h"
 #include "src/runtime/kernel/arm/fp32/deconvolution_winograd_fp32.h"
 #include "src/runtime/runtime_api.h"
-#include "src/runtime/kernel/arm/base/dequant.h"
 
 using mindspore::kernel::KERNEL_ARCH::kCPU;
 using mindspore::lite::KernelRegistrar;
@@ -62,7 +61,8 @@ int DeConvolutionCPUKernel::InitWeightBias() {
     return RET_ERROR;
   }
   memset(bias_data_, 0, UP_ROUND(output_channel, C4NUM) * sizeof(float));
-  if (in_tensors_.size() == 3) {
+  if (in_tensors_.size() == 3 && in_tensors_.at(kBiasIndex)->shape().size() == 1 &&
+      in_tensors_.at(kBiasIndex)->DimensionSize(0) == output_channel) {
     memcpy(bias_data_, in_tensors_.at(2)->MutableData(), output_channel * sizeof(float));
   }
 
@@ -115,7 +115,7 @@ int DeConvolutionCPUKernel::DoDeconv(int task_id) {
     return RET_OK;
   }
 
-#ifdef ENABLE_ARM32
+#if defined(ENABLE_ARM32) || defined(ENABLE_SSE)
   auto tmp_buffer = tmp_buffer_ + task_id * thread_stride_ * C8NUM * kernel_plane_ * matmul_param_->row_4_;
   MatMulOpt(pack_input_, weight_ptr_ + task_id * thread_stride_ * C8NUM * kernel_plane_ * matmul_param_->deep_,
             tmp_buffer, nullptr, ActType_No, matmul_param_->deep_, matmul_param_->row_4_, oc * C8NUM * kernel_plane_,
@@ -174,7 +174,7 @@ int DeConvolutionCPUKernel::InitRunBuf() {
     return RET_NULL_PTR;
   }
 
-#ifdef ENABLE_ARM32
+#if defined(ENABLE_ARM32) || defined(ENABLE_SSE)
   tmp_buffer_ =
     reinterpret_cast<float *>(ctx_->allocator->Malloc(matmul_param_->row_4_ * matmul_param_->col_8_ * sizeof(float)));
 #else
@@ -186,7 +186,7 @@ int DeConvolutionCPUKernel::InitRunBuf() {
     return RET_NULL_PTR;
   }
 
-#ifdef ENABLE_ARM32
+#if defined(ENABLE_ARM32) || defined(ENABLE_SSE)
   pack_input_ =
     reinterpret_cast<float *>(ctx_->allocator->Malloc(matmul_param_->row_4_ * matmul_param_->deep_ * sizeof(float)));
 #else
@@ -215,7 +215,7 @@ int DeConvolutionCPUKernel::Run() {
     input_ptr_ = src_in + batch_index * input_plane_ * conv_param_->input_channel_;
     output_ptr_ = src_out + batch_index * output_plane_ * conv_param_->output_channel_;
 
-#ifdef ENABLE_ARM32
+#if defined(ENABLE_ARM32) || defined(ENABLE_SSE)
     RowMajor2Col4Major(input_ptr_, pack_input_, matmul_param_->row_, matmul_param_->deep_);
 #else
     RowMajor2Col12Major(input_ptr_, pack_input_, matmul_param_->row_, matmul_param_->deep_);
@@ -239,20 +239,6 @@ kernel::LiteKernel *CpuDeConvFp32KernelCreator(const std::vector<lite::Tensor *>
                                                const mindspore::lite::PrimitiveC *primitive) {
   MS_ASSERT(opParameter != nullptr);
   MS_ASSERT(desc.type == schema::PrimitiveType_DeConv2D);
-  auto *weight_tensor = inputs.at(kWeightIndex);
-  auto *restore_data = weight_tensor->data_c();
-  auto restore_type = weight_tensor->data_type();
-  bool dequant_flag =
-    !weight_tensor->quant_params().empty() && weight_tensor->quant_params().front().inited && restore_data != nullptr;
-  if (dequant_flag) {
-    auto *dequant_weight = kernel::DequantUtil::DequantWeight(weight_tensor);
-    if (dequant_weight == nullptr) {
-      MS_LOG(ERROR) << "dequant data is nullptr.";
-      free(opParameter);
-      return nullptr;
-    }
-    weight_tensor->set_data(dequant_weight);
-  }
 
   kernel::LiteKernel *kernel;
   auto conv_param = reinterpret_cast<ConvParameter *>(opParameter);
@@ -265,11 +251,6 @@ kernel::LiteKernel *CpuDeConvFp32KernelCreator(const std::vector<lite::Tensor *>
 
   if (kernel == nullptr) {
     MS_LOG(ERROR) << "kernel is nullptr.";
-    if (dequant_flag) {
-      weight_tensor->FreeData();
-      weight_tensor->set_data(restore_data);
-      weight_tensor->set_data_type(restore_type);
-    }
     free(opParameter);
     return nullptr;
   }
@@ -277,21 +258,9 @@ kernel::LiteKernel *CpuDeConvFp32KernelCreator(const std::vector<lite::Tensor *>
   if (ret != RET_OK) {
     MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
                   << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
-    if (dequant_flag) {
-      weight_tensor->FreeData();
-      weight_tensor->set_data(restore_data);
-      weight_tensor->set_data_type(restore_type);
-    }
     delete kernel;
     return nullptr;
   }
-
-  if (dequant_flag) {
-    weight_tensor->FreeData();
-    weight_tensor->set_data(restore_data);
-    weight_tensor->set_data_type(restore_type);
-  }
-
   return kernel;
 }
 

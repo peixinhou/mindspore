@@ -43,8 +43,8 @@ TEST_F(TestHWBnGradSplit, test_bn_grad_split_tbe) {
   get_py_fun_.SetDoResolve(true);
   FuncGraphPtr g = get_py_fun_.CallAndParseRet("test_bn_grad_split", "before");
   ASSERT_TRUE(g != nullptr);
-  std::vector<int> shp_x{1, 64, 112, 112};
-  std::vector<int> shp_b{64};
+  std::vector<int64_t> shp_x{1, 64, 112, 112};
+  std::vector<int64_t> shp_b{64};
   auto x_abstract = std::make_shared<abstract::AbstractTensor>(kFloat32, shp_x);
   auto b_abstract = std::make_shared<abstract::AbstractTensor>(kFloat32, shp_b);
   AbstractBasePtrList args_spec_list{x_abstract, x_abstract, b_abstract, b_abstract, b_abstract};
@@ -81,10 +81,12 @@ TEST_F(TestHWBnGradSplit, test_bn_grad_split_tbe) {
   kernel::KernelBuildInfo::KernelBuildInfoBuilder builder1;
   builder1.SetInputsFormat(
     {kOpFormat_NC1HWC0, kOpFormat_NC1HWC0, kOpFormat_NC1HWC0, kOpFormat_NC1HWC0, kOpFormat_NC1HWC0});
-  builder1.SetOutputsFormat({kOpFormat_NC1HWC0, kOpFormat_NC1HWC0, kOpFormat_NC1HWC0});
+  builder1.SetOutputsFormat(
+    {kOpFormat_NC1HWC0, kOpFormat_NC1HWC0, kOpFormat_NC1HWC0, kOpFormat_NC1HWC0, kOpFormat_NC1HWC0});
   builder1.SetInputsDeviceType(
     {kNumberTypeFloat32, kNumberTypeFloat32, kNumberTypeFloat32, kNumberTypeFloat32, kNumberTypeFloat32});
-  builder1.SetOutputsDeviceType({kNumberTypeFloat32, kNumberTypeFloat32, kNumberTypeFloat32});
+  builder1.SetOutputsDeviceType(
+    {kNumberTypeFloat32, kNumberTypeFloat32, kNumberTypeFloat32, kNumberTypeFloat32, kNumberTypeFloat32});
   builder1.SetKernelType(TBE_KERNEL);
   AnfAlgo::SetSelectKernelBuildInfo(builder1.Build(), bn_grad.get());
   // do bn_grad_split pass

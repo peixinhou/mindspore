@@ -18,6 +18,7 @@
 #define MINDSPORE_CORE_ABSTRACT_PARAM_VALIDATOR_H_
 
 #include <memory>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -44,9 +45,23 @@ ShapePtr CheckShapeSame(const std::string &op, const AbstractTensorPtr &tensor_b
 
 TypePtr CheckDtypeSame(const std::string &op, const AbstractTensorPtr &tensor_base, const AbstractTensorPtr &tensor);
 
-int CheckAxis(const std::string &op, const ValuePtr &axis, int min, int max);
+int64_t CheckAxis(const std::string &op, const ValuePtr &axis, int64_t min, int64_t max);
 
 void CheckArgsSize(const std::string &op, const AbstractBasePtrList &args_spec_list, size_t size_expect);
+
+void CheckShapeAllPositive(const std::string &op, const ShapeVector &shape);
+
+void CheckShapeAnyAndPositive(const std::string &op, const ShapeVector &shape);
+
+int64_t CheckAttrPositiveInt64(const std::string &op, const ValuePtr &attr, const std::string &attr_name);
+
+std::vector<int64_t> CheckAttrIntOrTuple(const std::string &op, const ValuePtr &attr, const size_t start_idx,
+                                         const size_t num_element);
+
+std::string CheckAttrStringSet(const std::string &op, const ValuePtr &attr, const std::string &attr_name,
+                               const std::set<std::string> &val_set);
+
+void CheckRequiredArgsSize(const std::string &op, const AbstractBasePtrList &args_spec_list, size_t size_expect);
 
 template <typename T>
 struct ReportNameTraits {};

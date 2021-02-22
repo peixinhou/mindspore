@@ -22,23 +22,13 @@
 
 namespace mindspore {
 namespace lite {
-STATUS OnnxResizeParser::Parse(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node,
-                               schema::CNodeT *op) {
+lite::PrimitiveC *OnnxResizeParser::ParseLitePrimitive(const onnx::GraphProto &onnx_graph,
+                                                       const onnx::NodeProto &onnx_node) {
   MS_LOG(DEBUG) << "onnx ResizeParser";
-  if (op == nullptr) {
-    MS_LOG(ERROR) << "op is null";
-    return RET_NULL_PTR;
-  }
-  op->primitive = std::make_unique<schema::PrimitiveT>();
-  if (op->primitive == nullptr) {
-    MS_LOG(ERROR) << "op->primitive is null";
-    return RET_NULL_PTR;
-  }
-
-  std::unique_ptr<schema::ResizeT> attr = std::make_unique<schema::ResizeT>();
+  auto attr = std::make_unique<schema::ResizeT>();
   if (attr == nullptr) {
     MS_LOG(ERROR) << "new op failed";
-    return RET_NULL_PTR;
+    return nullptr;
   }
 
   attr->format = schema::Format_NCHW;
@@ -46,17 +36,19 @@ STATUS OnnxResizeParser::Parse(const onnx::GraphProto &onnx_graph, const onnx::N
   for (const auto &onnx_node_attr : onnx_node.attribute()) {
     const auto &attribute_name = onnx_node_attr.name();
     if (attribute_name == "coordinate_transformation_mode") {
-      attr->coordinateTransformMode = [&]() {
-        std::map<std::string, schema::CoordinateTransformMode> transform_map = {
-          {"half_pixel", schema::CoordinateTransformMode_HALF_PIXEL},
-          {"pytorch_half_pixel", schema::CoordinateTransformMode_PYTORCH_HALF_PIXEL},
-          {"align_corners", schema::CoordinateTransformMode_ALIGN_CORNERS},
-          {"asymmetric", schema::CoordinateTransformMode_ASYMMETRIC},
-          {"tf_half_pixel_for_nn", schema::CoordinateTransformMode_TF_HALF_PIXEL},
-          {"tf_crop_and_resize", schema::CoordinateTransformMode_TF_CROP_AND_RESIZE},
-        };
-        return transform_map[onnx_node_attr.s()];
-      }();
+      std::map<std::string, schema::CoordinateTransformMode> transform_map = {
+        {"half_pixel", schema::CoordinateTransformMode_HALF_PIXEL},
+        {"pytorch_half_pixel", schema::CoordinateTransformMode_HALF_PIXEL},
+        {"align_corners", schema::CoordinateTransformMode_ALIGN_CORNERS},
+        {"asymmetric", schema::CoordinateTransformMode_ASYMMETRIC},
+        {"tf_crop_and_resize", schema::CoordinateTransformMode_TF_CROP_AND_RESIZE},
+      };
+      if (transform_map.find(onnx_node_attr.s()) != transform_map.end()) {
+        attr->coordinateTransformMode = transform_map[onnx_node_attr.s()];
+      } else {
+        MS_LOG(ERROR) << "Unsupport coordinate transform mode: " << attribute_name;
+        return nullptr;
+      }
     } else if (attribute_name == "cubic_coeff_a") {
       attr->cubicCoeff = onnx_node_attr.f();
     } else if (attribute_name == "exclude_outside") {
@@ -85,9 +77,14 @@ STATUS OnnxResizeParser::Parse(const onnx::GraphProto &onnx_graph, const onnx::N
     }
   }
 
-  op->primitive->value.type = schema::PrimitiveType_Resize;
-  op->primitive->value.value = attr.release();
-  return RET_OK;
+  auto primitive = std::make_unique<schema::PrimitiveT>();
+  if (primitive == nullptr) {
+    MS_LOG(ERROR) << "new primitive failed";
+    return nullptr;
+  }
+  primitive->value.type = schema::PrimitiveType_Resize;
+  primitive->value.value = attr.release();
+  return PrimitiveC::Create(primitive.release());
 }
 
 OnnxNodeRegistrar g_onnxResizeParser("Resize", new OnnxResizeParser());

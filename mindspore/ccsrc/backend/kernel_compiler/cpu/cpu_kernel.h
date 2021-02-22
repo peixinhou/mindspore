@@ -19,6 +19,7 @@
 #include <memory>
 #include <numeric>
 #include <string>
+#include <thread>
 #include <vector>
 #include "backend/kernel_compiler/kernel.h"
 #include "backend/session/anf_runtime_algorithm.h"
@@ -26,16 +27,16 @@
 
 using mindspore::kernel::Address;
 using mindspore::kernel::AddressPtr;
+using CTask = std::function<void(size_t, size_t)>;
 namespace mindspore {
 namespace kernel {
-const char KSIZE[] = "ksize";
+const char KERNEL_SIZE[] = "kernel_size";
 const char STRIDE[] = "stride";
 const char STRIDES[] = "strides";
 const char DILATION[] = "dilation";
 const char PAD[] = "pad";
 const char PAD_LIST[] = "pad_list";
 const char PAD_MODE[] = "pad_mode";
-const char PADDING[] = "padding";
 const char PAD_MODE_LOWER_SAME[] = "same";
 const char PAD_MODE_LOWER_VALID[] = "valid";
 const char PAD_MODE_UPPER_SAME[] = "SAME";
@@ -46,11 +47,15 @@ const char IS_GRAD[] = "is_grad";
 const char TRANSPOSE_NO = 'N';
 const char TRANSPOSE_YES = 'T';
 const char AXIS[] = "axis";
+const char DIM[] = "dim";
 const char BEGIN[] = "begin";
 const char END[] = "end";
 const char SIZE[] = "size";
 const char USE_NESTEROV[] = "use_nesterov";
 const char GROUP[] = "group";
+const char START[] = "start";
+const char LIMIT[] = "limit";
+const char DELTA[] = "delta";
 
 enum OperateType {
   ADD = 0,
@@ -61,6 +66,8 @@ enum OperateType {
   SQRT,
   POW,
   REALDIV,
+  FLOORDIV,
+  MOD,
   NEG,
   LESS,
   ASSIGNADD,
@@ -69,7 +76,27 @@ enum OperateType {
   ABSGRAD,
   TANHGRAD,
   SQRTGRAD,
-  SIGMOIDGRAD
+  SIGMOIDGRAD,
+  ONESLIKE,
+  ZEROSLIKE,
+  SIGN,
+  EQUAL,
+  NOTEQUAL,
+  LESSEQUAL,
+  LOGICALAND,
+  LOGICALOR,
+  LOGICALNOT,
+  FLOOR,
+  SQUAREDDIFFERENCE,
+  GREATER,
+  GREATEREQUAL,
+  RECIPROCAL,
+  GELU,
+  GELUGRAD,
+  ASIN,
+  ACOS,
+  ASINGRAD,
+  ACOSGRAD,
 };
 
 class CPUKernel : public kernel::KernelMod {
@@ -101,6 +128,8 @@ class CPUKernelUtils {
   static size_t CalcOffset(const std::vector<size_t> &shape, size_t dim0, size_t dim1, size_t dim2, size_t dim3);
   static size_t GetElementNumOnAxis(const std::vector<size_t> &shape, int axis);
   static void GetElementNumEveryDim(const std::vector<size_t> &shape, std::vector<size_t> *element_num);
+  static void ParallelFor(const CTask &task, size_t count);
+  static std::vector<size_t> FlatShapeByAxis(const std::vector<size_t> &shape, int axis);
 };
 }  // namespace kernel
 }  // namespace mindspore

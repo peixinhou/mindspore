@@ -1,4 +1,4 @@
-# Copyright 2020 Huawei Technologies Co., Ltd
+# Copyright 2020-2021 Huawei Technologies Co., Ltd
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,13 +14,16 @@
 # ============================================================================
 """Profiling api file."""
 import os
+import re
+import stat
 import time
+import json
 from enum import Enum
 
 from mindspore import log as logger, context
 from mindspore.communication.management import release, get_rank
 from mindspore.profiler.common.exceptions.exceptions import ProfilerFileNotFoundException, \
-    ProfilerIOException, ProfilerException
+    ProfilerIOException, ProfilerException, ProfilerRawFileException
 from mindspore.profiler.common.util import get_file_names, fwrite_format
 from mindspore.profiler.common.validator.validate_path import \
     validate_and_normalize_path
@@ -29,14 +32,14 @@ from mindspore.profiler.parser.framework_parser import FrameworkParser
 from mindspore.profiler.parser.hwts_log_parser import HWTSLogParser
 from mindspore.profiler.parser.integrator import Integrator
 from mindspore.profiler.parser.integrator import GpuTimelineGenerator, AscendTimelineGenerator
+from mindspore.profiler.parser.memory_usage_parser import MemoryUsageParser
 from mindspore.profiler.parser.minddata_parser import MinddataParser
 from mindspore.profiler.parser.minddata_pipeline_parser import \
     MinddataPipelineParser
 from mindspore.profiler.parser.optime_parser import OPComputeTimeParser
-from mindspore.profiler.parser.step_trace_parser import StepTraceParser
+from mindspore.profiler.parser.step_trace_parser import GpuStepTraceParser, AscendStepTraceParser
 from mindspore.nn.cell import Cell
 
-PROFILING_LOG_BASE_PATH = "/var/log/npu/profiling"
 INIT_OP_NAME = 'Default/InitDataSetQueue'
 
 class ProfileOption(Enum):
@@ -71,7 +74,6 @@ class Profiler:
         >>> profiler.analyse()
     """
 
-    _base_profiling_container_path = "/var/log/npu/profiling/container"
     _hwts_output_filename_target = "output_format_data_hwts_"
     _opcompute_output_filename_target = "output_op_compute_time_"
     _aicpu_op_output_filename_target = "output_data_preprocess_aicpu_"
@@ -79,18 +81,15 @@ class Profiler:
     def __init__(self, **kwargs):
         # get device_id and device_target
         self._get_devid_and_devtarget()
-        output_path = kwargs.pop("output_path", "./data")
-        self._output_path = validate_and_normalize_path(output_path)
-        self._output_path = os.path.join(self._output_path, "profiler")
-        if not os.path.exists(self._output_path):
-            os.makedirs(self._output_path, exist_ok=True)
-        else:
-            logger.warning("The target dir already exists. "
-                           "There may be some old profiling data, and they will be rewrote in the end.")
-
+        self._get_output_path(kwargs)
         os.environ['PROFILING_MODE'] = 'true'
         os.environ['MINDDATA_PROFILING_DIR'] = self._output_path
 
+        if self._device_target:
+            from mindspore._c_expression import CPUProfiler
+            self._cpu_profiler = CPUProfiler.get_instance()
+            self._cpu_profiler.init(self._output_path)
+            self._cpu_profiler.step_profiling_enable(True)
         if self._device_target and self._device_target == "GPU":
             from mindspore._c_expression import GPUProfiler
             self._gpu_profiler = GPUProfiler.get_instance()
@@ -106,24 +105,47 @@ class Profiler:
             optypes_not_deal = kwargs.pop("optypes_not_deal", "Variable")
             if not isinstance(optypes_not_deal, str):
                 raise TypeError("The parameter optypes_not_deal must be str.")
-            job_id = kwargs.pop("ascend_job_id", "")
+            job_dir = kwargs.pop("ascend_job_id", "")
+            if job_dir:
+                job_dir = validate_and_normalize_path(job_dir)
+                if not os.path.exists(job_dir):
+                    msg = f"Invalid ascend_job_id: {job_dir}, Please pass the absolute path of the JOB dir"
+                    logger.error(msg)
+                    raise ValueError(msg)
+                self._output_path, _ = os.path.split(job_dir)
             if kwargs:
                 logger.warning("There are invalid params which don't work.")
 
             os.environ['DEVICE_ID'] = self._dev_id
-            os.environ['AICPU_PROFILING_MODE'] = 'true'
+            fp_point = os.environ.get("PROFILING_FP_START", "")
+            bp_point = os.environ.get("PROFILING_BP_END", "")
 
+            profiling_options = {
+                "output": self._output_path,
+                "fp_point": fp_point,
+                "bp_point": bp_point,
+                "training_trace": "on",
+                "task_trace": "on",
+                "aic_metrics": "PipeUtilization",
+                "aicpu": "on"
+            }
+
+            profiling_options = json.dumps(profiling_options)
+            # Characters longer than 2048 are ignored, resulting in profiling option resolution errors
+            if len(profiling_options) > 2048:
+                msg = "The parameter length exceeds the limit (2048), please input valid parameters."
+                logger.error(msg)
+                raise ValueError(msg)
             # use context interface to open profiling, for the new mindspore version(after 2020.5.21)
-            context.set_context(enable_profiling=True, profiling_options="training_trace:task_trace")
-
-            self._container_path = os.path.join(self._base_profiling_container_path, self._dev_id)
-            data_path = os.path.join(self._container_path, "data")
+            context.set_context(enable_profiling=True, profiling_options=profiling_options)
+            base_profiling_container_path = os.path.join(self._output_path, "container")
+            container_path = os.path.join(base_profiling_container_path, self._dev_id)
+            data_path = os.path.join(container_path, "data")
             data_path = validate_and_normalize_path(data_path)
             if not os.path.exists(data_path):
                 os.makedirs(data_path, exist_ok=True)
 
             self._filt_optype_names = optypes_not_deal.split(",") if optypes_not_deal else []
-            self._profiling_job_id = job_id
             # add job id env through user input later
             self._job_id_env = 0
             self._start_time = int(time.time() * 10000000)
@@ -143,97 +165,130 @@ class Profiler:
             >>> model.train()
             >>> profiler.analyse()
         """
+        self._cpu_profiler.stop()
         if self._device_target and self._device_target == "GPU":
-            self._gpu_profiler.stop()
-            self._generate_timeline()
-
-            # parse minddata pipeline operator and queue for GPU
-            try:
-                pipeline_parser = MinddataPipelineParser(self._output_path, self._dev_id, self._output_path)
-                pipeline_parser.parse()
-            except ProfilerException as err:
-                logger.warning(err.message)
-
-            os.environ['PROFILING_MODE'] = str("false")
+            self._gpu_analyse()
 
         elif self._device_target and self._device_target == "Ascend":
-            release()
+            self._ascend_analyse()
 
-            job_id = self._get_profiling_job_id()
-            logger.info("Profiling: job id is %s ", job_id)
+    def _ascend_analyse(self):
+        """Collect and analyse ascend performance data"""
+        release()
 
-            source_path = os.path.join(PROFILING_LOG_BASE_PATH, job_id)
-            # parse hwts.log.data.45.dev file, and get task profiling data
-            hwts_output_filename = self._hwts_output_filename_target + self._dev_id + ".txt"
-            hwts_output_filename = os.path.join(self._output_path, hwts_output_filename)
-            source_path = validate_and_normalize_path(source_path)
-            hwts_output_filename = validate_and_normalize_path(hwts_output_filename)
-            hwtslog_parser = HWTSLogParser(source_path, hwts_output_filename)
-            _ = hwtslog_parser.execute()
+        job_id = self._get_profiling_job_id()
+        logger.info("Profiling: job id is %s ", job_id)
 
-            # parse Framework file, and get the relation of op and tasks
-            framework_parser = FrameworkParser(job_id, self._dev_id, self._output_path)
-            framework_parser.parse()
-            op_task_dict = framework_parser.to_task_id_full_op_name_dict()
-            if not op_task_dict:
-                logger.error("Profiling: fail to parse framework files.")
-                return
+        source_path = os.path.join(self._output_path, job_id)
+        # parse hwts.log.data.45.dev file, and get task profiling data
+        hwts_output_filename = self._hwts_output_filename_target + self._dev_id + ".txt"
+        hwts_output_filename = os.path.join(self._output_path, hwts_output_filename)
+        source_path = validate_and_normalize_path(source_path)
+        hwts_output_filename = validate_and_normalize_path(hwts_output_filename)
+        hwtslog_parser = HWTSLogParser(source_path, hwts_output_filename)
+        hwtslog_parser.execute()
 
-            # get op compute time from hwts data and framework data, write output_op_compute_time.txt
-            opcompute_output_filename = self._opcompute_output_filename_target + self._dev_id + ".txt"
-            opcompute_output_filename = os.path.join(self._output_path, opcompute_output_filename)
-            opcompute_output_filename = validate_and_normalize_path(opcompute_output_filename)
-            optime_parser = OPComputeTimeParser(
-                hwts_output_filename, opcompute_output_filename,
-                op_task_dict, self._output_path, self._dev_id
-            )
-            optime_parser.execute()
+        # parse Framework file, and get the relation of op and tasks
+        framework_parser = FrameworkParser(job_id, self._dev_id, self._output_path)
+        framework_parser.parse()
+        op_task_dict = framework_parser.to_task_id_full_op_name_dict()
+        if not op_task_dict:
+            logger.error("Profiling: fail to parse framework files.")
+            return
 
-            # parse DATA_PREPROCESS.dev.AICPU file, write output_data_preprocess_aicpu_x.txt
-            output_data_preprocess_aicpu = self._aicpu_op_output_filename_target + self._dev_id + ".txt"
-            output_data_preprocess_aicpu = os.path.join(self._output_path, output_data_preprocess_aicpu)
-            output_data_preprocess_aicpu = validate_and_normalize_path(output_data_preprocess_aicpu)
-            aicpu_data_parser = DataPreProcessParser(source_path, output_data_preprocess_aicpu)
-            aicpu_data_parser.execute()
+        # get op compute time from hwts data and framework data, write output_op_compute_time.txt
+        opcompute_output_filename = self._opcompute_output_filename_target + self._dev_id + ".txt"
+        opcompute_output_filename = os.path.join(self._output_path, opcompute_output_filename)
+        opcompute_output_filename = validate_and_normalize_path(opcompute_output_filename)
+        optime_parser = OPComputeTimeParser(
+            hwts_output_filename, opcompute_output_filename,
+            op_task_dict, self._output_path, self._dev_id
+        )
+        optime_parser.execute()
 
-            # Parsing minddata AICPU profiling
-            MinddataParser.execute(source_path, self._output_path, self._dev_id)
+        # parse DATA_PREPROCESS.dev.AICPU file, write output_data_preprocess_aicpu_x.txt
+        output_data_preprocess_aicpu = self._aicpu_op_output_filename_target + self._dev_id + ".txt"
+        output_data_preprocess_aicpu = os.path.join(self._output_path, output_data_preprocess_aicpu)
+        output_data_preprocess_aicpu = validate_and_normalize_path(output_data_preprocess_aicpu)
+        aicpu_data_parser = DataPreProcessParser(source_path, output_data_preprocess_aicpu)
+        aicpu_data_parser.execute()
 
-            # parse minddata pipeline operator and queue
-            try:
-                pipeline_parser = MinddataPipelineParser(self._output_path, self._dev_id, self._output_path)
-                pipeline_parser.parse()
-            except ProfilerException as err:
-                logger.warning(err.message)
+        # Parsing minddata AICPU profiling
+        MinddataParser.execute(source_path, self._output_path, self._dev_id)
 
-            # analyse op compute time info
-            try:
-                self._analyser_op_info()
-            except ProfilerException as err:
-                logger.warning(err.message)
+        # parse minddata pipeline operator and queue
+        try:
+            pipeline_parser = MinddataPipelineParser(self._output_path, self._dev_id, self._output_path)
+            pipeline_parser.parse()
+        except ProfilerException as err:
+            logger.warning(err.message)
 
-            # analyse step trace info
-            try:
-                self._analyse_step_trace(source_path, framework_parser)
-            except ProfilerException as err:
-                logger.warning(err.message)
+        # analyse op compute time info
+        try:
+            self._analyser_op_info()
+        except ProfilerException as err:
+            logger.warning(err.message)
 
-            # analyse timeline info
-            try:
-                self._analyse_timeline(aicpu_data_parser, optime_parser)
-            except (ProfilerIOException, ProfilerFileNotFoundException, RuntimeError) as err:
-                logger.warning('Fail to write timeline data: %s', err)
+        # analyse step trace info
+        points = None
+        try:
+            points = self._analyse_step_trace(source_path, framework_parser)
+        except ProfilerException as err:
+            logger.warning(err.message)
 
-            os.environ['PROFILING_MODE'] = str("false")
-            context.set_context(enable_profiling=False)
+        # analyse timeline info
+        try:
+            self._analyse_timeline(aicpu_data_parser, optime_parser, source_path)
+        except (ProfilerIOException, ProfilerFileNotFoundException, RuntimeError) as err:
+            logger.warning('Fail to write timeline data: %s', err)
 
-    def _analyse_step_trace(self, source_path, framework_parser):
+        # analyse memory usage info
+        try:
+            self._analyse_memory_usage(points)
+        except (ProfilerIOException, ProfilerFileNotFoundException, ProfilerRawFileException) as err:
+            logger.warning(err.message)
+
+        os.environ['PROFILING_MODE'] = str("false")
+        context.set_context(enable_profiling=False)
+
+    def _gpu_analyse(self):
+        """Collect and analyse gpu performance data"""
+        if context.get_auto_parallel_context('device_num') > 1 and self._dev_id != get_rank():
+            self._dev_id = get_rank()
+            logger.error('Please check the Profiler object initialized after set_auto_parallel_context() '
+                         'and init(). Profiler should be initialized after these code. ')
+        self._gpu_profiler.stop()
+        timeline_generator = self._generate_timeline()
+
+        # parse minddata pipeline operator and queue for GPU
+        try:
+            pipeline_parser = MinddataPipelineParser(self._output_path, self._dev_id, self._output_path)
+            pipeline_parser.parse()
+        except ProfilerException as err:
+            logger.warning(err.message)
+
+        # analyse step trace info
+        try:
+            self._analyse_step_trace(is_training_mode_flag=timeline_generator.check_op_name('Gradients'))
+        except ProfilerException as err:
+            logger.warning(err.message)
+
+        os.environ['PROFILING_MODE'] = str("false")
+
+        logger.warning(
+            '\nMemory Usage is not supported on GPU currently.\n'
+            'Please running on Ascend if you would like to see memory analysis, '
+            'otherwise, this warning can be ignored.'
+        )
+
+    def _analyse_step_trace(self, source_path=None, framework_parser=None, is_training_mode_flag=True):
         """
         Analyse step trace data and save the result.
 
         Args:
             source_path (str): The directory that contains the step trace original data.
             framework_parser (FrameworkParser): The framework parse instance.
+            is_training_mode_flag (bool): Whether in training mode or not.
         """
         logger.info("Begin to parse step trace.")
         # construct output path
@@ -247,24 +302,41 @@ class Profiler:
         )
         step_trace_intermediate_file_path = validate_and_normalize_path(step_trace_intermediate_file_path)
         point_info_file_path = validate_and_normalize_path(point_info_file_path)
-        # whether keep the first step
-        skip_first_step_flag = framework_parser.check_op_name(INIT_OP_NAME)
-        point_info = framework_parser.point_info
-        # parser the step trace files and save the result to disk
-        source_path = validate_and_normalize_path(source_path)
-        parser = StepTraceParser(input_dir=source_path,
-                                 output_file_path=step_trace_intermediate_file_path,
-                                 job_id=self._job_id_env,
-                                 skip_first_step=skip_first_step_flag)
-        parser.update_tag_op_type_map(point_info)
-        parser.parse_and_save()
-        point_info = parser.record_point_info(point_info, point_info_file_path)
+
+        if self._device_target and self._device_target == 'GPU':
+            input_file_path = os.path.join(
+                self._output_path,
+                f'step_trace_profiling_{self._dev_id}.txt'
+            )
+            parser = GpuStepTraceParser(input_dir=input_file_path,
+                                        output_file_path=step_trace_intermediate_file_path,
+                                        is_training_mode=is_training_mode_flag)
+            parser.parse_and_save()
+            point_info = parser.record_point_info(input_file_path, point_info_file_path)
+        else:
+            # whether keep the first step
+            skip_first_step_flag = framework_parser.check_op_name(INIT_OP_NAME)
+            point_info = framework_parser.point_info
+            # recognize inference or traning mode
+            is_traning_mode_flag = framework_parser.check_op_name("Gradients")
+            # parser the step trace files and save the result to disk
+            source_path = validate_and_normalize_path(source_path)
+            parser = AscendStepTraceParser(input_dir=source_path,
+                                           output_file_path=step_trace_intermediate_file_path,
+                                           job_id=self._job_id_env,
+                                           skip_first_step=skip_first_step_flag,
+                                           is_training_mode=is_traning_mode_flag)
+            parser.update_tag_op_type_map(point_info)
+            parser.parse_and_save()
+            point_info = parser.record_point_info(point_info, point_info_file_path)
         # print parser result
         parser.show()
         logger.info("Finish saving the intermediate result: %s", step_trace_intermediate_file_path)
         logger.info("The point info is: %s", point_info)
 
-    def _analyse_timeline(self, aicpu_parser, optime_parser):
+        return point_info
+
+    def _analyse_timeline(self, aicpu_parser, optime_parser, source_path):
         """
         Analyse and parse timeline info.
 
@@ -296,7 +368,8 @@ class Profiler:
         # Add info into timeline, such as AI CPU, AllReduce, framework info.
         aicpu_info = aicpu_parser.query_aicpu_data()
         min_cycle_counter = min(aicpu_parser.min_cycle_counter, optime_parser.min_cycle_counter)
-        timeline_analyser.init_timeline(all_reduce_info, framework_info, aicpu_info, min_cycle_counter)
+        timeline_analyser.init_timeline(all_reduce_info, framework_info, aicpu_info,
+                                        min_cycle_counter, source_path)
         size_limit = 20 * 1024 * 1024  # 20MB
         timeline_analyser.write_timeline(size_limit)
         timeline_analyser.write_timeline_summary()
@@ -309,51 +382,53 @@ class Profiler:
             timeline_generator.init_timeline()
             timeline_generator.write_timeline(size_limit)
             timeline_generator.write_timeline_summary()
+            return timeline_generator
         except (ProfilerIOException, ProfilerFileNotFoundException, RuntimeError) as err:
             logger.warning('Fail to write timeline data: %s', err)
             raise RuntimeError('Fail to write timeline data.')
+
+    def _analyse_memory_usage(self, points):
+        """Analyse memory usage data."""
+        integrator = Integrator(self._output_path, self._dev_id)
+        aicore_detail_data = integrator.get_aicore_detail_data()
+        memory_parser = MemoryUsageParser(self._output_path, self._dev_id)
+        memory_parser.init_memory_usage_info(aicore_detail_data, points)
+        memory_parser.write_memory_files()
 
     def _get_profiling_job_id(self):
         """Get profiling job id, which was generated by ada service.
 
         Returns:
-            str: profiling jon id.
+            str, profiling job id.
         """
 
-        if self._profiling_job_id:
-            return self._profiling_job_id
-
         job_id = ""
-        cmd = "ls -t " + PROFILING_LOG_BASE_PATH + "|grep JOB|awk '{print $1}'"
-        r = os.popen(cmd)
-        profiling_job_dirs = r.readlines()
-        r.close()
-        for item in profiling_job_dirs:
-            path = os.path.join(PROFILING_LOG_BASE_PATH, item.strip())
-            log_file = get_file_names(path, "host_start.log")
-            if not log_file:
-                logger.error("Profiling: job path %s, host_start.log not exist.", path)
-                continue
+        for item in os.listdir(self._output_path):
+            if item.startswith('JOB'):
+                path = os.path.join(self._output_path, item)
 
-            log_file = os.path.join(path, log_file[0])
-            item_dict = self._parse_host_start_log(log_file)
+                log_file = get_file_names(path, "host_start.log")
+                if not log_file:
+                    logger.error("Profiling: job path %s, host_start.log not exist.", path)
+                    break
 
-            if not item_dict:
-                logger.error("Profiling: job path %s, fail to get job start info.", path)
-                continue
+                log_file = os.path.join(path, log_file[0])
+                item_dict = self._parse_host_start_log(log_file)
 
-            if self._dev_id != item_dict["device_id"]:
-                logger.info("Profiling: job path %s, dev id %s, training device id %s.",
-                            path, item_dict["device_id"], self._dev_id)
-                continue
+                if not item_dict:
+                    logger.error("Profiling: job path %s, fail to get job start info.", path)
+                    break
 
-            if self._start_time > int(item_dict["start_time"]):
-                logger.info("Profiling: job path %s, start_time %s, training start_time %d.",
-                            path, item_dict["start_time"], self._start_time)
+                job_id = item
+
+                if self._dev_id != item_dict["device_id"]:
+                    logger.info("Profiling: job path %s, dev id %s, training device id %s.",
+                                path, item_dict["device_id"], self._dev_id)
+
+                if self._start_time > int(item_dict["start_time"]):
+                    logger.info("Profiling: job path %s, start_time %s, training start_time %d.",
+                                path, item_dict["start_time"], self._start_time)
                 break
-
-            job_id = item.strip()
-            break
 
         if not job_id:
             msg = "Fail to get profiling job, please check whether job dir was generated"
@@ -463,6 +538,49 @@ class Profiler:
 
         self._dev_id = dev_id
         self._device_target = device_target
+
+    def _get_output_path(self, kwargs):
+        """Get output path of profiling data."""
+        current_time = int(time.time())
+
+        # to avoid getting different timestamp from different process in multi-card training,
+        # set the timestamp as exist timestamp if it's difference is less than 6 seconds.
+        def _select_timestamp(dir_name, re_pattern, input_time):
+            """select the timestamp from current_time and exist timestamp."""
+            timestamp_diff_threshold = 6
+            exist_timestamp_list = []
+            select_time = input_time
+            if not os.path.exists(dir_name):
+                os.makedirs(dir_name, exist_ok=True)
+            for file_name in os.listdir(dir_name):
+                match_res = re_pattern.match(file_name)
+                if match_res:
+                    exist_timestamp_list.append(int(match_res.group(1)))
+            if exist_timestamp_list:
+                time_diff_list = [input_time - timestamp for timestamp in exist_timestamp_list]
+                min_time_diff = min(time_diff_list)
+                if min_time_diff <= timestamp_diff_threshold:
+                    select_time = exist_timestamp_list[time_diff_list.index(min_time_diff)]
+
+            return select_time
+
+        if "output_path" not in kwargs:
+            selected_timestamp = _select_timestamp(os.getcwd(), re.compile(r'data-(\d+)'), current_time)
+            output_path = f"data-{selected_timestamp}"
+            self._output_path = validate_and_normalize_path(output_path)
+        else:
+            output_path = kwargs.pop("output_path")
+            self._output_path = validate_and_normalize_path(output_path)
+            selected_timestamp = _select_timestamp(self._output_path,
+                                                   re.compile(r'profiler-(\d+)'), current_time)
+
+        self._output_path = os.path.join(self._output_path, f"profiler-{selected_timestamp}")
+        if not os.path.exists(self._output_path):
+            os.makedirs(self._output_path, exist_ok=True)
+            os.chmod(self._output_path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
+        else:
+            logger.warning("The target dir already exists. "
+                           "There may be some old profiling data, and they will be rewrote in the end.")
 
     @staticmethod
     def profile(network=None, profile_option=None):

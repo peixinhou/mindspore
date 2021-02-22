@@ -50,7 +50,7 @@ Status ReLUV2Info::CheckStrategy(const StrategyPtr &strategy) {
 
 Status ReLUV2Info::GetAttrs() { return SUCCESS; }
 
-Status ReLUV2Info::GenerateStrategies(int32_t stage_id) {
+Status ReLUV2Info::GenerateStrategies(int64_t stage_id) {
   Shape input0_split(inputs_shape_[0].size(), 1);
   // the second dimension is not splitable
   input0_split[1] = 0;
@@ -172,7 +172,7 @@ Status ReLUV2Info::InferAsLossDivisor() {
   }
 
   if (outputs_tensor_map_[0].empty()) {
-    as_loss_divisor_ = SizeToInt(global_device_list_.size());
+    as_loss_divisor_ = stage_device_size_;
     MS_LOG(INFO) << name_ << ": The output is a scalar, use the dev size " << as_loss_divisor_ << ", loss divisor.";
     return SUCCESS;
   }

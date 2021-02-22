@@ -25,6 +25,9 @@
 #if defined(_WIN32) || defined(_WIN64)
 #undef HAVE_STDDEF_H
 #undef HAVE_STDLIB_H
+#elif __APPLE__
+#include <sys/param.h>
+#include <sys/mount.h>
 #endif
 #include "./jpeglib.h"
 #include "./jerror.h"
@@ -52,6 +55,12 @@ int GetCVInterpolationMode(InterpolationMode mode);
 /// \param type
 /// \return Status code
 int GetCVBorderType(BorderType type);
+
+/// \brief Returns the check result of tensor rank and tensor shape
+/// \param[in] tensor: The input tensor need to check
+/// \param[in] channel: The channel index of tensor shape.
+/// \param[out] return true if channel of tensor shape is 1 or 3.
+bool CheckTensorShape(const std::shared_ptr<Tensor> &tensor, const int &channel);
 
 /// \brief Returns flipped image
 /// \param[in] input/output: Tensor of shape <H,W,C> or <H,W> and any OpenCv compatible type, see CVTensor.
@@ -93,6 +102,8 @@ Status Decode(const std::shared_ptr<Tensor> &input, std::shared_ptr<Tensor> *out
 Status DecodeCv(const std::shared_ptr<Tensor> &input, std::shared_ptr<Tensor> *output);
 
 bool IsNonEmptyJPEG(const std::shared_ptr<Tensor> &input);
+
+bool IsNonEmptyPNG(const std::shared_ptr<Tensor> &input);
 
 void JpegSetSource(j_decompress_ptr c_info, const void *data, int64_t data_size);
 
@@ -181,6 +192,15 @@ Status Rotate(const std::shared_ptr<Tensor> &input, std::shared_ptr<Tensor> *out
 /// \param output: Normalized image Tensor of same input shape and type DE_FLOAT32
 Status Normalize(const std::shared_ptr<Tensor> &input, std::shared_ptr<Tensor> *output,
                  const std::shared_ptr<Tensor> &mean, const std::shared_ptr<Tensor> &std);
+
+/// \brief Returns Normalized and paded image
+/// \param input: Tensor of shape <H,W,C> in RGB order and any OpenCv compatible type, see CVTensor.
+/// \param mean: Tensor of shape <3> and type DE_FLOAT32 which are mean of each channel in RGB order
+/// \param std:  Tensor of shape <3> and type DE_FLOAT32 which are std of each channel in RGB order
+/// \param dtype: output dtype
+/// \param output: Normalized image Tensor and pad an extra channel, return a dtype Tensor
+Status NormalizePad(const std::shared_ptr<Tensor> &input, std::shared_ptr<Tensor> *output,
+                    const std::shared_ptr<Tensor> &mean, const std::shared_ptr<Tensor> &std, const std::string &dtype);
 
 /// \brief Returns image with adjusted brightness.
 /// \param input: Tensor of shape <H,W,3> in RGB order and any OpenCv compatible type, see CVTensor.

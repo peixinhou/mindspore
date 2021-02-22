@@ -71,9 +71,9 @@ int Slice::UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &inpu
           auto valTuplPtr = dyn_cast<ValueTuple>(value);
           MS_ASSERT(valTuplPtr != nullptr);
           for (size_t i = 0; i < valTuplPtr->size(); i++) {
-            auto elem = dyn_cast<Int32Imm>((*valTuplPtr)[i]);
+            auto elem = (*valTuplPtr)[i];
             MS_ASSERT(elem != nullptr);
-            attr->begin.emplace_back(elem->value());
+            attr->begin.emplace_back(CastToInt(elem).front());
           }
         }
       }
@@ -88,9 +88,9 @@ int Slice::UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &inpu
           auto valTuplPtr = dyn_cast<ValueTuple>(value);
           MS_ASSERT(valTuplPtr != nullptr);
           for (size_t i = 0; i < valTuplPtr->size(); i++) {
-            auto elem = dyn_cast<Int32Imm>((*valTuplPtr)[i]);
+            auto elem = (*valTuplPtr)[i];
             MS_ASSERT(elem != nullptr);
-            attr->size.emplace_back(elem->value());
+            attr->size.emplace_back(CastToInt(elem).front());
           }
         }
       }
@@ -175,27 +175,27 @@ int Slice::InferShape(std::vector<lite::Tensor *> inputs, std::vector<lite::Tens
   outputs.at(0)->set_data_type(input->data_type());
   outputs.at(0)->set_format(input->format());
   if (!infer_flag()) {
-    return RET_OK;
+    return RET_INFER_INVALID;
   }
   auto input_shape = input->shape();
   std::vector<int32_t> slice_begin(GetBegin());
   std::vector<int32_t> slice_size(GetSize());
   std::vector<int32_t> slice_axes(GetAxes());
   std::vector<int32_t> output_shape(input_shape.size());
-  if (inputs.size() == kSliceMaxInputNum) {
-    if (slice_begin.empty() && inputs.at(1)->data_c() != nullptr) {
+  if (inputs.size() > kSliceInputNum && inputs.size() <= kSliceMaxInputNum) {
+    if (slice_begin.empty() && inputs.size() >= 2 && inputs.at(1)->data_c() != nullptr) {
       for (int i = 0; i < inputs.at(1)->ElementsNum(); i++) {
         slice_begin.emplace_back(static_cast<int *>(inputs.at(1)->data_c())[i]);
       }
     }
-    if (slice_size.empty() && inputs.at(2)->data_c() != nullptr) {
+    if (slice_size.empty() && inputs.size() >= 3 && inputs.at(2)->data_c() != nullptr) {
       for (int i = 0; i < inputs.at(2)->ElementsNum(); i++) {
         auto end = static_cast<int *>(inputs.at(2)->data_c())[i];
         auto size = end < 0 ? end : (end == INT32_MAX ? -1 : end - slice_begin.at(i));
         slice_size.emplace_back(size);
       }
     }
-    if (slice_axes.empty() && inputs.at(3)->data_c() != nullptr) {
+    if (slice_axes.empty() && inputs.size() >= 4 && inputs.at(3)->data_c() != nullptr) {
       for (int i = 0; i < inputs.at(3)->ElementsNum(); i++) {
         slice_axes.emplace_back(static_cast<int *>(inputs.at(3)->data_c())[i]);
       }
@@ -220,12 +220,12 @@ int Slice::InferShape(std::vector<lite::Tensor *> inputs, std::vector<lite::Tens
       MS_LOG(ERROR) << "Invalid begin input " << begin.at(i) << " which should be >= 0";
       return RET_PARAM_INVALID;
     }
-    if (input_shape.at(i) <= begin.at(i)) {
-      MS_LOG(ERROR) << "Invalid begin input!begin[" << i << "]=" << begin.at(i)
-                    << " which should be <= " << input_shape.at(i);
+    if (input_shape.at(i) != 0 && input_shape.at(i) <= begin.at(i)) {
+      MS_LOG(ERROR) << "Invalid begin input!begin[" << i << "]=" << begin.at(i) << " which should be > "
+                    << input_shape.at(i);
       return RET_PARAM_INVALID;
     }
-    if (size.at(i) > (input_shape.at(i) - begin.at(i))) {
+    if (input_shape.at(i) != 0 && size.at(i) > (input_shape.at(i) - begin.at(i))) {
       MS_LOG(ERROR) << "Invalid size input " << size.at(i) << " which should be <= " << input_shape.at(i) - begin.at(i);
       return RET_PARAM_INVALID;
     }

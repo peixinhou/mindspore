@@ -21,7 +21,7 @@
 #include <limits.h>
 #include <stdlib.h>
 #include <sys/stat.h>
-#if !defined(_WIN32) && !defined(_WIN64)
+#if !defined(_WIN32) && !defined(_WIN64) && !defined(__APPLE__)
 #include <sys/statfs.h>
 #include <sys/wait.h>
 #endif
@@ -77,7 +77,7 @@ enum TaskType {
   kCommonTask = 0,
   kPaddedTask = 1,
 };
-enum SamplerType { kCustomTopNSampler, kCustomTopPercentSampler, kSubsetRandomSampler, kPKSampler };
+enum SamplerType { kCustomTopNSampler, kCustomTopPercentSampler, kSubsetRandomSampler, kPKSampler, kSubsetSampler };
 
 enum ShuffleType { kShuffleCategory, kShuffleSample };
 
@@ -144,7 +144,7 @@ const std::unordered_map<std::string, std::string> kTypesMap = {
   {"float16", "float32"}, {"float32", "float32"}, {"float64", "float64"}, {"string", "string"}};
 /// \brief split a string using a character
 /// \param[in] field target string
-/// \param[in] separator a character for spliting
+/// \param[in] separator a character for splitting
 /// \return vector type result
 std::vector<std::string> StringSplit(const std::string &field, char separator);
 
@@ -181,6 +181,9 @@ std::pair<MSRStatus, uint64_t> GetDiskSize(const std::string &str_dir, const Dis
 /// \brief get the max hardware concurrency
 /// \return max concurrency
 uint32_t GetMaxThreadNum();
+
+/// \brief the max number of samples to enable lazy load
+const uint32_t LAZY_LOAD_THRESHOLD = 5000000;
 }  // namespace mindrecord
 }  // namespace mindspore
 

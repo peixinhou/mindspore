@@ -17,10 +17,10 @@
 #ifndef MINDSPORE_LITE_SRC_RUNTIME_KERNEL_ARM_FP32_GATHERND_H_
 #define MINDSPORE_LITE_SRC_RUNTIME_KERNEL_ARM_FP32_GATHERND_H_
 
+#include <string.h>
 #include <vector>
-#include "nnacl/fp32/gatherNd.h"
+#include "nnacl/fp32/gatherNd_fp32.h"
 #include "src/lite_kernel.h"
-
 #include "include/context.h"
 #include "nnacl/op_base.h"
 
@@ -41,8 +41,9 @@ class GatherNdCPUKernel : public LiteKernel {
   int DoGatherNd(int task_id);
 
  private:
-  int thread_sz_count_;
-  int thread_sz_stride_;
+  void InitOffset();
+  int thread_sz_count_ = 0;
+  int thread_sz_stride_ = 0;
   int count_;
   int area_;
   int *in_offset_ = nullptr;

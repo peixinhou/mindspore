@@ -18,7 +18,7 @@ import sys
 import numpy as np
 
 from mindspore._checkparam import Validator as validator
-from ._evaluation import EvaluationBase
+from .metric import EvaluationBase
 
 
 class Precision(EvaluationBase):
@@ -47,6 +47,9 @@ class Precision(EvaluationBase):
         >>> metric.clear()
         >>> metric.update(x, y)
         >>> precision = metric.eval()
+        >>> print(precision)
+        [0.5 1. ]
+
     """
     def __init__(self, eval_type='classification'):
         super(Precision, self).__init__(eval_type)

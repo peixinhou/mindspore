@@ -1,5 +1,5 @@
 /**
- * Copyright 2020 Huawei Technologies Co., Ltd
+ * Copyright 2020-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,10 +29,18 @@ namespace dataset {
 // Function to build ProjectOp
 ProjectNode::ProjectNode(std::shared_ptr<DatasetNode> child, const std::vector<std::string> &columns)
     : columns_(columns) {
-  this->children.push_back(child);
+  this->AddChild(child);
 }
 
+std::shared_ptr<DatasetNode> ProjectNode::Copy() {
+  auto node = std::make_shared<ProjectNode>(nullptr, this->columns_);
+  return node;
+}
+
+void ProjectNode::Print(std::ostream &out) const { out << Name() + "(column: " + PrintColumns(columns_) + ")"; }
+
 Status ProjectNode::ValidateParams() {
+  RETURN_IF_NOT_OK(DatasetNode::ValidateParams());
   if (columns_.empty()) {
     std::string err_msg = "ProjectNode: No columns are specified.";
     MS_LOG(ERROR) << err_msg;
@@ -44,13 +52,19 @@ Status ProjectNode::ValidateParams() {
   return Status::OK();
 }
 
-std::vector<std::shared_ptr<DatasetOp>> ProjectNode::Build() {
-  // A vector containing shared pointer to the Dataset Ops that this object will create
-  std::vector<std::shared_ptr<DatasetOp>> node_ops;
-
-  node_ops.push_back(std::make_shared<ProjectOp>(columns_));
-  return node_ops;
+Status ProjectNode::Build(std::vector<std::shared_ptr<DatasetOp>> *const node_ops) {
+  auto op = std::make_shared<ProjectOp>(columns_);
+  op->set_total_repeats(GetTotalRepeats());
+  op->set_num_repeats_per_epoch(GetNumRepeatsPerEpoch());
+  node_ops->push_back(op);
+  return Status::OK();
 }
 
+Status ProjectNode::to_json(nlohmann::json *out_json) {
+  nlohmann::json args;
+  args["columns"] = columns_;
+  *out_json = args;
+  return Status::OK();
+}
 }  // namespace dataset
 }  // namespace mindspore

@@ -26,7 +26,6 @@ from mindspore import context
 from mindspore.communication.management import init, get_rank, get_group_size
 from mindspore.train.callback import ModelCheckpoint, RunContext
 from mindspore.train.callback import _InternalCallbackParam, CheckpointConfig
-import mindspore as ms
 from mindspore import amp
 from mindspore.train.loss_scale_manager import FixedLossScaleManager
 from mindspore.common import set_seed
@@ -124,29 +123,6 @@ def parse_args():
     args.data_root = os.path.join(args.data_dir, 'train2014')
     args.annFile = os.path.join(args.data_dir, 'annotations/instances_train2014.json')
 
-    # init distributed
-    if args.is_distributed:
-        if args.device_target == "Ascend":
-            init()
-        else:
-            init("nccl")
-        args.rank = get_rank()
-        args.group_size = get_group_size()
-
-    # select for master rank save ckpt or all rank save, compatiable for model parallel
-    args.rank_save_ckpt_flag = 0
-    if args.is_save_on_master:
-        if args.rank == 0:
-            args.rank_save_ckpt_flag = 1
-    else:
-        args.rank_save_ckpt_flag = 1
-
-    # logger
-    args.outputs_dir = os.path.join(args.ckpt_path,
-                                    datetime.datetime.now().strftime('%Y-%m-%d_time_%H_%M_%S'))
-    args.logger = get_logger(args.outputs_dir, args.rank)
-    args.logger.save_args(args)
-
     return args
 
 
@@ -155,18 +131,33 @@ def conver_training_shape(args):
     return training_shape
 
 
-def train():
-    """Train function."""
-    args = parse_args()
+def network_init(args):
     devid = int(os.getenv('DEVICE_ID', '0'))
     context.set_context(mode=context.GRAPH_MODE, enable_auto_mixed_precision=True,
                         device_target=args.device_target, save_graphs=True, device_id=devid)
-    if args.need_profiler:
-        from mindspore.profiler.profiling import Profiler
-        profiler = Profiler(output_path=args.outputs_dir, is_detail=True, is_show_op_path=True)
+    # init distributed
+    if args.is_distributed:
+        if args.device_target == "Ascend":
+            init()
+        else:
+            init("nccl")
+        args.rank = get_rank()
+        args.group_size = get_group_size()
+    # select for master rank save ckpt or all rank save, compatible for model parallel
+    args.rank_save_ckpt_flag = 0
+    if args.is_save_on_master:
+        if args.rank == 0:
+            args.rank_save_ckpt_flag = 1
+    else:
+        args.rank_save_ckpt_flag = 1
+    # logger
+    args.outputs_dir = os.path.join(args.ckpt_path,
+                                    datetime.datetime.now().strftime('%Y-%m-%d_time_%H_%M_%S'))
+    args.logger = get_logger(args.outputs_dir, args.rank)
+    args.logger.save_args(args)
 
-    loss_meter = AverageMeter('loss')
 
+def parallel_init(args):
     context.reset_auto_parallel_context()
     parallel_mode = ParallelMode.STAND_ALONE
     degree = 1
@@ -174,6 +165,17 @@ def train():
         parallel_mode = ParallelMode.DATA_PARALLEL
         degree = get_group_size()
     context.set_auto_parallel_context(parallel_mode=parallel_mode, gradients_mean=True, device_num=degree)
+
+def train():
+    """Train function."""
+    args = parse_args()
+    network_init(args)
+    if args.need_profiler:
+        from mindspore.profiler.profiling import Profiler
+        profiler = Profiler(output_path=args.outputs_dir, is_detail=True, is_show_op_path=True)
+
+    loss_meter = AverageMeter('loss')
+    parallel_init(args)
 
     network = YOLOV3DarkNet53(is_training=True)
     # default is kaiming-normal
@@ -184,7 +186,6 @@ def train():
     args.logger.info('finish get network')
 
     config = ConfigYOLOV3DarkNet53()
-
     config.label_smooth = args.label_smooth
     config.label_smooth_factor = args.label_smooth_factor
 
@@ -204,7 +205,6 @@ def train():
         args.ckpt_interval = args.steps_per_epoch
 
     lr = get_lr(args)
-
     opt = Momentum(params=get_param_groups(network),
                    learning_rate=Tensor(lr),
                    momentum=args.momentum,
@@ -218,7 +218,7 @@ def train():
                                           level="O2", keep_batchnorm_fp32=False)
         keep_loss_fp32(network)
     else:
-        network = TrainingWrapper(network, opt)
+        network = TrainingWrapper(network, opt, sens=args.loss_scale)
         network.set_train()
 
     if args.rank_save_ckpt_flag:
@@ -255,9 +255,8 @@ def train():
         batch_gt_box1 = Tensor.from_numpy(data['gt_box2'])
         batch_gt_box2 = Tensor.from_numpy(data['gt_box3'])
 
-        input_shape = Tensor(tuple(input_shape[::-1]), ms.float32)
         loss = network(images, batch_y_true_0, batch_y_true_1, batch_y_true_2, batch_gt_box0, batch_gt_box1,
-                       batch_gt_box2, input_shape)
+                       batch_gt_box2)
         loss_meter.update(loss.asnumpy())
 
         if args.rank_save_ckpt_flag:
@@ -284,7 +283,6 @@ def train():
             if i == 10:
                 profiler.analyse()
                 break
-
     args.logger.info('==========end training===============')
 
 

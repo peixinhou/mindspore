@@ -17,7 +17,7 @@
 #include <vector>
 #include "nnacl/gather_parameter.h"
 #include "nnacl/int8/gather_int8.h"
-#include "nnacl/quantization/quantize.h"
+#include "mindspore/lite/nnacl/int8/quantize.h"
 #include "schema/model_generated.h"
 #include "src/kernel_registry.h"
 #include "src/runtime/runtime_api.h"
@@ -107,29 +107,5 @@ int GatherInt8CPUKernel::Run() {
   return RET_OK;
 }
 
-kernel::LiteKernel *CpuGatherInt8KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                               const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter,
-                                               const lite::InnerContext *ctx, const kernel::KernelKey &desc,
-                                               const mindspore::lite::PrimitiveC *primitive) {
-  MS_ASSERT(desc.type == schema::PrimitiveType_Gather);
-  if (opParameter == nullptr) {
-    MS_LOG(ERROR) << "input parameter is nullptr!";
-    return nullptr;
-  }
-  auto *kernel = new (std::nothrow) GatherInt8CPUKernel(opParameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    free(opParameter);
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
-}
-
-REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Gather, CpuGatherInt8KernelCreator)
+REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Gather, LiteKernelCreator<GatherInt8CPUKernel>)
 }  // namespace mindspore::kernel

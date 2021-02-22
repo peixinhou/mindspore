@@ -51,7 +51,7 @@ class Net(nn.Cell):
         super().__init__()
         if shape is None:
             shape = [64, 64]
-        self.gatherv2 = P.GatherV2().shard(strategy1).add_prim_attr("primitive_target", target)
+        self.gatherv2 = P.Gather().shard(strategy1).add_prim_attr("primitive_target", target)
         self.mul = P.Mul().shard(strategy2)
         self.index = Tensor(np.ones(shape), dtype=ms.int32)
         self.axis = axis
@@ -173,6 +173,32 @@ def test_gatherv2_semi_auto8():
 
     x = Tensor(np.ones([64]), dtype=ms.float32)
     y = Tensor(np.ones([64, 64]), dtype=ms.float32)
+    net.set_train()
+    _executor.compile(net, x, y)
+
+
+def test_gatherv2_forward_all_reduce():
+    context.set_auto_parallel_context(device_num=8, global_rank=0, parallel_mode="semi_auto_parallel")
+    strategy1 = ((8, 1), (1, 1))
+    strategy2 = ((2, 4, 1), (2, 4, 1))
+    net = GradWrap(NetWithLoss(Net(0, strategy1, strategy2, shape=[2, 64])))
+    net.set_auto_parallel()
+
+    x = Tensor(np.ones([64, 64]), dtype=ms.float32)
+    y = Tensor(np.ones([2, 64, 64]), dtype=ms.float32)
+    net.set_train()
+    _executor.compile(net, x, y)
+
+
+def test_gatherv2_split_axis_0_repeat_calc():
+    context.set_auto_parallel_context(device_num=8, global_rank=7, parallel_mode="semi_auto_parallel")
+    strategy1 = ((4, 1), (1, 1))
+    strategy2 = ((2, 4, 1), (2, 4, 1))
+    net = GradWrap(NetWithLoss(Net(0, strategy1, strategy2, shape=[2, 64])))
+    net.set_auto_parallel()
+
+    x = Tensor(np.ones([64, 64]), dtype=ms.float32)
+    y = Tensor(np.ones([2, 64, 64]), dtype=ms.float32)
     net.set_train()
     _executor.compile(net, x, y)
 

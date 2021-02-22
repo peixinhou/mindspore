@@ -1,5 +1,5 @@
 /**
- * Copyright 2019 Huawei Technologies Co., Ltd
+ * Copyright 2019-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -43,12 +43,14 @@ static constexpr char kAvgPoolingModeLowerCase[] = "avg";
 static constexpr float kSignedMinFloat = -3.402823466e+38F;
 
 // Used by mixprecision, cudnn dtype select
-static std::map<std::string, cudnnDataType_t> kCudnnDtypeMap = {{"kNumberTypeFloat32", CUDNN_DATA_FLOAT},
-                                                                {"kNumberTypeFloat16", CUDNN_DATA_HALF},
-                                                                {"kNumberTypeInt32", CUDNN_DATA_INT32}};
+static std::map<std::string, cudnnDataType_t> kCudnnDtypeMap = {
+  {"kNumberTypeFloat32", CUDNN_DATA_FLOAT},  {"kNumberTypeFloat16", CUDNN_DATA_HALF},
+  {"kNumberTypeFloat64", CUDNN_DATA_DOUBLE}, {"kNumberTypeInt32", CUDNN_DATA_INT32},
+  {"kNumberTypeBool", CUDNN_DATA_INT8},      {"kNumberTypeInt8", CUDNN_DATA_INT8},
+  {"kNumberTypeUInt8", CUDNN_DATA_UINT8}};
 // Used by mixprecision, cuda dtype select
-static std::map<std::string, cudaDataType_t> kCudaDtypeMap = {{"kNumberTypeFloat32", CUDA_R_32F},
-                                                              {"kNumberTypeFloat16", CUDA_R_16F}};
+static std::map<std::string, cudaDataType_t> kCudaDtypeMap = {
+  {"kNumberTypeFloat64", CUDA_R_64F}, {"kNumberTypeFloat32", CUDA_R_32F}, {"kNumberTypeFloat16", CUDA_R_16F}};
 }  // namespace kernel
 }  // namespace mindspore
 

@@ -22,9 +22,9 @@ export BUILD_PATH="${BASEPATH}/build/"
 usage()
 {
   echo "Usage:"
-  echo "bash build.sh [-d] [-r] [-v] [-c on|off] [-t on|off] [-g on|off] [-h] [-b ge] [-m infer|train] \\"
-  echo "              [-a on|off] [-p on|off] [-i] [-L] [-R] [-D on|off] [-j[n]] [-e gpu|ascend|cpu|acl] \\"
-  echo "              [-P on|off] [-z [on|off]] [-M on|off] [-V 9.2|10.1] [-I arm64|arm32|x86_64] [-K] \\"
+  echo "bash build.sh [-d] [-r] [-v] [-c on|off] [-t ut|st] [-g on|off] [-h] [-b ge] [-m infer|train] \\"
+  echo "              [-a on|off] [-p on|off] [-i] [-L] [-R] [-D on|off] [-j[n]] [-e gpu|ascend|cpu|npu] \\"
+  echo "              [-P on|off] [-z [on|off]] [-M on|off] [-V 9.2|10.1|310|910] [-I arm64|arm32|x86_64] [-K] \\"
   echo "              [-B on|off] [-E] [-l on|off] [-n full|lite|off] [-T on|off] \\"
   echo "              [-A [cpp|java|object-c] [-C on|off] [-o on|off] [-S on|off] [-k on|off] [-W sse|neon|avx|off] \\"
   echo ""
@@ -33,7 +33,7 @@ usage()
   echo "    -r Release mode, default mode"
   echo "    -v Display build command"
   echo "    -c Enable code coverage, default off"
-  echo "    -t Run testcases, default on"
+  echo "    -t Run testcases, default off"
   echo "    -g Use glog to output log, default on"
   echo "    -h Print usage"
   echo "    -b Select other backend, available: \\"
@@ -45,16 +45,15 @@ usage()
   echo "    -i Enable increment building, default off"
   echo "    -L Enable load ANF-IR as input of 'infer', default off"
   echo "    -j[n] Set the threads when building (Default: -j8)"
-  echo "    -e Use cpu, gpu, ascend or acl"
+  echo "    -e Use cpu, gpu, npu or ascend"
   echo "    -P Enable dump anf graph to file in ProtoBuffer format, default on"
   echo "    -D Enable dumping of function graph ir, default on"
   echo "    -z Compile dataset & mindrecord, default on"
-  echo "    -n Compile minddata with mindspore lite, available: off, lite, full, lite_cv, full, wrapper mode in lite train and lite_cv mode in lite predict"
+  echo "    -n Compile minddata with mindspore lite, available: off, lite, full, lite_cv, full mode in lite train and lite_cv, wrapper mode in lite predict"
   echo "    -M Enable MPI and NCCL for GPU training, gpu default on"
-  echo "    -V Specify the minimum required cuda version, default CUDA 10.1"
+  echo "    -V Specify the device version, if -e gpu, default CUDA 10.1, if -e ascend, default Ascend 910"
   echo "    -I Enable compiling mindspore lite for arm64, arm32 or x86_64, default disable mindspore lite compilation"
   echo "    -K Compile with AKG, default on"
-  echo "    -s Enable serving module, default off"
   echo "    -B Enable debugger, default on"
   echo "    -E Enable IBVERBS for parameter server, default off"
   echo "    -l Compile with python dependency, default on"
@@ -87,6 +86,7 @@ checkopts()
   VERBOSE=""
   ENABLE_COVERAGE="off"
   RUN_TESTCASES="off"
+  RUN_CPP_ST_TESTS="off"
   ENABLE_BACKEND=""
   TRAIN_MODE="INFER"
   ENABLE_ASAN="off"
@@ -105,7 +105,6 @@ checkopts()
   SUPPORT_TRAIN="off"
   USE_GLOG="on"
   ENABLE_AKG="on"
-  ENABLE_SERVING="off"
   ENABLE_ACL="off"
   ENABLE_DEBUGGER="on"
   ENABLE_IBVERBS="off"
@@ -119,9 +118,11 @@ checkopts()
   ANDROID_STL="c++_shared"
   ENABLE_MAKE_CLEAN="off"
   X86_64_SIMD="off"
-
+  DEVICE_VERSION=""
+  DEVICE=""
+  ENABLE_NPU="off"
   # Process the options
-  while getopts 'drvj:c:t:hsb:a:g:p:ie:m:l:I:LRP:D:zM:V:K:swB:En:T:A:C:o:S:k:W:' opt
+  while getopts 'drvj:c:t:hsb:a:g:p:ie:m:l:I:LRP:D:zM:V:K:B:En:T:A:C:o:S:k:W:' opt
   do
     OPTARG=$(echo ${OPTARG} | tr '[A-Z]' '[a-z]')
     case "${opt}" in
@@ -152,8 +153,17 @@ checkopts()
         ENABLE_COVERAGE="$OPTARG"
         ;;
       t)
-        check_on_off $OPTARG t
-        RUN_TESTCASES="$OPTARG"
+        if [[ "X$OPTARG" == "Xon" || "X$OPTARG" == "Xut" ]]; then
+          RUN_TESTCASES="on"
+        elif [[ "X$OPTARG" == "Xoff" ]]; then
+          RUN_TESTCASES="off"
+        elif [[ "X$OPTARG" == "Xst" ]]; then
+          RUN_CPP_ST_TESTS="on"
+        else
+          echo "Invalid value ${OPTARG} for option -t"
+          usage
+          exit 1
+        fi
         ;;
       g)
         check_on_off $OPTARG g
@@ -216,40 +226,14 @@ checkopts()
         echo "enable make clean"
         ;;
       e)
-        if [[ "X$OPTARG" == "Xgpu" ]]; then
-          ENABLE_GPU="on"
-          ENABLE_CPU="on"
-          ENABLE_MPI="on"
-        elif [[ "X$OPTARG" == "Xd" || "X$OPTARG" == "Xascend" ]]; then
-          ENABLE_D="on"
-          ENABLE_CPU="on"
-          ENABLE_SERVING="on"
-        elif [[ "X$OPTARG" == "Xacl" ]]; then
-          ENABLE_SERVING="on"
-          ENABLE_ACL="on"
-        elif [[ "X$OPTARG" == "Xcpu" ]]; then
-          ENABLE_CPU="on"
-        else
-          echo "Invalid value ${OPTARG} for option -e"
-          usage
-          exit 1
-        fi
+        DEVICE=$OPTARG
         ;;
       M)
         check_on_off $OPTARG M
         ENABLE_MPI="$OPTARG"
         ;;
       V)
-        if [[ "X$OPTARG" != "X9.2" && "X$OPTARG" != "X10.1" ]]; then
-          echo "Invalid value ${OPTARG} for option -V"
-          usage
-          exit 1
-        fi
-        if [[ "X$OPTARG" == "X9.2" ]]; then
-          echo "Unsupported CUDA version 9.2"
-          exit 1
-        fi
-        CUDA_VERSION="$OPTARG"
+        DEVICE_VERSION=$OPTARG
         ;;
       P)
         check_on_off $OPTARG p
@@ -297,16 +281,6 @@ checkopts()
         ENABLE_AKG="on"
         echo "enable compile with akg"
         ;;
-      s)
-        ENABLE_SERVING="on"
-        echo "enable serving"
-        ;;
-      w)
-        ENABLE_SERVING="on"
-        echo "enable serving"
-        ENABLE_ACL="on"
-        echo "enable acl"
-        ;;
       B)
         check_on_off $OPTARG B
         ENABLE_DEBUGGER="$OPTARG"
@@ -318,7 +292,6 @@ checkopts()
       T)
         check_on_off $OPTARG T
         SUPPORT_TRAIN=$OPTARG
-        SUPPORT_TRAIN=OFF
         COMPILE_MINDDATA_LITE="full"
         echo "support train on device "
         ;;
@@ -364,14 +337,74 @@ checkopts()
         exit 1
     esac
   done
+
+  # Parse device
+  # Process build option
+  if [[ "X$DEVICE" == "Xgpu" ]]; then
+    LITE_ENABLE_GPU="opencl"
+    ENABLE_GPU="on"
+    ENABLE_CPU="on"
+    ENABLE_MPI="on"
+    # version default 10.1
+    if [[ "X$DEVICE_VERSION" == "X" ]]; then
+      DEVICE_VERSION=10.1
+    fi
+    if [[ "X$DEVICE_VERSION" != "X9.2" && "X$DEVICE_VERSION" != "X10.1" ]]; then
+      echo "Invalid value ${DEVICE_VERSION} for option -V"
+      usage
+      exit 1
+    fi
+    if [[ "X$DEVICE_VERSION" == "X9.2" ]]; then
+      echo "Unsupported CUDA version 9.2"
+      exit 1
+    fi
+    CUDA_VERSION="$DEVICE_VERSION"
+  elif [[ "X$DEVICE" == "Xd" || "X$DEVICE" == "Xascend" ]]; then
+    # version default 910
+    if [[ "X$DEVICE_VERSION" == "X" ]]; then
+      DEVICE_VERSION=910
+    fi
+    if [[ "X$DEVICE_VERSION" == "X310" ]]; then
+      ENABLE_ACL="on"
+    elif [[ "X$DEVICE_VERSION" == "X910" ]]; then
+      ENABLE_D="on"
+      ENABLE_CPU="on"
+    else
+      echo "Invalid value ${DEVICE_VERSION} for option -V"
+      usage
+      exit 1
+    fi
+  elif [[ "X$DEVICE" == "Xnpu" ]]; then
+    ENABLE_NPU="on"
+    ENABLE_CPU="on"
+  elif [[ "X$DEVICE" == "Xcpu" ]]; then
+    ENABLE_CPU="on"
+  elif [[ "X$DEVICE" == "Xopencl" ]]; then
+    LITE_ENABLE_GPU="opencl"
+  elif [[ "X$DEVICE" == "Xvulkan" ]]; then
+    LITE_ENABLE_GPU="vulkan"
+  elif [[ "X$DEVICE" == "Xcuda" ]]; then
+    LITE_ENABLE_GPU="cuda"
+  elif [[ "X$DEVICE" == "X" ]]; then
+    :
+  else
+    echo "Invalid value ${DEVICE} for option -e"
+    usage
+    exit 1
+  fi
 }
+
 checkopts "$@"
 echo "---------------- MindSpore: build start ----------------"
 mkdir -pv "${BUILD_PATH}/package/mindspore/lib"
 git submodule update --init graphengine
+cd "${BASEPATH}/graphengine"
+git submodule update --init metadef
+cd "${BASEPATH}"
 if [[ "X$ENABLE_AKG" = "Xon" ]] && [[ "X$ENABLE_D" = "Xon" || "X$ENABLE_GPU" = "Xon" ]]; then
     git submodule update --init --recursive akg
 fi
+
 
 build_exit()
 {
@@ -393,6 +426,9 @@ build_mindspore()
     fi
     if [[ "X$RUN_TESTCASES" = "Xon" ]]; then
       CMAKE_ARGS="${CMAKE_ARGS} -DENABLE_TESTCASES=ON"
+    fi
+    if [[ "X$RUN_CPP_ST_TESTS" = "Xon" ]]; then
+      CMAKE_ARGS="${CMAKE_ARGS} -DENABLE_CPP_ST=ON"
     fi
     if [[ -n "$ENABLE_BACKEND" ]]; then
       CMAKE_ARGS="${CMAKE_ARGS} -DENABLE_${ENABLE_BACKEND}=ON"
@@ -438,9 +474,6 @@ build_mindspore()
     if [[ "X$ENABLE_AKG" = "Xon" ]] && [[ "X$ENABLE_D" = "Xon" || "X$ENABLE_GPU" = "Xon" ]]; then
         CMAKE_ARGS="${CMAKE_ARGS} -DENABLE_AKG=ON"
     fi
-    if [[ "X$ENABLE_SERVING" = "Xon" ]]; then
-        CMAKE_ARGS="${CMAKE_ARGS} -DENABLE_SERVING=ON"
-    fi
     if [[ "X$ENABLE_ACL" = "Xon" ]]; then
         CMAKE_ARGS="${CMAKE_ARGS} -DENABLE_ACL=ON"
     fi
@@ -464,200 +497,20 @@ build_mindspore()
 
 checkndk() {
     if [ "${ANDROID_NDK}" ]; then
-        echo -e "\e[31mANDROID_NDK_PATH=$ANDROID_NDK  \e[0m"
+        echo -e "\e[31mANDROID_NDK=$ANDROID_NDK  \e[0m"
     else
         echo -e "\e[31mplease set ANDROID_NDK in environment variable for example: export ANDROID_NDK=/root/usr/android-ndk-r20b/ \e[0m"
         exit 1
     fi
 }
 
-gene_flatbuffer() {
-    FLAT_DIR="${BASEPATH}/mindspore/lite/schema"
-    cd ${FLAT_DIR} && rm -rf "${FLAT_DIR}/inner" && mkdir -p "${FLAT_DIR}/inner"
-    find . -name "*.fbs" -print0 | xargs -0 "${FLATC}" -c -b
-    find . -name "*.fbs" -print0 | xargs -0 "${FLATC}" -c -b --reflect-types --gen-mutable --reflect-names --gen-object-api -o "${FLAT_DIR}/inner"
-
-    FLAT_DIR="${BASEPATH}/mindspore/lite/tools/converter/parser/tflite"
-    cd ${FLAT_DIR}
-    find . -name "*.fbs" -print0 | xargs -0 "${FLATC}" -c -b --reflect-types --gen-mutable --reflect-names --gen-object-api -o "${FLAT_DIR}/"
-}
-
-build_flatbuffer() {
-    cd ${BASEPATH}
-    FLATC="${BASEPATH}"/third_party/flatbuffers/build/flatc
-    if [[ ! -f "${FLATC}" ]]; then
-        if [[ "${MSLIBS_SERVER}" ]]; then
-            cd "${BASEPATH}"/third_party/
-            rm -rf ./v1.11.0.tar.gz ./flatbuffers
-            wget http://${MSLIBS_SERVER}:8081/libs/flatbuffers/v1.11.0.tar.gz
-            tar -zxvf ./v1.11.0.tar.gz
-            mv ./flatbuffers-1.11.0 ./flatbuffers
-        else
-            git submodule update --init --recursive third_party/flatbuffers
-        fi
-        cd ${BASEPATH}/third_party/flatbuffers
-        rm -rf build && mkdir -pv build && cd build && cmake -DFLATBUFFERS_BUILD_SHAREDLIB=ON .. && make -j$THREAD_NUM
-        gene_flatbuffer
-    fi
-    if [[ "${INC_BUILD}" == "off" ]]; then
-        gene_flatbuffer
-    fi
-}
-
-build_gtest() {
-    cd ${BASEPATH}
-    git submodule update --init --recursive third_party/googletest
-}
-
-gene_clhpp() {
-    CL_SRC_DIR="${BASEPATH}/mindspore/lite/src/runtime/kernel/opencl/cl"
-    if [ ! -d "${CL_SRC_DIR}" ]; then
-      return
-    fi
-    cd ${CL_SRC_DIR}/
-    rm -rf *.inc
-    echo "$(cd "$(dirname $0)"; pwd)"
-    for file_path in "${CL_SRC_DIR}"/*
-    do
-        file="$(basename ${file_path})"
-        inc_file=$(echo ${CL_SRC_DIR}/${file} | sed 's/$/.inc/')
-        sed 's/\\/\\\\/g;s/\"/\\\"/g;s/^/\"/;s/$/\\n\" \\/' ${CL_SRC_DIR}/${file} > ${inc_file}
-        kernel_name=$(echo ${file} | sed s'/.\{3\}$//')
-        sed -i "1i\static const char *${kernel_name}_source =\"\\n\" \\" ${inc_file}
-        sed -i '$a\;' ${inc_file}
-    done
-}
-
-gene_ocl_program() {
-    OCL_SRC_DIR="${BASEPATH}/mindspore/lite/src/runtime/kernel/opencl/cl"
-    SPIRV_DIR=build/spirv
-    [ -n "${SPIRV_DIR}" ] && rm -rf ${SPIRV_DIR}
-    mkdir -pv ${SPIRV_DIR}
-    if [ ! -d "${OCL_SRC_DIR}" ]; then
-      return
-    fi
-    for file_path in "${OCL_SRC_DIR}"/*
-    do
-      ocl_file="$(basename ${file_path})"
-      if [ "${ocl_file##*.}" != "cl" ]; then
-        continue
-      fi
-      clang -Xclang -finclude-default-header -cl-std=CL2.0 --target=spir64-unknown-unknown -emit-llvm \
-            -c -O0 -o ${SPIRV_DIR}/${ocl_file%.*}.bc ${OCL_SRC_DIR}/${ocl_file}
-    done
-
-    bcs=$(ls ${SPIRV_DIR}/*.bc)
-    llvm-link ${bcs} -o ${SPIRV_DIR}/program.bc
-    llvm-spirv -o ${SPIRV_DIR}/program.spv ${SPIRV_DIR}/program.bc
-
-    CL_PROGRAM_PATH="${BASEPATH}/mindspore/lite/src/runtime/kernel/opencl/cl/program.inc"
-    echo "#include <vector>" > ${CL_PROGRAM_PATH}
-    echo "std::vector<unsigned char> g_program_binary = {" >> ${CL_PROGRAM_PATH}
-    #hexdump -v -e '16/1 "0x%02x, " "\n"' ${SPIRV_DIR}/program.spv >> ${CL_PROGRAM_PATH}
-    hexdump -v -e '1/1 "0x%02x, "' ${SPIRV_DIR}/program.spv >> ${CL_PROGRAM_PATH}
-    echo "};" >> ${CL_PROGRAM_PATH}
-    echo "Compile SPIRV done"
-}
-
-build_opencl() {
-    cd ${BASEPATH}
-    git submodule update --init third_party/OpenCL-Headers
-    git submodule update --init third_party/OpenCL-CLHPP
-    if [[ "${OPENCL_OFFLINE_COMPILE}" == "on" ]]; then
-        gene_ocl_program
+checkddk() {
+    if [ "${HWHIAI_DDK}" ]; then
+        echo -e "\e[31mHWHIAI_DDK=$HWHIAI_DDK  \e[0m"
     else
-        gene_clhpp
+        echo -e "\e[31mplease set HWHIAI_DDK in environment variable for example: export HWHIAI_DDK=/root/usr/hwhiai-ddk-100.500.010.010/ \e[0m"
+        exit 1
     fi
-}
-
-build_opencv() {
-    # check what platform we are building opencv on
-    cd ${BASEPATH}
-    if [[ "${LITE_PLATFORM}" == "x86_64" ]]; then
-        OPENCV_BIN="${BASEPATH}"/third_party/opencv/build/lib/libopencv_core.so.4.2.0
-    elif [[ "${LITE_PLATFORM}" == "arm32" ]]; then
-        OPENCV_BIN="${BASEPATH}"/third_party/opencv/build/lib/armeabi-v7a/libopencv_core.so
-    else
-        OPENCV_BIN="${BASEPATH}"/third_party/opencv/build/lib/arm64-v8a/libopencv_core.so
-
-    fi
-    if [[ ! -f "${OPENCV_BIN}" ]]; then
-        if [[ "${MSLIBS_SERVER}" ]]; then
-	    cd "${BASEPATH}"/third_party/
-	    rm -rf 4.2.0.tar.gz ./opencv
-	    wget http://${MSLIBS_SERVER}:8081/libs/opencv/4.2.0.tar.gz
-            tar -zxvf ./4.2.0.tar.gz
-	    mv ./opencv-4.2.0 ./opencv
-            rm -rf 4.2.0.tar.gz
-	else
-            git submodule update --init --recursive third_party/opencv
-        fi
-        cd ${BASEPATH}/third_party/opencv
-        rm -rf build && mkdir -p build && cd build && cmake ${CMAKE_MINDDATA_ARGS} -DBUILD_SHARED_LIBS=ON -DBUILD_ANDROID_PROJECTS=OFF \
-          -DBUILD_LIST=core,imgcodecs,imgproc -DBUILD_ZLIB=ON .. && make -j$THREAD_NUM
-    fi
-}
-
-build_jpeg_turbo() {
-    if [ -d  "${BASEPATH}"/third_party/libjpeg-turbo/lib ];then
-        rm -rf "${BASEPATH}"/third_party/libjpeg-turbo/lib
-    fi
-    cd ${BASEPATH}
-    if [[ "${LITE_PLATFORM}" == "x86_64" ]]; then
-        JPEG_TURBO="${BASEPATH}"/third_party/libjpeg-turbo/lib/libjpeg.so.62.3.0
-    else
-        JPEG_TURBO="${BASEPATH}"/third_party/libjpeg-turbo/lib/libjpeg.so
-    fi
-
-    if [[ ! -f "${JPEG_TURBO}" ]]; then
-        if [[ "${MSLIBS_SERVER}" ]]; then
-            cd "${BASEPATH}"/third_party/
-	    rm -rf 2.0.4.tar.gz ./libjpeg-turbo
-	    wget http://${MSLIBS_SERVER}:8081/libs/jpeg_turbo/2.0.4.tar.gz
-	    tar -zxvf ./2.0.4.tar.gz
-	    mv ./libjpeg-turbo-2.0.4 ./libjpeg-turbo
-	    rm -rf ./2.0.4.tar.gz
-        else
-            git submodule update --init --recursive third_party/libjpeg-turbo
-        fi
-
-        cd ${BASEPATH}/third_party/libjpeg-turbo
-        rm -rf build && mkdir -p build && cd build && cmake ${CMAKE_MINDDATA_ARGS} -DCMAKE_BUILD_TYPE=Release \
-          -DCMAKE_INSTALL_PREFIX="${BASEPATH}/third_party/libjpeg-turbo" .. && make -j$THREAD_NUM && make install
-    fi
-}
-
-build_eigen() {
-    cd ${BASEPATH}
-    if [[ "${MSLIBS_SERVER}" ]]; then
-        cd "${BASEPATH}"/third_party/
-	rm -rf ./eigen-3.*.tar.gz ./eigen
-        wget http://${MSLIBS_SERVER}:8081/libs/eigen3/eigen-3.3.7.tar.gz
-        tar -zxvf ./eigen-3.3.7.tar.gz
-        mv ./eigen-3.3.7 ./eigen
-	rm -rf ./eigen-3.*.tar.gz
-    else
-        git submodule update --init --recursive third_party/eigen
-
-    fi
-}
-
-build_minddata_lite_deps()
-{
-  echo "start build minddata lite project"
-  if [[ "${LITE_PLATFORM}" == "arm64" ]]; then
-      CMAKE_MINDDATA_ARGS="-DCMAKE_TOOLCHAIN_FILE=${ANDROID_NDK}/build/cmake/android.toolchain.cmake -DANDROID_NATIVE_API_LEVEL=19    \
-            -DANDROID_NDK=${ANDROID_NDK} -DANDROID_ABI=arm64-v8a -DANDROID_TOOLCHAIN_NAME=aarch64-linux-android-clang                 \
-            -DANDROID_STL=c++_shared -DCMAKE_BUILD_TYPE=${BUILD_TYPE}"
-  elif [[ "${LITE_PLATFORM}" == "arm32" ]]; then
-      CMAKE_MINDDATA_ARGS="-DCMAKE_TOOLCHAIN_FILE=${ANDROID_NDK}/build/cmake/android.toolchain.cmake -DANDROID_NATIVE_API_LEVEL=19    \
-            -DANDROID_NDK=${ANDROID_NDK} -DANDROID_ABI=armeabi-v7a -DANDROID_TOOLCHAIN_NAME=clang                                     \
-            -DANDROID_STL=c++_shared -DCMAKE_BUILD_TYPE=${BUILD_TYPE}"
-  else
-      CMAKE_MINDDATA_ARGS="-DCMAKE_BUILD_TYPE=${BUILD_TYPE}"
-  fi
-  build_eigen
-  build_jpeg_turbo
 }
 
 get_version() {
@@ -667,67 +520,79 @@ get_version() {
     VERSION_STR=${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_REVISION}
 }
 
+write_commit_file() {
+    COMMIT_STR=$(git log -1 | grep commit)
+    echo ${COMMIT_STR} > "${BASEPATH}/mindspore/lite/build/.commit_id"
+}
+
 build_lite()
 {
     get_version
     echo "============ Start building MindSpore Lite ${VERSION_STR} ============"
-    if [ "${ENABLE_GPU}" == "on" ] && [ "${LITE_PLATFORM}" == "arm64" ]; then
-      echo "start build opencl"
-      build_opencl
-    fi
-    if [ "${RUN_TESTCASES}" == "on" ]; then
-        build_gtest
+
+    LITE_ENABLE_NPU=${ENABLE_NPU}
+    if [[ "${DEVICE}" == ""  &&  "${LITE_PLATFORM}" == "arm64" ]]; then
+      LITE_ENABLE_GPU="opencl"
+      LITE_ENABLE_NPU="on"
     fi
 
-    if [[ "${COMPILE_MINDDATA_LITE}" == "lite" || "${COMPILE_MINDDATA_LITE}" == "full" ||  "${COMPILE_MINDDATA_LITE}" == "wrapper" ]]; then
-        build_minddata_lite_deps
+    if [ "${LITE_ENABLE_NPU}" == "on" ]; then
+      if [ "${LITE_PLATFORM}" == "arm64" ]; then
+        checkddk
+      else
+        echo "NPU only support platform arm64."
+        exit 1
+      fi
     fi
 
     cd "${BASEPATH}/mindspore/lite"
-    if [[ "${INC_BUILD}" == "off" ]]; then
+    if [[ "${INC_BUILD}" == "off" || $2 == "off" ]]; then
         rm -rf build
     fi
     mkdir -pv build
     cd build
+    write_commit_file
     BUILD_TYPE="Release"
     if [[ "${DEBUG_MODE}" == "on" ]]; then
       BUILD_TYPE="Debug"
     fi
 
-    if [[ "${LITE_PLATFORM}" == "arm64" ]]; then
+    if [[ "${LITE_PLATFORM}" == "arm64" || $1 == "arm64" ]]; then
         checkndk
         cmake -DCMAKE_TOOLCHAIN_FILE="${ANDROID_NDK}/build/cmake/android.toolchain.cmake" -DANDROID_NATIVE_API_LEVEL="19"      \
               -DANDROID_NDK="${ANDROID_NDK}" -DANDROID_ABI="arm64-v8a" -DANDROID_TOOLCHAIN_NAME="aarch64-linux-android-clang"  \
               -DANDROID_STL=${ANDROID_STL} -DCMAKE_BUILD_TYPE=${BUILD_TYPE} -DSUPPORT_TRAIN=${SUPPORT_TRAIN}                     \
-              -DPLATFORM_ARM64=on -DENABLE_NEON=on -DENABLE_FP16="off"      \
+              -DPLATFORM_ARM64=on -DENABLE_NEON=on -DENABLE_FP16="on"      \
               -DENABLE_TOOLS=${ENABLE_TOOLS} -DENABLE_CONVERTER=${ENABLE_CONVERTER} -DBUILD_TESTCASES=${RUN_TESTCASES} \
-              -DSUPPORT_GPU=${ENABLE_GPU} -DOFFLINE_COMPILE=${OPENCL_OFFLINE_COMPILE} -DBUILD_MINDDATA=${COMPILE_MINDDATA_LITE} \
+              -DSUPPORT_GPU=${LITE_ENABLE_GPU} -DSUPPORT_NPU=${LITE_ENABLE_NPU} -DENABLE_V0=on \
+              -DOFFLINE_COMPILE=${OPENCL_OFFLINE_COMPILE} -DBUILD_MINDDATA=${COMPILE_MINDDATA_LITE} \
               -DCMAKE_INSTALL_PREFIX=${BASEPATH}/output/tmp -DMS_VERSION_MAJOR=${VERSION_MAJOR}                           \
               -DMS_VERSION_MINOR=${VERSION_MINOR} -DMS_VERSION_REVISION=${VERSION_REVISION} -DENABLE_VERBOSE=${ENABLE_VERBOSE} \
               "${BASEPATH}/mindspore/lite"
-    elif [[ "${LITE_PLATFORM}" == "arm32" ]]; then
+    elif [[ "${LITE_PLATFORM}" == "arm32" || $1 == "arm32" ]]; then
         checkndk
         cmake -DCMAKE_TOOLCHAIN_FILE="${ANDROID_NDK}/build/cmake/android.toolchain.cmake" -DANDROID_NATIVE_API_LEVEL="19"      \
               -DANDROID_NDK="${ANDROID_NDK}" -DANDROID_ABI="armeabi-v7a" -DANDROID_TOOLCHAIN_NAME="clang"                      \
               -DANDROID_STL=${ANDROID_STL}  -DCMAKE_BUILD_TYPE=${BUILD_TYPE}                                                      \
               -DPLATFORM_ARM32=on -DENABLE_NEON=on -DSUPPORT_TRAIN=${SUPPORT_TRAIN}  \
               -DENABLE_TOOLS=${ENABLE_TOOLS} -DENABLE_CONVERTER=${ENABLE_CONVERTER} -DBUILD_TESTCASES=${RUN_TESTCASES} \
-              -DSUPPORT_GPU=${ENABLE_GPU} -DOFFLINE_COMPILE=${OPENCL_OFFLINE_COMPILE} -DBUILD_MINDDATA=${COMPILE_MINDDATA_LITE} \
+              -DSUPPORT_GPU=${LITE_ENABLE_GPU} -DSUPPORT_NPU=${ENABLE_NPU} -DENABLE_V0=on \
+              -DOFFLINE_COMPILE=${OPENCL_OFFLINE_COMPILE} -DBUILD_MINDDATA=${COMPILE_MINDDATA_LITE} \
               -DCMAKE_INSTALL_PREFIX=${BASEPATH}/output/tmp -DMS_VERSION_MAJOR=${VERSION_MAJOR}                           \
               -DMS_VERSION_MINOR=${VERSION_MINOR} -DMS_VERSION_REVISION=${VERSION_REVISION} -DENABLE_VERBOSE=${ENABLE_VERBOSE} \
                "${BASEPATH}/mindspore/lite"
     else
         cmake -DPLATFORM_ARM64=off -DSUPPORT_TRAIN=${SUPPORT_TRAIN}   \
         -DENABLE_TOOLS=${ENABLE_TOOLS} -DENABLE_CONVERTER=${ENABLE_CONVERTER} -DBUILD_TESTCASES=${RUN_TESTCASES} \
-        -DCMAKE_BUILD_TYPE=${BUILD_TYPE} -DSUPPORT_GPU=${ENABLE_GPU} -DBUILD_MINDDATA=${COMPILE_MINDDATA_LITE} \
+        -DCMAKE_BUILD_TYPE=${BUILD_TYPE} -DSUPPORT_GPU=${LITE_ENABLE_GPU} -DSUPPORT_NPU=${ENABLE_NPU} \
+        -DBUILD_MINDDATA=${COMPILE_MINDDATA_LITE} -DENABLE_V0=on \
         -DOFFLINE_COMPILE=${OPENCL_OFFLINE_COMPILE} -DCMAKE_INSTALL_PREFIX=${BASEPATH}/output/tmp  \
         -DMS_VERSION_MAJOR=${VERSION_MAJOR} -DMS_VERSION_MINOR=${VERSION_MINOR} -DMS_VERSION_REVISION=${VERSION_REVISION} \
         -DENABLE_VERBOSE=${ENABLE_VERBOSE} -DX86_64_SIMD=${X86_64_SIMD} "${BASEPATH}/mindspore/lite"
     fi
     make -j$THREAD_NUM && make install && make package
-    COMPILE_RET=$?
 
-    if [[ "${COMPILE_RET}" -ne 0 ]]; then
+    if [[ $? -ne 0 ]]; then
         echo "---------------- mindspore lite: build failed ----------------"
         exit 1
     else
@@ -742,41 +607,40 @@ build_lite()
 
 build_lite_java_arm64() {
     # build mindspore-lite arm64
-    if [[ "X$INC_BUILD" = "Xoff" ]] || [[ ! -f "${BASEPATH}/output/mindspore-lite-${VERSION_STR}-runtime-arm64-cpu.tar.gz" ]]; then
-      LITE_PLATFORM="arm64"
-      INC_BUILD_COPY=${INC_BUILD}
-      INC_BUILD="off"
-      build_lite
-      INC_BUILD=${INC_BUILD_COPY}
+    JTARBALL=mindspore-lite-${VERSION_STR}-inference-android-aarch64
+    if [[ "X$SUPPORT_TRAIN" = "Xon" ]]; then
+        JTARBALL=mindspore-lite-${VERSION_STR}-train-android-aarch64
+    fi
+    if [[ "X$INC_BUILD" = "Xoff" ]] || [[ ! -f "${BASEPATH}/output/${JTARBALL}.tar.gz" ]]; then
+      build_lite "arm64" "off"
     fi
     # copy arm64 so
     cd ${BASEPATH}/output/
-    rm -rf mindspore-lite-${VERSION_STR}-runtime-arm64-cpu
-    tar -zxvf mindspore-lite-${VERSION_STR}-runtime-arm64-cpu.tar.gz
+    rm -rf ${JTARBALL}
+    tar -zxvf ${JTARBALL}.tar.gz
     [ -n "${JAVA_PATH}" ] && rm -rf ${JAVA_PATH}/java/app/libs/arm64-v8a/
     mkdir -p ${JAVA_PATH}/java/app/libs/arm64-v8a/
-    cp ${BASEPATH}/output/mindspore-lite-${VERSION_STR}-runtime-arm64-cpu/lib/libmindspore-lite.so ${JAVA_PATH}/java/app/libs/arm64-v8a/
-    echo mindspore-lite-${VERSION_STR}-runtime-arm64-cpu
-    [ -n "${VERSION_STR}" ] && rm -rf mindspore-lite-${VERSION_STR}-runtime-arm64-cpu
+    cp ${BASEPATH}/output/${JTARBALL}/lib/libmindspore-lite.so ${JAVA_PATH}/java/app/libs/arm64-v8a/
+    [ -n "${VERSION_STR}" ] && rm -rf ${JTARBALL}
 }
 
 build_lite_java_arm32() {
     # build mindspore-lite arm32
-    if [[ "X$INC_BUILD" = "Xoff" ]] || [[ ! -f "${BASEPATH}/output/mindspore-lite-${VERSION_STR}-runtime-arm32-cpu.tar.gz" ]]; then
-      LITE_PLATFORM="arm32"
-      INC_BUILD_COPY=${INC_BUILD}
-      INC_BUILD="off"
-      build_lite
-      INC_BUILD=${INC_BUILD_COPY}
+    JTARBALL=mindspore-lite-${VERSION_STR}-inference-android-aarch32
+    if [[ "X$SUPPORT_TRAIN" = "Xon" ]]; then
+        JTARBALL=mindspore-lite-${VERSION_STR}-train-android-aarch32
+    fi
+    if [[ "X$INC_BUILD" = "Xoff" ]] || [[ ! -f "${BASEPATH}/output/${JTARBALL}.tar.gz" ]]; then
+      build_lite  "arm32" "off"
     fi
     # copy arm32 so
     cd ${BASEPATH}/output/
-    rm -rf mindspore-lite-${VERSION_STR}-runtime-arm32-cpu
-    tar -zxvf mindspore-lite-${VERSION_STR}-runtime-arm32-cpu.tar.gz
+    rm -rf ${JTARBALL}
+    tar -zxvf ${JTARBALL}.tar.gz
     [ -n "${JAVA_PATH}" ] && rm -rf ${JAVA_PATH}/java/app/libs/armeabi-v7a/
     mkdir -p ${JAVA_PATH}/java/app/libs/armeabi-v7a/
-    cp ${BASEPATH}/output/mindspore-lite-${VERSION_STR}-runtime-arm32-cpu/lib/libmindspore-lite.so ${JAVA_PATH}/java/app/libs/armeabi-v7a/
-    [ -n "${VERSION_STR}" ] && rm -rf mindspore-lite-${VERSION_STR}-runtime-arm32-cpu
+    cp ${BASEPATH}/output/${JTARBALL}/lib/libmindspore-lite.so ${JAVA_PATH}/java/app/libs/armeabi-v7a/
+    [ -n "${VERSION_STR}" ] && rm -rf ${JTARBALL}
 }
 
 build_jni_arm64() {
@@ -789,10 +653,9 @@ build_jni_arm64() {
           -DANDROID_NDK="${ANDROID_NDK}" -DANDROID_ABI="arm64-v8a" -DANDROID_TOOLCHAIN_NAME="aarch64-linux-android-clang"  \
           -DMS_VERSION_MAJOR=${VERSION_MAJOR} -DMS_VERSION_MINOR=${VERSION_MINOR} -DMS_VERSION_REVISION=${VERSION_REVISION} \
           -DANDROID_STL="c++_static" -DCMAKE_BUILD_TYPE=${BUILD_TYPE} -DENABLE_VERBOSE=${ENABLE_VERBOSE} \
-          -DPLATFORM_ARM64=on "${JAVA_PATH}/java/app/src/main/native"
+          -DSUPPORT_TRAIN=${SUPPORT_TRAIN} -DPLATFORM_ARM64=on "${JAVA_PATH}/java/app/src/main/native"
     make -j$THREAD_NUM
-    COMPILE_RET=$?
-    if [[ "${COMPILE_RET}" -ne 0 ]]; then
+    if [[ $? -ne 0 ]]; then
         echo "---------------- mindspore lite: build jni arm64 failed----------------"
         exit 1
     fi
@@ -810,10 +673,9 @@ build_jni_arm32() {
           -DANDROID_NDK="${ANDROID_NDK}" -DANDROID_ABI="armeabi-v7a" -DANDROID_TOOLCHAIN_NAME="aarch64-linux-android-clang"  \
           -DMS_VERSION_MAJOR=${VERSION_MAJOR} -DMS_VERSION_MINOR=${VERSION_MINOR} -DMS_VERSION_REVISION=${VERSION_REVISION} \
           -DANDROID_STL="c++_static" -DCMAKE_BUILD_TYPE=${BUILD_TYPE} -DENABLE_VERBOSE=${ENABLE_VERBOSE} \
-          -DPLATFORM_ARM32=on "${JAVA_PATH}/java/app/src/main/native"
+          -DSUPPORT_TRAIN=${SUPPORT_TRAIN} -DPLATFORM_ARM32=on "${JAVA_PATH}/java/app/src/main/native"
     make -j$THREAD_NUM
-    COMPILE_RET=$?
-    if [[ "${COMPILE_RET}" -ne 0 ]]; then
+    if [[ $? -ne 0 ]]; then
         echo "---------------- mindspore lite: build jni arm32 failed----------------"
         exit 1
     fi
@@ -849,7 +711,7 @@ build_java() {
 
 make_clean()
 {
-  echo "enbale make clean"
+  echo "enable make clean"
   cd "${BUILD_PATH}/mindspore"
   cmake --build . --target clean
 }

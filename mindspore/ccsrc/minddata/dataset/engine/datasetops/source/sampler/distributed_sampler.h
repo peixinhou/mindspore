@@ -63,7 +63,19 @@ class DistributedSamplerRT : public SamplerRT {
 
   int64_t GetDeviceNum() { return num_devices_; }
 
-  void Print(std::ostream &out, bool show_all) const override;
+  /// \brief Recursively calls this function on its children to get the actual number of samples on a tree of samplers
+  /// \note This is not a getter for num_samples_. For example, if num_samples_ is 0 or if it's smaller than num_rows,
+  ///     then num_samples_ is not returned at all.
+  /// \param[in] num_rows The total number of rows in the dataset
+  /// \return int64_t Calculated number of samples
+  int64_t CalculateNumSamples(int64_t num_rows) override;
+
+  void SamplerPrint(std::ostream &out, bool show_all) const override;
+
+  /// \brief Get the arguments of node
+  /// \param[out] out_json JSON string of all attributes
+  /// \return Status of the function
+  Status to_json(nlohmann::json *out_json) override;
 
  private:
   int64_t cnt_;  // number of samples that have already been filled in to buffer

@@ -19,7 +19,7 @@
 #include <vector>
 #include "src/lite_kernel.h"
 #include "include/context.h"
-#include "nnacl/fp32/prelu.h"
+#include "nnacl/fp32/prelu_fp32.h"
 
 namespace mindspore::kernel {
 class PReluCPUKernel : public LiteKernel {
@@ -33,11 +33,10 @@ class PReluCPUKernel : public LiteKernel {
   ~PReluCPUKernel() = default;
 
   int Init() override;
-  int ReSize() override { return 0; }
+  int ReSize() override;
   int Run() override;
   int DoExcute(int task_id);
   int ProcessShareChannelInput();
-  int ProcessInput();
 
  private:
   PReluParameter *prelu_param_;

@@ -180,31 +180,44 @@ STATUS TfliteCustomParser::FftImag(const std::vector<uint8_t> &custom_attr, sche
   return RET_OK;
 }
 
-STATUS TfliteCustomParser::Parse(TfliteTensorsInfo *tensors_info, const std::unique_ptr<tflite::OperatorT> &tflite_op,
-                                 const std::unique_ptr<tflite::ModelT> &tflite_model,
-                                 const std::unique_ptr<tflite::SubGraphT> &tflite_subgraph, schema::CNodeT *op) {
-  MS_LOG(DEBUG) << "parse TfliteCustomParser";
-  MS_ASSERT(tflite_op != nullptr);
-  MS_ASSERT(tflite_model != nullptr);
-  MS_ASSERT(tflite_subgraph != nullptr);
-  if (op == nullptr) {
-    MS_LOG(ERROR) << "op is null";
+STATUS TfliteCustomParser::Identity(const std::vector<uint8_t> &custom_attr, schema::CNodeT *op,
+                                    const std::unique_ptr<tflite::OperatorT> &tflite_op) {
+  std::unique_ptr<schema::IdentityT> attr = std::make_unique<schema::IdentityT>();
+  if (attr == nullptr) {
+    MS_LOG(ERROR) << "new op failed";
     return RET_NULL_PTR;
   }
+  op->primitive->value.type = schema::PrimitiveType_Identity;
+  op->primitive->value.value = attr.release();
+  return RET_OK;
+}
+
+STATUS TfliteCustomParser::BatchMatMul(const std::vector<uint8_t> &custom_attr, schema::CNodeT *op,
+                                       const std::unique_ptr<tflite::OperatorT> &tflite_op) {
+  std::unique_ptr<schema::MatMulT> attr = std::make_unique<schema::MatMulT>();
+  if (attr == nullptr) {
+    MS_LOG(ERROR) << "new op failed";
+    return RET_NULL_PTR;
+  }
+  attr->transposeA = false;
+  attr->transposeB = false;
+  op->primitive->value.type = schema::PrimitiveType_MatMul;
+  op->primitive->value.value = attr.release();
+  return RET_OK;
+}
+
+PrimitiveC *TfliteCustomParser::ParseLitePrimitive(const std::unique_ptr<tflite::OperatorT> &tflite_op,
+                                                   const std::unique_ptr<tflite::ModelT> &tflite_model) {
+  auto &tflite_subgraph = tflite_model->subgraphs.front();
+  auto op = new schema::CNodeT;
   op->primitive = std::make_unique<schema::PrimitiveT>();
   if (op->primitive == nullptr) {
     MS_LOG(ERROR) << "op->primitive is null";
-    return RET_NULL_PTR;
+    return nullptr;
   }
   const auto &custom_attr = tflite_op->custom_options;
-  const auto opcode_index = tflite_op->opcode_index;
-  const auto &operator_code = tflite_model->operator_codes[opcode_index];
-  if (operator_code == nullptr) {
-    MS_LOG(ERROR) << "operator_code is null";
-    return RET_NULL_PTR;
-  }
-  const auto &custom_type = operator_code->custom_code;
-
+  const auto &opcode_index = tflite_op->opcode_index;
+  const auto &custom_type = tflite_model->operator_codes[opcode_index]->custom_code;
   int status = RET_OK;
   if (custom_type == "TFLite_Detection_PostProcess") {
     status = DetectPostProcess(custom_attr, op, tflite_op);
@@ -229,18 +242,13 @@ STATUS TfliteCustomParser::Parse(TfliteTensorsInfo *tensors_info, const std::uni
     status = RET_NOT_FIND_OP;
   }
   if (status != RET_OK) {
-    return status;
+    return nullptr;
   }
-
-  for (int input : tflite_op->inputs) {
-    AddOpInput(op, tensors_info, input, tflite_subgraph->tensors.size(), schema::Format::Format_NHWC);
-  }
-  for (int output : tflite_op->outputs) {
-    AddOpOutput(op, tensors_info, output, tflite_subgraph->tensors.size(), schema::Format::Format_NHWC);
-  }
-  return status;
+  auto primitive = op->primitive.release();
+  delete op;
+  return PrimitiveC::Create(primitive);
 }
 
-TfliteNodeRegister g_tfliteCustomParser("Custom", new TfliteCustomParser());
+TfliteNodeRegister g_tfliteCustomParser(tflite::BuiltinOperator_CUSTOM, new TfliteCustomParser());
 }  // namespace lite
 }  // namespace mindspore

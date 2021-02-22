@@ -13,10 +13,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 #include "src/runtime/kernel/arm/fp32/zeroslike_fp32.h"
-#include <vector>
 #include "schema/model_generated.h"
-#include "nnacl/zeroslike.h"
+#include "mindspore/lite/nnacl/base/zeroslike_base.h"
 #include "src/kernel_registry.h"
 #include "include/errorcode.h"
 
@@ -31,34 +31,9 @@ int ZerosLikeCPUKernel::Init() { return RET_OK; }
 
 int ZerosLikeCPUKernel::Run() {
   auto output_data = reinterpret_cast<float *>(out_tensors_.at(0)->MutableData());
-  ApproximateZerosLike(output_data, in_tensors_.at(0)->ElementsNum());
+  ApproximateZerosLike(output_data, in_tensors_.at(0)->ElementsNum(), sizeof(float));
   return RET_OK;
 }
 
-kernel::LiteKernel *CpuZerosLikeFp32KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                                  const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter,
-                                                  const lite::InnerContext *ctx, const kernel::KernelKey &desc,
-                                                  const mindspore::lite::PrimitiveC *primitive) {
-  if (opParameter == nullptr) {
-    MS_LOG(ERROR) << "input opParameter is nullptr!";
-    return nullptr;
-  }
-  MS_ASSERT(desc.type == schema::PrimitiveType_ZerosLike);
-  auto *kernel = new (std::nothrow) ZerosLikeCPUKernel(opParameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "new ZerosLikeCPUKernel fail!";
-    free(opParameter);
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
-}
-
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_ZerosLike, CpuZerosLikeFp32KernelCreator)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_ZerosLike, LiteKernelCreator<ZerosLikeCPUKernel>)
 }  // namespace mindspore::kernel

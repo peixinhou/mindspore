@@ -1,5 +1,5 @@
 /**
- * Copyright 2019 Huawei Technologies Co., Ltd
+ * Copyright 2019-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,18 +19,13 @@
 #include <fstream>
 #include <iomanip>
 
-#include "./tinyxml2.h"
 #include "minddata/dataset/core/config_manager.h"
 #include "minddata/dataset/core/tensor_shape.h"
 #include "minddata/dataset/engine/datasetops/source/sampler/sequential_sampler.h"
 #include "minddata/dataset/engine/db_connector.h"
 #include "minddata/dataset/engine/execution_tree.h"
-#include "minddata/dataset/engine/opt/pass.h"
 #include "utils/ms_utils.h"
 
-using tinyxml2::XMLDocument;
-using tinyxml2::XMLElement;
-using tinyxml2::XMLError;
 namespace mindspore {
 namespace dataset {
 const char kColumnImage[] = "image";
@@ -97,7 +92,7 @@ Status VOCOp::Builder::SanityCheck() {
   err_msg += builder_num_workers_ <= 0 ? "Invalid parameter, num_parallel_workers must be greater than 0, but got " +
                                            std::to_string(builder_num_workers_) + ".\n"
                                        : "";
-  return err_msg.empty() ? Status::OK() : Status(StatusCode::kUnexpectedError, __LINE__, __FILE__, err_msg);
+  return err_msg.empty() ? Status::OK() : Status(StatusCode::kMDUnexpectedError, __LINE__, __FILE__, err_msg);
 }
 
 VOCOp::VOCOp(const TaskType &task_type, const std::string &task_mode, const std::string &folder_path,
@@ -191,7 +186,8 @@ void VOCOp::Print(std::ostream &out, bool show_all) const {
     // Call the super class for displaying any common detailed info
     ParallelOp::Print(out, show_all);
     // Then show any custom derived-internal stuff
-    out << "\nNumber of rows: " << num_rows_ << "\nVOC Directory: " << folder_path_ << "\n\n";
+    out << "\nNumber of rows: " << num_rows_ << "\nVOC Directory: " << folder_path_
+        << "\nDecode: " << (decode_ ? "yes" : "no") << "\n\n";
   }
 }
 
@@ -212,6 +208,7 @@ Status VOCOp::LoadTensorRow(row_id_type row_id, const std::string &image_id, Ten
     RETURN_IF_NOT_OK(ReadImageToTensor(kImageFile, data_schema_->column(0), &image));
     RETURN_IF_NOT_OK(ReadImageToTensor(kTargetFile, data_schema_->column(1), &target));
     (*trow) = TensorRow(row_id, {std::move(image), std::move(target)});
+    trow->setPath({kImageFile, kTargetFile});
   } else if (task_type_ == TaskType::Detection) {
     std::shared_ptr<Tensor> image;
     TensorRow annotation;
@@ -222,6 +219,7 @@ Status VOCOp::LoadTensorRow(row_id_type row_id, const std::string &image_id, Ten
     RETURN_IF_NOT_OK(ReadImageToTensor(kImageFile, data_schema_->column(0), &image));
     RETURN_IF_NOT_OK(ReadAnnotationToTensor(kAnnotationFile, &annotation));
     trow->setId(row_id);
+    trow->setPath({kImageFile, kAnnotationFile, kAnnotationFile, kAnnotationFile, kAnnotationFile});
     trow->push_back(std::move(image));
     trow->insert(trow->end(), annotation.begin(), annotation.end());
   }
@@ -324,6 +322,14 @@ Status VOCOp::ParseAnnotationIds() {
   return Status::OK();
 }
 
+void VOCOp::ParseNodeValue(XMLElement *bbox_node, const char *name, float *value) {
+  *value = 0.0;
+  if (bbox_node != nullptr) {
+    XMLElement *node = bbox_node->FirstChildElement(name);
+    if (node != nullptr) *value = node->FloatText();
+  }
+}
+
 Status VOCOp::ParseAnnotationBbox(const std::string &path) {
   if (!Path(path).Exists()) {
     RETURN_STATUS_UNEXPECTED("Invalid file, failed to open file: " + path);
@@ -347,24 +353,19 @@ Status VOCOp::ParseAnnotationBbox(const std::string &path) {
     float xmin = 0.0, ymin = 0.0, xmax = 0.0, ymax = 0.0, truncated = 0.0, difficult = 0.0;
     XMLElement *name_node = object->FirstChildElement("name");
     if (name_node != nullptr && name_node->GetText() != 0) label_name = name_node->GetText();
-    XMLElement *truncated_node = object->FirstChildElement("truncated");
-    if (truncated_node != nullptr) truncated = truncated_node->FloatText();
-    XMLElement *difficult_node = object->FirstChildElement("difficult");
-    if (difficult_node != nullptr) difficult = difficult_node->FloatText();
+    ParseNodeValue(object, "difficult", &difficult);
+    ParseNodeValue(object, "truncated", &truncated);
 
     XMLElement *bbox_node = object->FirstChildElement("bndbox");
     if (bbox_node != nullptr) {
-      XMLElement *xmin_node = bbox_node->FirstChildElement("xmin");
-      if (xmin_node != nullptr) xmin = xmin_node->FloatText();
-      XMLElement *ymin_node = bbox_node->FirstChildElement("ymin");
-      if (ymin_node != nullptr) ymin = ymin_node->FloatText();
-      XMLElement *xmax_node = bbox_node->FirstChildElement("xmax");
-      if (xmax_node != nullptr) xmax = xmax_node->FloatText();
-      XMLElement *ymax_node = bbox_node->FirstChildElement("ymax");
-      if (ymax_node != nullptr) ymax = ymax_node->FloatText();
+      ParseNodeValue(bbox_node, "xmin", &xmin);
+      ParseNodeValue(bbox_node, "xmax", &xmax);
+      ParseNodeValue(bbox_node, "ymin", &ymin);
+      ParseNodeValue(bbox_node, "ymax", &ymax);
     } else {
       RETURN_STATUS_UNEXPECTED("Invalid data, bndbox dismatch in " + path);
     }
+
     if (label_name != "" && (class_index_.empty() || class_index_.find(label_name) != class_index_.end()) && xmin > 0 &&
         ymin > 0 && xmax > xmin && ymax > ymin) {
       std::vector<float> bbox_list = {xmin, ymin, xmax - xmin, ymax - ymin, difficult, truncated};
@@ -388,7 +389,8 @@ Status VOCOp::LaunchThreadsAndInitOp() {
   }
   RETURN_IF_NOT_OK(io_block_queues_.Register(tree_->AllTasks()));
   RETURN_IF_NOT_OK(wait_for_workers_post_.Register(tree_->AllTasks()));
-  RETURN_IF_NOT_OK(tree_->LaunchWorkers(num_workers_, std::bind(&VOCOp::WorkerEntry, this, std::placeholders::_1)));
+  RETURN_IF_NOT_OK(
+    tree_->LaunchWorkers(num_workers_, std::bind(&VOCOp::WorkerEntry, this, std::placeholders::_1), "", id()));
   TaskManager::FindMe()->Post();
   RETURN_IF_NOT_OK(this->ParseImageIds());
   if (task_type_ == TaskType::Detection) {
@@ -403,7 +405,7 @@ Status VOCOp::ReadImageToTensor(const std::string &path, const ColDescriptor &co
   if (decode_ == true) {
     Status rc = Decode(*tensor, tensor);
     if (rc.IsError()) {
-      RETURN_STATUS_UNEXPECTED("Invalid file, failed to decode file: " + path);
+      RETURN_STATUS_UNEXPECTED("Invalid data, failed to decode image: " + path);
     }
   }
   return Status::OK();
@@ -446,16 +448,9 @@ Status VOCOp::ReadAnnotationToTensor(const std::string &path, TensorRow *row) {
   return Status::OK();
 }
 
-#ifdef ENABLE_PYTHON
 Status VOCOp::CountTotalRows(const std::string &dir, const std::string &task_type, const std::string &task_mode,
-                             const py::dict &dict, int64_t *count) {
+                             const std::map<std::string, int32_t> &input_class_indexing, int64_t *count) {
   if (task_type == "Detection") {
-    std::map<std::string, int32_t> input_class_indexing;
-    for (auto p : dict) {
-      (void)input_class_indexing.insert(std::pair<std::string, int32_t>(py::reinterpret_borrow<py::str>(p.first),
-                                                                        py::reinterpret_borrow<py::int_>(p.second)));
-    }
-
     std::shared_ptr<VOCOp> op;
     RETURN_IF_NOT_OK(
       Builder().SetDir(dir).SetTask(task_type).SetUsage(task_mode).SetClassIndex(input_class_indexing).Build(&op));
@@ -472,6 +467,7 @@ Status VOCOp::CountTotalRows(const std::string &dir, const std::string &task_typ
   return Status::OK();
 }
 
+#ifdef ENABLE_PYTHON
 Status VOCOp::GetClassIndexing(const std::string &dir, const std::string &task_type, const std::string &task_mode,
                                const py::dict &dict, std::map<std::string, int32_t> *output_class_indexing) {
   std::map<std::string, int32_t> input_class_indexing;
@@ -497,12 +493,6 @@ Status VOCOp::GetClassIndexing(const std::string &dir, const std::string &task_t
 }
 #endif
 
-// Visitor accept method for NodePass
-Status VOCOp::Accept(NodePass *p, bool *modified) {
-  // Downcast shared pointer then call visitor
-  return p->RunOnNode(shared_from_base<VOCOp>(), modified);
-}
-
 Status VOCOp::ComputeColMap() {
   // Set the column name map (base class field)
   if (column_name_id_map_.empty()) {
@@ -515,31 +505,26 @@ Status VOCOp::ComputeColMap() {
   return Status::OK();
 }
 
-// Get Dataset size
-Status VOCOp::GetDatasetSize(int64_t *dataset_size) {
-  if (dataset_size_ > 0) {
-    *dataset_size = dataset_size_;
-    return Status::OK();
-  }
-  int64_t num_rows = 0, sample_size;
-  if (image_ids_.size() == 0) {
-    if (task_type_ == TaskType::Detection) {
-      std::shared_ptr<VOCOp> op;
-      RETURN_IF_NOT_OK(
-        Builder().SetDir(folder_path_).SetTask("Detection").SetUsage(usage_).SetClassIndex(class_index_).Build(&op));
-      RETURN_IF_NOT_OK(op->ParseImageIds());
-      RETURN_IF_NOT_OK(op->ParseAnnotationIds());
-      num_rows = static_cast<int64_t>(op->image_ids_.size());
-    } else if (task_type_ == TaskType::Segmentation) {
-      std::shared_ptr<VOCOp> op;
-      RETURN_IF_NOT_OK(Builder().SetDir(folder_path_).SetTask("Segmentation").SetUsage(usage_).Build(&op));
-      RETURN_IF_NOT_OK(op->ParseImageIds());
-      num_rows = static_cast<int64_t>(op->image_ids_.size());
+Status VOCOp::GetClassIndexing(std::vector<std::pair<std::string, std::vector<int32_t>>> *output_class_indexing) {
+  if ((*output_class_indexing).empty()) {
+    if (task_type_ != TaskType::Detection) {
+      MS_LOG(ERROR) << "Class index only valid in \"Detection\" task.";
+      RETURN_STATUS_UNEXPECTED("GetClassIndexing: Get Class Index failed in VOCOp.");
+    }
+    std::shared_ptr<VOCOp> op;
+    RETURN_IF_NOT_OK(
+      Builder().SetDir(folder_path_).SetTask("Detection").SetUsage(usage_).SetClassIndex(class_index_).Build(&op));
+    RETURN_IF_NOT_OK(op->ParseImageIds());
+    RETURN_IF_NOT_OK(op->ParseAnnotationIds());
+    for (const auto label : op->label_index_) {
+      if (!class_index_.empty()) {
+        (*output_class_indexing)
+          .emplace_back(std::make_pair(label.first, std::vector<int32_t>(1, class_index_[label.first])));
+      } else {
+        (*output_class_indexing).emplace_back(std::make_pair(label.first, std::vector<int32_t>(1, label.second)));
+      }
     }
   }
-  sample_size = sampler_->GetNumSamples();
-  *dataset_size = sample_size > 0 ? std::min(num_rows, sample_size) : num_rows;
-  dataset_size_ = *dataset_size;
   return Status::OK();
 }
 }  // namespace dataset

@@ -1,5 +1,5 @@
 /**
- * Copyright 2020 Huawei Technologies Co., Ltd
+ * Copyright 2020-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,16 +16,16 @@
 #ifndef MINDSPORE_CCSRC_MINDDATA_DATASET_ENGINE_DATASETOPS_SOURCE_ALBUM_OP_H_
 #define MINDSPORE_CCSRC_MINDDATA_DATASET_ENGINE_DATASETOPS_SOURCE_ALBUM_OP_H_
 
+#include <algorithm>
 #include <deque>
+#include <map>
 #include <memory>
 #include <queue>
-#include <string>
-#include <algorithm>
-#include <map>
 #include <set>
+#include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
-#include <unordered_map>
 #include "minddata/dataset/core/tensor.h"
 #include "minddata/dataset/engine/data_buffer.h"
 #include "minddata/dataset/engine/data_schema.h"
@@ -130,12 +130,12 @@ class AlbumOp : public ParallelOp, public RandomAccessOp {
     }
 
     /// \brief Check validity of input args
-    /// \return - The error code returned
+    /// \return Status The status code returned
     Status SanityCheck();
 
     /// \brief The builder "build" method creates the final object.
-    /// \param[inout] std::shared_ptr<AlbumOp> *op - DatasetOp
-    /// \return - The error code returned
+    /// \param[in, out] std::shared_ptr<AlbumOp> *op - DatasetOp
+    /// \return Status The status code returned
     Status Build(std::shared_ptr<AlbumOp> *op);
 
    private:
@@ -168,18 +168,18 @@ class AlbumOp : public ParallelOp, public RandomAccessOp {
   ~AlbumOp() = default;
 
   /// \brief Initialize AlbumOp related var, calls the function to walk all files
-  /// \return - The error code returned
+  /// \return Status The status code returned
   Status PrescanEntry();
 
   /// \brief Worker thread pulls a number of IOBlock from IOBlock Queue, make a buffer and push it to Connector
   /// \param[in] int32_t workerId - id of each worker
-  /// \return Status - The error code returned
+  /// \return Status The status code returned
   Status WorkerEntry(int32_t worker_id) override;
 
   /// \brief Main Loop of AlbumOp
   ///     Master thread: Fill IOBlockQueue, then goes to sleep
   ///     Worker thread: pulls IOBlock from IOBlockQueue, work on it then put buffer to mOutConnector
-  /// \return Status - The error code returned
+  /// \return Status The status code returned
   Status operator()() override;
 
   /// \brief A print method typically used for debugging
@@ -189,14 +189,8 @@ class AlbumOp : public ParallelOp, public RandomAccessOp {
 
   /// \brief Check if image ia valid.Only support JPEG/PNG/GIF/BMP
   ///     This function could be optimized to return the tensor to reduce open/closing files
-  /// \return Status - The error code returned
-  Status CheckImageType(const std::string &file_name, bool *valid);
-
-  // Base-class override for NodePass visitor acceptor.
-  // @param p - Pointer to the NodePass to be accepted.
-  // @param modified - Whether this node visit modified the pipeline.
-  // @return - Status of the node visit.
-  Status Accept(NodePass *p, bool *modified) override;
+  /// \return bool - if file is bad then return false
+  bool CheckImageType(const std::string &file_name, bool *valid);
 
   // Op name getter
   // @return Name of the current Op
@@ -204,93 +198,101 @@ class AlbumOp : public ParallelOp, public RandomAccessOp {
 
  private:
   /// \brief Initialize Sampler, calls sampler->Init() within
-  /// \return Status The error code returned
+  /// \return Status The status code returned
   Status InitSampler();
 
   /// \brief Load image to tensor row
   /// \param[in] image_file Image name of file
   /// \param[in] col_num Column num in schema
-  /// \param[inout] row Tensor row to push to
-  /// \return Status The error code returned
+  /// \param[in, out] row Tensor row to push to
+  /// \return Status The status code returned
   Status LoadImageTensor(const std::string &image_file, uint32_t col_num, TensorRow *row);
 
   /// \brief Load vector of ints to tensor, append tensor to tensor row
   /// \param[in] json_obj Json object containing multi-dimensional label
   /// \param[in] col_num Column num in schema
-  /// \param[inout] row Tensor row to push to
-  /// \return Status The error code returned
+  /// \param[in, out] row Tensor row to push to
+  /// \return Status The status code returned
   Status LoadIntArrayTensor(const nlohmann::json &json_obj, uint32_t col_num, TensorRow *row);
 
   /// \brief Load vector of floatss to tensor, append tensor to tensor row
   /// \param[in] json_obj Json object containing array data
   /// \param[in] col_num Column num in schema
-  /// \param[inout] row Tensor row to push to
-  /// \return Status The error code returned
+  /// \param[in, out] row Tensor row to push to
+  /// \return Status The status code returned
   Status LoadFloatArrayTensor(const nlohmann::json &json_obj, uint32_t col_num, TensorRow *row);
 
   /// \brief Load string array into a tensor, append tensor to tensor row
   /// \param[in] json_obj Json object containing string tensor
   /// \param[in] col_num Column num in schema
-  /// \param[inout] row Tensor row to push to
-  /// \return Status The error code returned
+  /// \param[in, out] row Tensor row to push to
+  /// \return Status The status code returned
   Status LoadStringArrayTensor(const nlohmann::json &json_obj, uint32_t col_num, TensorRow *row);
 
   /// \brief Load string into a tensor, append tensor to tensor row
   /// \param[in] json_obj Json object containing string tensor
   /// \param[in] col_num Column num in schema
-  /// \param[inout] row Tensor row to push to
-  /// \return Status The error code returned
+  /// \param[in, out] row Tensor row to push to
+  /// \return Status The status code returned
   Status LoadStringTensor(const nlohmann::json &json_obj, uint32_t col_num, TensorRow *row);
 
   /// \brief Load float value to tensor row
   /// \param[in] json_obj Json object containing float
   /// \param[in] col_num Column num in schema
-  /// \param[inout] row Tensor row to push to
-  /// \return Status The error code returned
+  /// \param[in, out] row Tensor row to push to
+  /// \return Status The status code returned
   Status LoadFloatTensor(const nlohmann::json &json_obj, uint32_t col_num, TensorRow *row);
 
   /// \brief Load int value to tensor row
   /// \param[in] json_obj Json object containing int
   /// \param[in] col_num Column num in schema
-  /// \param[inout] row Tensor row to push to
-  /// \return Status The error code returned
+  /// \param[in, out] row Tensor row to push to
+  /// \return Status The status code returned
   Status LoadIntTensor(const nlohmann::json &json_obj, uint32_t col_num, TensorRow *row);
 
-  /// \brief Load emtpy tensor to tensor row
+  /// \brief Load empty tensor to tensor row
   /// \param[in] col_num Column num in schema
-  /// \param[inout] row Tensor row to push to
-  /// \return Status The error code returned
+  /// \param[in, out] row Tensor row to push to
+  /// \return Status The status code returned
   Status LoadEmptyTensor(uint32_t col_num, TensorRow *row);
 
   /// \brief Load id from file name to tensor row
   /// \param[in] file The file name to get ID from
   /// \param[in] col_num Column num in schema
-  /// \param[inout] row Tensor row to push to
-  /// \return Status The error code returned
+  /// \param[in, out] row Tensor row to push to
+  /// \return Status The status code returned
   Status LoadIDTensor(const std::string &file, uint32_t col_num, TensorRow *row);
 
   /// \brief Load a tensor row according to a json file
   /// \param[in] row_id_type row_id - id for this tensor row
   /// \param[in] ImageColumns file Json file location
-  /// \param[inout] TensorRow row Json content stored into a tensor row
-  /// \return Status The error code returned
+  /// \param[in, out] TensorRow row Json content stored into a tensor row
+  /// \return Status The status code returned
   Status LoadTensorRow(row_id_type row_id, const std::string &file, TensorRow *row);
 
+  /// \brief Load a tensor column according to a json file
+  /// \param[in] ImageColumns file Json file location
+  /// \param[in] index - certain column index
+  /// \param[in] js - json object
+  /// \param[in, out] TensorRow row Json content stored into a tensor row
+  /// \return Status The status code returned
+  Status loadColumnData(const std::string &file, int32_t index, nlohmann::json js, TensorRow *row);
+
   /// \param[in] const std::vector<int64_t> &keys Keys in ioblock
-  /// \param[inout] std::unique_ptr<DataBuffer> db Databuffer to push to
-  /// \return Status The error code returned
+  /// \param[in, out] std::unique_ptr<DataBuffer> db Databuffer to push to
+  /// \return Status The status code returned
   Status LoadBuffer(const std::vector<int64_t> &keys, std::unique_ptr<DataBuffer> *db);
 
   /// \brief Called first when function is called
-  /// \return Status The error code returned
+  /// \return Status The status code returned
   Status LaunchThreadsAndInitOp();
 
   /// \brief reset Op
-  /// \return Status The error code return
+  /// \return Status The status code returned
   Status Reset() override;
 
   // Private function for computing the assignment of the column name map.
-  // @return Status The error code returned
+  // @return Status The status code returned
   Status ComputeColMap() override;
 
   int32_t rows_per_buffer_;

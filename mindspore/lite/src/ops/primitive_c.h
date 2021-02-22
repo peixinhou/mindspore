@@ -24,6 +24,9 @@
 #ifdef PRIMITIVE_WRITEABLE
 #include "ir/primitive.h"
 #include "schema/inner/model_generated.h"
+#include "schema/inner/ops_generated.h"
+#include "schema/ops_generated.h"
+#include "tools/converter/ops/ops_def.h"
 #else
 #include "schema/model_generated.h"
 #endif
@@ -34,10 +37,11 @@
 
 namespace mindspore {
 namespace lite {
+constexpr const int OP_TYPE_NOT_SET = -1;
 constexpr uint32_t kSingleNum = 1;
 constexpr uint32_t kDoubleNum = 2;
-constexpr uint32_t kMultiNum = 3;
-constexpr uint32_t kDimension_4d = 4;
+constexpr uint32_t kTripleNum = 3;
+constexpr uint32_t kQuadrupleNum = 4;
 
 const std::set<int> kSupportDataType = {kNumberTypeBool,  kNumberTypeUInt8,   kNumberTypeInt8,
                                         kNumberTypeInt32, kNumberTypeFloat32, kNumberTypeFloat16};
@@ -47,11 +51,17 @@ using TensorPtr = std::shared_ptr<mindspore::tensor::Tensor>;
 constexpr int kAnfPopulaterInputNumOne = 1;
 constexpr int kAnfPopulaterInputNumTwo = 2;
 constexpr int kAnfPopulaterInputNumThree = 3;
-static std::map<std::string, schema::ActivationType> kActivationTypeMap{{"ReLU", schema::ActivationType_RELU},
-                                                                        {"ReLU6", schema::ActivationType_RELU6},
-                                                                        {"Sigmoid", schema::ActivationType_SIGMOID},
-                                                                        {"HSwish", schema::ActivationType_HSWISH},
-                                                                        {"HSigmoid", schema::ActivationType_HSIGMOID}};
+static std::map<std::string, schema::ActivationType> kActivationTypeMap{
+  {"ReLU", schema::ActivationType_RELU},
+  {"ReLU6", schema::ActivationType_RELU6},
+  {"Sigmoid", schema::ActivationType_SIGMOID},
+  {"HSwish", schema::ActivationType_HSWISH},
+  {"HSigmoid", schema::ActivationType_HSIGMOID},
+  {"Swish", schema::ActivationType_SWISH},
+  {"LeakyRelu", schema::ActivationType_LEAKY_RELU},
+  {"Tanh", schema::ActivationType_TANH},
+  {"Logistic", schema::ActivationType_SIGMOID}};
+std::vector<int> CastToInt(const ValuePtr &value);
 class PrimitiveC : public mindspore::Primitive {
  public:
   // Argument primitive is deliverd into PrimitiveC and will be deleted in ~PrimitiveC().
@@ -113,11 +123,19 @@ class PrimitiveC : public mindspore::Primitive {
 
   schema::QuantType quant_type() const;
 
+  bool enable_huffman_code() const;
+
+  void set_enable_huffman_code(bool enable_huffman_code);
+
   virtual int InferShape(std::vector<lite::Tensor *> inputs, std::vector<lite::Tensor *> outputs);
 
   bool infer_flag() const;
 
   void set_infer_flag(bool flag);
+
+  bool train_flag() const;
+
+  void set_train_flag(bool flag);
 
   static PrimitiveC *Create(mindspore::schema::Primitive *primitive) { return Create(primitive->UnPack()); }
 
@@ -126,12 +144,12 @@ class PrimitiveC : public mindspore::Primitive {
   static void GetAttrDataFromInput(const AnfNodePtr &inputNode, std::vector<int> *data);
 
   static std::shared_ptr<PrimitiveC> Create(const Primitive &prim, const std::vector<AnfNodePtr> &inputs,
-                                            const schema::QuantType &quantType);
+                                            const schema::QuantType &quantType, bool train_flag = false);
+  void PopulaterQuantParam(const Primitive &prim, const std::vector<AnfNodePtr> &inputs);
   void FillDefaultInputQuantParamIfNeed(const size_t &inputSize);
   void PopulaterInputQuantParam(const Primitive &prim, const std::vector<AnfNodePtr> &inputs,
                                 bool narrowRangeQuantParam, int32_t numbitsRangeQuantParam);
   void PopulaterOutputQuantParam(const Primitive &prim, bool narrowRangeQuantParam, int32_t numbitsRangeQuantParam);
-  void PopulaterQuantParam(const Primitive &prim, const std::vector<AnfNodePtr> &inputs);
   static void CalFloatScopeByMeanAndStddev(const double &mean, const double &stdDev, float *mMin, float *mMax);
 
  protected:
@@ -143,6 +161,9 @@ class PrimitiveC : public mindspore::Primitive {
   std::vector<std::vector<schema::QuantParamT>> output_quant_param_;
   schema::QuantType quant_type_{schema::QuantType_QUANT_NONE};
   bool infer_flag_ = true;
+  int op_type_ = OP_TYPE_NOT_SET;
+  bool enable_huffman_code_ = false;
+  bool train_flag_ = false;
 };
 std::shared_ptr<PrimitiveC> GetReturnPrim();
 
@@ -162,6 +183,10 @@ class PrimitiveC {
   bool infer_flag() const;
 
   void set_infer_flag(bool flag);
+
+  bool train_flag() const;
+
+  void set_train_flag(bool flag);
 
   virtual int InferShape(std::vector<lite::Tensor *> inputs, std::vector<lite::Tensor *> outputs);
 
@@ -221,7 +246,10 @@ class PrimitiveC {
   char *primitive_buf_ = nullptr;
   bool infer_flag_ = true;
   schema::QuantType quant_type_{schema::QuantType_QUANT_NONE};
+  int op_type_ = OP_TYPE_NOT_SET;
+  bool train_flag_ = false;
 };
+using PrimitiveCPtr = std::shared_ptr<PrimitiveC>;
 typedef PrimitiveC *(*PrimitiveCCreator)(const schema::Primitive *primitive);
 #endif
 typedef OpParameter *(*ParameterCreator)(const PrimitiveC *primitive);

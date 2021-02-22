@@ -32,16 +32,21 @@ class LayerNorm : public PrimitiveC {
 #ifdef PRIMITIVE_WRITEABLE
   MS_DECLARE_PARENT(LayerNorm, PrimitiveC);
   explicit LayerNorm(schema::PrimitiveT *primitive) : PrimitiveC(primitive) {}
-  void SetNormalizedShape(const std::vector<int> &normalizedShape);
   void SetEpsilon(float epsilon);
-  void SetElementwiseAffine(bool elementwiseAffine);
+  void SetBeginNormAxis(int axis);
+  void SetBeginParamsAxis(int axis);
+  int UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &inputs) override;
 #else
   int UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::FlatBufferBuilder *fbb) override;
 #endif
   int InferShape(std::vector<lite::Tensor *> inputs_, std::vector<lite::Tensor *> outputs_) override;
-  std::vector<int> GetNormalizedShape() const;
   float GetEpsilon() const;
-  bool GetElementwiseAffine() const;
+  int GetBeginNormAxis() const;
+  int GetBeginParamsAxis() const;
+  std::vector<int> GetNormlizedShape() const { return normlized_shape_; }
+
+ protected:
+  std::vector<int> normlized_shape_;
 };
 }  // namespace lite
 }  // namespace mindspore

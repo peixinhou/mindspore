@@ -17,7 +17,7 @@
 #include "src/ops/lstm.h"
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
-#include "nnacl/fp32/lstm.h"
+#include "nnacl/fp32/lstm_fp32.h"
 
 namespace mindspore {
 namespace lite {
@@ -36,6 +36,7 @@ OpParameter *PopulateLstmParameter(const mindspore::lite::PrimitiveC *primitive)
     return nullptr;
   }
   lstm_param->bidirectional_ = param->GetBidirection();
+  lstm_param->smooth_ = param->GetSmooth();
   return reinterpret_cast<OpParameter *>(lstm_param);
 }
 Registry LstmParameterRegistry(schema::PrimitiveType_Lstm, PopulateLstmParameter);

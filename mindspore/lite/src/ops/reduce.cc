@@ -67,6 +67,11 @@ int Reduce::UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &inp
       attr->mode = schema::ReduceMode_ReduceProd;
     } else if (prim.name() == "ReduceSumSquare") {
       attr->mode = schema::ReduceMode_ReduceSumSquare;
+    } else if (prim.name() == "ReduceAll") {
+      attr->mode = schema::ReduceMode_ReduceAll;
+    } else {
+      MS_LOG(ERROR) << "Not supported reduce mode: " << prim.name();
+      return RET_ERROR;
     }
 
     attr->keepDims = GetValue<bool>(prim.GetAttr("keep_dims"));
@@ -82,12 +87,12 @@ int Reduce::UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &inp
           auto valTuplPtr = dyn_cast<ValueTuple>(value);
           MS_ASSERT(valTuplPtr != nullptr);
           for (size_t i = 0; i < valTuplPtr->size(); i++) {
-            auto elem = dyn_cast<Int32Imm>((*valTuplPtr)[i]);
+            auto elem = (*valTuplPtr)[i];
             MS_ASSERT(elem != nullptr);
-            attr->axes.emplace_back(elem->value());
+            attr->axes.emplace_back(CastToInt(elem).front());
           }
         } else {
-          int axes_item = GetValue<int>(value);
+          int axes_item = CastToInt(value).front();
           attr->axes.push_back(axes_item);
         }
       }
@@ -152,7 +157,7 @@ int Reduce::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> outp
   output->set_data_type(input->data_type());
   output->set_format(input->format());
   if (!infer_flag()) {
-    return RET_OK;
+    return RET_INFER_INVALID;
   }
   if (this->primitive_ == nullptr) {
     return RET_NULL_PTR;

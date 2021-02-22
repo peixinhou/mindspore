@@ -22,16 +22,7 @@
 
 namespace mindspore {
 namespace lite {
-#ifdef PRIMITIVE_WRITEABLE
-bool SparseToDense::GetValidateIndices() const { return this->primitive_->value.AsSparseToDense()->validateIndices; }
-
-void SparseToDense::SetValidateIndices(bool validate_indices) {
-  this->primitive_->value.AsSparseToDense()->validateIndices = validate_indices;
-}
-
-#else
-
-bool SparseToDense::GetValidateIndices() const { return this->primitive_->value_as_SparseToDense()->validateIndices(); }
+#ifndef PRIMITIVE_WRITEABLE
 int SparseToDense::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::FlatBufferBuilder *fbb) {
   MS_ASSERT(nullptr != primitive);
   MS_ASSERT(nullptr != fbb);
@@ -40,7 +31,7 @@ int SparseToDense::UnPackToFlatBuilder(const schema::Primitive *primitive, flatb
     MS_LOG(ERROR) << "value_as_SparseToDense return nullptr";
     return RET_ERROR;
   }
-  auto val_offset = schema::CreateSparseToDense(*fbb, attr->validateIndices());
+  auto val_offset = schema::CreateSparseToDense(*fbb);
   auto prim_offset = schema::CreatePrimitive(*fbb, schema::PrimitiveType_SparseToDense, val_offset.o);
   fbb->Finish(prim_offset);
   return RET_OK;
@@ -54,7 +45,6 @@ Registry SparseToDenseRegistry(schema::PrimitiveType_SparseToDense, SparseToDens
 
 int SparseToDense::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> outputs_) {
   MS_ASSERT(this->primitive_ != nullptr);
-  MS_ASSERT(output_shape != nullptr);
   auto output = outputs_.front();
   if (output == nullptr) {
     MS_LOG(ERROR) << "output null pointer dereferencing.";
@@ -65,7 +55,7 @@ int SparseToDense::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor 
   outputs_.at(0)->set_format(input2->format());
 
   if (!infer_flag()) {
-    return RET_OK;
+    return RET_INFER_INVALID;
   }
   if (this->primitive_ == nullptr) {
     return RET_NULL_PTR;

@@ -1,5 +1,5 @@
 /**
- * Copyright 2020 Huawei Technologies Co., Ltd
+ * Copyright 2020-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,11 +20,11 @@
 #include <string>
 
 #include "common/common.h"
+#include "include/api/status.h"
 #include "minddata/dataset/include/datasets.h"
-#include "minddata/dataset/include/status.h"
+#include "minddata/dataset/text/vocab.h"
 
 using mindspore::dataset::Tensor;
-using mindspore::dataset::Status;
 using mindspore::dataset::Vocab;
 
 class MindDataTestVocab : public UT::DatasetOpTesting {
@@ -47,7 +47,7 @@ TEST_F(MindDataTestVocab, TestVocabFromUnorderedMap) {
 
   // Look up specified words
   std::vector<std::string> words = {"apple", "dog", "egg"};
-  std::vector<int32_t> expected = {1, 3, -1};
+  std::vector<int64_t> expected = {1, 3, -1};
   for (uint32_t i = 0; i < words.size(); ++i) {
     int32_t x = vocab->Lookup(words[i]);
     EXPECT_EQ(x, expected[i]);
@@ -65,7 +65,7 @@ TEST_F(MindDataTestVocab, TestVocabFromEmptyMap) {
   // Look up specified words
   // Expect that we will return -1 when word is not in vocab
   std::vector<std::string> words = {"apple", "dog", "egg"};
-  std::vector<int32_t> expected = {-1, -1, -1};
+  std::vector<int64_t> expected = {-1, -1, -1};
   for (uint32_t i = 0; i < words.size(); ++i) {
     int32_t x = vocab->Lookup(words[i]);
     EXPECT_EQ(x, expected[i]);
@@ -96,7 +96,7 @@ TEST_F(MindDataTestVocab, TestVocabFromVectorPrependSpTokens) {
   // Look up specified words
   // Expect that we will return -1 when word is not in vocab
   std::vector<std::string> words = {"apple", "banana", "fox"};
-  std::vector<int32_t> expected = {1, 2, -1};
+  std::vector<int64_t> expected = {1, 2, -1};
   for (uint32_t i = 0; i < words.size(); ++i) {
     int32_t x = vocab->Lookup(words[i]);
     EXPECT_EQ(x, expected[i]);
@@ -113,7 +113,7 @@ TEST_F(MindDataTestVocab, TestVocabFromVectorAppendSpTokens) {
 
   // Look up specified words
   std::vector<std::string> words = {"apple", "<unk>", "fox"};
-  std::vector<int32_t> expected = {0, 5, -1};
+  std::vector<int64_t> expected = {0, 5, -1};
   for (uint32_t i = 0; i < words.size(); ++i) {
     int32_t x = vocab->Lookup(words[i]);
     EXPECT_EQ(x, expected[i]);
@@ -131,7 +131,7 @@ TEST_F(MindDataTestVocab, TestVocabFromVectorWithNoSpTokens) {
 
   // Look up specified words
   std::vector<std::string> words = {"apple", "banana", "fox", "<pad>"};
-  std::vector<int32_t> expected = {0, 1, -1, -1};
+  std::vector<int64_t> expected = {0, 1, -1, -1};
   for (uint32_t i = 0; i < words.size(); ++i) {
     int32_t x = vocab->Lookup(words[i]);
     EXPECT_EQ(x, expected[i]);
@@ -149,7 +149,7 @@ TEST_F(MindDataTestVocab, TestVocabFromEmptyVector) {
   // Look up specified words
   // Expect that we will return -1 when word is not in vocab
   std::vector<std::string> words = {"apple", "banana", "fox"};
-  std::vector<int32_t> expected = {-1, -1, -1};
+  std::vector<int64_t> expected = {-1, -1, -1};
   for (uint32_t i = 0; i < words.size(); ++i) {
     int32_t x = vocab->Lookup(words[i]);
     EXPECT_EQ(x, expected[i]);
@@ -202,7 +202,7 @@ TEST_F(MindDataTestVocab, TestVocabFromFile) {
 
   // Look up specified words
   std::vector<std::string> words = {"not", "all"};
-  std::vector<int32_t> expected = {2, 3};
+  std::vector<int64_t> expected = {2, 3};
   for (uint32_t i = 0; i < words.size(); ++i) {
     int32_t x = vocab->Lookup(words[i]);
     EXPECT_EQ(x, expected[i]);
@@ -224,7 +224,7 @@ TEST_F(MindDataTestVocab, TestVocabFromFileFail2) {
   std::string vocab_dir = datasets_root_path_ + "/testVocab/vocab_list.txt";
   std::shared_ptr<Vocab> vocab = std::make_shared<Vocab>();
 
-  // Expected failure: vocab_size shoule be either -1 or positive integer
+  // Expected failure: vocab_size should be either -1 or positive integer
   Status s = Vocab::BuildFromFileCpp(vocab_dir, ",", -2, {}, true, &vocab);
   EXPECT_NE(s, Status::OK());
 }

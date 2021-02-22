@@ -15,122 +15,81 @@
  */
 
 #include "tools/converter/parser/onnx/onnx_slice_parser.h"
+#include <algorithm>
+#include <functional>
 #include <memory>
+#include <numeric>
 #include <vector>
+#include <string>
 
 namespace mindspore {
 namespace lite {
-STATUS OnnxSliceParser::Parse(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node,
-                              schema::CNodeT *op) {
+lite::PrimitiveC *OnnxSliceParser::ParseLitePrimitive(const onnx::GraphProto &onnx_graph,
+                                                      const onnx::NodeProto &onnx_node) {
   MS_LOG(DEBUG) << "onnx SliceParser";
-  if (op == nullptr) {
-    MS_LOG(ERROR) << "op is null";
-    return RET_NULL_PTR;
-  }
-  op->primitive = std::make_unique<schema::PrimitiveT>();
-  if (op->primitive == nullptr) {
-    MS_LOG(ERROR) << "op->primitive is null";
-    return RET_NULL_PTR;
-  }
-
-  std::unique_ptr<schema::SliceT> attr = std::make_unique<schema::SliceT>();
+  auto attr = std::make_unique<schema::StridedSliceT>();
   if (attr == nullptr) {
     MS_LOG(ERROR) << "new op failed";
-    return RET_NULL_PTR;
+    return nullptr;
   }
 
-  std::vector<int> axes;
   std::vector<int> starts;
   std::vector<int> ends;
+  std::vector<int> axes;
   std::vector<int> steps;
+  constexpr int64_t int_32_max = INT32_MAX;
   for (const auto &onnx_node_attr : onnx_node.attribute()) {
     const auto &attribute_name = onnx_node_attr.name();
     if (attribute_name == "starts") {
       const int num = onnx_node_attr.ints_size();
       starts.clear();
       for (int i = 0; i < num; ++i) {
-        starts.push_back(static_cast<int>(onnx_node_attr.ints()[i]));
+        starts.push_back(static_cast<int>(std::min(onnx_node_attr.ints()[i], int_32_max)));
       }
     } else if (attribute_name == "axes") {
       const int num = onnx_node_attr.ints_size();
       axes.clear();
       for (int i = 0; i < num; ++i) {
-        axes.push_back(static_cast<int>(onnx_node_attr.ints()[i]));
+        axes.push_back(static_cast<int>(std::min(onnx_node_attr.ints()[i], int_32_max)));
       }
     } else if (attribute_name == "ends") {
       const int num = onnx_node_attr.ints_size();
       ends.clear();
       for (int i = 0; i < num; ++i) {
-        ends.push_back(static_cast<int>(onnx_node_attr.ints()[i]));
+        ends.push_back(static_cast<int>(std::min(onnx_node_attr.ints()[i], int_32_max)));
       }
     } else if (attribute_name == "steps") {
       const int num = onnx_node_attr.ints_size();
       steps.clear();
       for (int i = 0; i < num; ++i) {
-        steps.push_back(static_cast<int>(onnx_node_attr.ints()[i]));
+        steps.push_back(static_cast<int>(std::min(onnx_node_attr.ints()[i], int_32_max)));
       }
     }
   }
-
-  if (onnx_node.input_size() > 1) {
-    const auto &starts_name = onnx_node.input(1);
-    for (const auto &it : onnx_graph.initializer()) {
-      if (it.name() == starts_name) {
-        starts.clear();
-        for (int i = 0; i < it.int32_data_size(); ++i) {
-          starts.push_back(it.int32_data(i));
-        }
-      }
+  auto primitive = std::make_unique<schema::PrimitiveT>();
+  if (primitive == nullptr) {
+    MS_LOG(ERROR) << "new primitive failed";
+    return nullptr;
+  }
+  primitive->value.type = schema::PrimitiveType_StridedSlice;
+  primitive->value.value = attr.release();
+  auto primitive_c = PrimitiveC::Create(primitive.release());
+  if (starts.empty()) {
+    return primitive_c;
+  }
+  if (axes.empty()) {
+    for (size_t i = 0; i < starts.size(); ++i) {
+      axes.push_back(i);
     }
   }
-
-  if (onnx_node.input_size() > 2) {
-    const auto &ends_name = onnx_node.input(2);
-    for (const auto &it : onnx_graph.initializer()) {
-      if (it.name() == ends_name) {
-        ends.clear();
-        for (int i = 0; i < it.int32_data_size(); ++i) {
-          ends.push_back(it.int32_data(i));
-        }
-      }
-    }
+  if (steps.empty()) {
+    steps.assign(starts.size(), 1);
   }
-
-  if (onnx_node.input_size() > 3) {
-    const auto &axes_name = onnx_node.input(3);
-    for (const auto &it : onnx_graph.initializer()) {
-      if (it.name() == axes_name) {
-        axes.clear();
-        for (int i = 0; i < it.int32_data_size(); ++i) {
-          axes.push_back(it.int32_data(i));
-        }
-      }
-    }
-  }
-
-  if (onnx_node.input_size() > 4) {
-    const auto &steps_name = onnx_node.input(4);
-    for (const auto &it : onnx_graph.initializer()) {
-      if (it.name() == steps_name) {
-        steps.clear();
-        for (int i = 0; i < it.int32_data_size(); ++i) {
-          steps.push_back(it.int32_data(i));
-        }
-      }
-    }
-  }
-
-  std::vector<int> sizes(starts.size(), -1);
-  for (size_t i = 0; i < starts.size(); ++i) {
-    sizes[i] = (ends[i] < 0 ? ends[i] : ends[i] - starts[i]);
-  }
-  attr->axes = axes;
-  attr->begin = starts;
-  attr->size = sizes;
-  attr->step = steps;
-  op->primitive->value.type = schema::PrimitiveType_Slice;
-  op->primitive->value.value = attr.release();
-  return RET_OK;
+  primitive_c->set_attr("starts", MakeValue<std::vector<int>>(starts));
+  primitive_c->set_attr("ends", MakeValue<std::vector<int>>(ends));
+  primitive_c->set_attr("axes", MakeValue<std::vector<int>>(axes));
+  primitive_c->set_attr("steps", MakeValue<std::vector<int>>(steps));
+  return primitive_c;
 }
 
 OnnxNodeRegistrar g_onnxSliceParser("Slice", new OnnxSliceParser());

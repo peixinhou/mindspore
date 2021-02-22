@@ -20,10 +20,12 @@
 #include <vector>
 #include <memory>
 #include <string>
+#include <algorithm>
 #include "backend/session/anf_runtime_algorithm.h"
 #include "runtime/device/ascend/ge_types_convert.h"
 #include "utils/utils.h"
 #include "external/graph/tensor.h"
+#include "external/register/op_tiling_registry.h"
 
 namespace mindspore {
 namespace device {
@@ -98,12 +100,15 @@ void FeedTeOpTensorOutputArg(const NotNull<CNodePtr> &cnode,
 void FeedTeOpConstTensor(const NotNull<CNodePtr> &cnode, const std::map<uint32_t, tensor::TensorPtr> &depend_tensor_map,
                          NotNull<std::map<std::string, optiling::TeConstTensorData> *> const_inputs) {
   MS_LOG(INFO) << "FeedTeOpConstTensor start, node:" << cnode->fullname_with_scope();
-  if (!AnfAlgo::HasNodeAttr(kDynamicShapeDepends, cnode.get())) {
+  auto depends_list_me = abstract::GetDependsFormMap(cnode);
+  if (depends_list_me.empty()) {
     MS_LOG(INFO) << "No input depend found, " << cnode->fullname_with_scope();
     return;
   }
 
-  auto depends_list = AnfAlgo::GetNodeAttr<std::vector<int>>(cnode.get(), kDynamicShapeDepends);
+  std::vector<int> depends_list;
+  (void)std::transform(depends_list_me.begin(), depends_list_me.end(), std::back_inserter(depends_list),
+                       [](const int64_t &value) { return static_cast<int>(value); });
   for (auto index : depends_list) {
     auto iter = depend_tensor_map.find(IntToSize(index));
     if (iter == depend_tensor_map.end()) {
@@ -132,10 +137,9 @@ void FeedTeOpConstTensor(const NotNull<CNodePtr> &cnode, const std::map<uint32_t
 
 void OpTilingCalculater::Init() {
   MS_LOG(INFO) << "Start init OpTilingCalculater";
-  tiling_func_map_ = optiling::OpTilingInterf::RegisteredOpInterf();
-  MS_LOG(INFO) << "tiling_func_map_ size:" << tiling_func_map_.size();
-  for (const auto &iter : tiling_func_map_) {
-    MS_LOG(INFO) << "Regist tiling func:" << iter.first;
+  tiling_func_map_ = optiling::OpTilingRegistryInterf::RegisteredOpInterf();
+  if (tiling_func_map_.empty()) {
+    MS_LOG(EXCEPTION) << "Get register tiling func failed.";
   }
 }
 
@@ -143,7 +147,9 @@ std::string GetRealOpType(const std::string &op_type) {
   static const std::map<std::string, std::string> kOpTypeMap = {
     {"SparseApplyFtrl", "SparseApplyFtrlD"},
     {"SparseApplyProximalAdagrad", "SparseApplyProximalAdagradD"},
-    {"SparseGatherV2", "GatherV2"},
+    {"SparseGatherV2", "Gather"},
+    {"Pad", "PadD"},
+    {"Concat", "ConcatD"},
   };
   auto iter = kOpTypeMap.find(op_type);
   if (iter == kOpTypeMap.end()) {
@@ -152,8 +158,7 @@ std::string GetRealOpType(const std::string &op_type) {
   return iter->second;
 }
 
-void OpTilingCalculater::CalculateTiling(const NotNull<CNodePtr> &cnode,
-                                         const NotNull<std::shared_ptr<nlohmann::json>> &compile_info_json,
+void OpTilingCalculater::CalculateTiling(const NotNull<CNodePtr> &cnode, const optiling::OpCompileInfo &op_compile_info,
                                          const std::map<uint32_t, tensor::TensorPtr> &depend_tensor_map,
                                          NotNull<optiling::OpRunInfo *> op_run_info) {
   optiling::TeOpParas op_param;
@@ -176,7 +181,7 @@ void OpTilingCalculater::CalculateTiling(const NotNull<CNodePtr> &cnode,
   MS_LOG(INFO) << "Get tiling func:" << iter->first;
 
   if (iter != tiling_func_map_.end()) {
-    bool ret = (iter->second)(op_type, op_param, *compile_info_json.get(), *op_run_info);
+    bool ret = (iter->second)(op_param, op_compile_info, *op_run_info);
     if (!ret) {
       MS_LOG(EXCEPTION) << "Calculate tiling failed";
     }

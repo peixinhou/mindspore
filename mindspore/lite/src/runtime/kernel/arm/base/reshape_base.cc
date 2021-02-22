@@ -14,71 +14,82 @@
  * limitations under the License.
  */
 #include "src/runtime/kernel/arm/base/reshape_base.h"
-#include <vector>
-#include "src/runtime/kernel/arm/fp32/reshape_fp32.h"
 #include "schema/model_generated.h"
 #include "src/kernel_registry.h"
 #include "include/errorcode.h"
-#include "include/context.h"
 
+using mindspore::kernel::KERNEL_ARCH::kCPU;
 using mindspore::lite::KernelRegistrar;
 using mindspore::lite::RET_ERROR;
 using mindspore::lite::RET_OK;
+using mindspore::schema::PrimitiveType_ExpandDims;
+using mindspore::schema::PrimitiveType_Flatten;
+using mindspore::schema::PrimitiveType_FlattenGrad;
 using mindspore::schema::PrimitiveType_Reshape;
+using mindspore::schema::PrimitiveType_Squeeze;
+using mindspore::schema::PrimitiveType_Unsqueeze;
 
 namespace mindspore::kernel {
-int ReshapeBaseCPUKernel::Init() { return RET_OK; }
+int ReshapeBaseCPUKernel::Init() { return ReSize(); }
 
-kernel::LiteKernel *CpuReshapeInt32KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                                 const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter,
-                                                 const InnerContext *ctx, const kernel::KernelKey &desc,
-                                                 const mindspore::lite::PrimitiveC *primitive) {
-  if (opParameter == nullptr) {
-    MS_LOG(ERROR) << "Input opParameter is nullptr!";
-    return nullptr;
-  }
-  MS_ASSERT(desc.type == schema::PrimitiveType_Reshape);
-  auto *kernel = new (std::nothrow) ReshapeCPUKernel(opParameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "new ReshapeCPUKernel fail!";
-    free(opParameter);
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
+int ReshapeBaseCPUKernel::ReSize() {
+  int in_data_size = in_tensors_.front()->Size();
+  int thread_num = context_->thread_num_;
+  cal_max_num_per_thread_ = UP_DIV(in_data_size, thread_num);
+  return RET_OK;
 }
 
-kernel::LiteKernel *CpuReshapeFp32KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                                const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter,
-                                                const InnerContext *ctx, const kernel::KernelKey &desc,
-                                                const mindspore::lite::PrimitiveC *primitive) {
-  if (opParameter == nullptr) {
-    MS_LOG(ERROR) << "Input opParameter is nullptr!";
-    return nullptr;
+int ReshapeBaseCPUKernel::RunImpl(int task_id) {
+  size_t start_index = task_id * cal_max_num_per_thread_;
+  if (start_index >= in_tensors_.front()->Size()) {
+    return RET_OK;
   }
-  MS_ASSERT(desc.type == schema::PrimitiveType_Reshape);
-  auto *kernel = new (std::nothrow) ReshapeCPUKernel(opParameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "new ReshapeCPUKernel fail!";
-    free(opParameter);
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
+  auto cur_in_ptr = input_ptr_ + start_index;
+  auto cur_out_ptr = output_ptr_ + start_index;
+
+  size_t data_size = in_tensors_.front()->Size() - start_index;
+  data_size = data_size > cal_max_num_per_thread_ ? cal_max_num_per_thread_ : data_size;
+  memcpy(cur_out_ptr, cur_in_ptr, data_size);
+  return RET_OK;
 }
 
-REG_KERNEL(kCPU, kNumberTypeInt32, PrimitiveType_Reshape, CpuReshapeInt32KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Reshape, CpuReshapeFp32KernelCreator)
+int ReshapeRun(void *cdata, int task_id) {
+  auto reshape = reinterpret_cast<ReshapeBaseCPUKernel *>(cdata);
+  auto ret = reshape->RunImpl(task_id);
+  if (ret != RET_OK) {
+    MS_LOG(ERROR) << "ReshapeRun error task_id[" << task_id << "] error_code[" << ret << "]";
+    return ret;
+  }
+  return RET_OK;
+}
+
+int ReshapeBaseCPUKernel::Run() {
+  input_ptr_ = reinterpret_cast<uint8_t *>(in_tensors_.at(kInputIndex)->data_c());
+  output_ptr_ = reinterpret_cast<uint8_t *>(out_tensors_.at(kOutputIndex)->data_c());
+  auto ret = ParallelLaunch(this->context_->thread_pool_, ReshapeRun, this, context_->thread_num_);
+  if (ret != RET_OK) {
+    MS_LOG(ERROR) << "Reshape run error error_code[" << ret << "]";
+    return ret;
+  }
+  return RET_OK;
+}
+
+REG_KERNEL(kCPU, kNumberTypeInt32, PrimitiveType_Reshape, LiteKernelCreator<ReshapeBaseCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Reshape, LiteKernelCreator<ReshapeBaseCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_Reshape, LiteKernelCreator<ReshapeBaseCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_Flatten, LiteKernelCreator<ReshapeBaseCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Flatten, LiteKernelCreator<ReshapeBaseCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_FlattenGrad, LiteKernelCreator<ReshapeBaseCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt32, PrimitiveType_ExpandDims, LiteKernelCreator<ReshapeBaseCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_ExpandDims, LiteKernelCreator<ReshapeBaseCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_ExpandDims, LiteKernelCreator<ReshapeBaseCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_ExpandDims, LiteKernelCreator<ReshapeBaseCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Squeeze, LiteKernelCreator<ReshapeBaseCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_Squeeze, LiteKernelCreator<ReshapeBaseCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt32, PrimitiveType_Squeeze, LiteKernelCreator<ReshapeBaseCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeBool, PrimitiveType_Squeeze, LiteKernelCreator<ReshapeBaseCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_Unsqueeze, LiteKernelCreator<ReshapeBaseCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Unsqueeze, LiteKernelCreator<ReshapeBaseCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt32, PrimitiveType_Unsqueeze, LiteKernelCreator<ReshapeBaseCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt64, PrimitiveType_Unsqueeze, LiteKernelCreator<ReshapeBaseCPUKernel>)
 }  // namespace mindspore::kernel

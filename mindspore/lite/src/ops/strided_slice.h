@@ -47,6 +47,7 @@ class StridedSlice : public PrimitiveC {
   int UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::FlatBufferBuilder *fbb) override;
 #endif
   int InferShape(std::vector<lite::Tensor *> inputs_, std::vector<lite::Tensor *> outputs_) override;
+  bool CheckInputs(std::vector<lite::Tensor *> inputs_);
   int GetBeginMask() const;
   int GetEndMask() const;
   int GetEllipsisMask() const;
@@ -69,7 +70,7 @@ class StridedSlice : public PrimitiveC {
   std::vector<int> GetStrides() { return this->strides_; }
 
  protected:
-  int ndim_ = 0;
+  size_t ndim_ = 0;
   std::vector<int> in_shape_;
   std::vector<int> begins_;
   std::vector<int> ends_;
@@ -80,6 +81,7 @@ class StridedSlice : public PrimitiveC {
   std::vector<bool> new_axis_mask_;
   std::vector<bool> shrink_axis_mask_;
   void TransIndexToPositive();
+  int HandleAxesInputExist(const std::vector<lite::Tensor *> &inputs);
 };
 }  // namespace lite
 }  // namespace mindspore

@@ -14,13 +14,9 @@
  * limitations under the License.
  */
 #include "src/runtime/kernel/arm/fp32/cast_fp32.h"
-#include <vector>
 #include "schema/model_generated.h"
 #include "src/kernel_registry.h"
-#include "nnacl/fp32/cast.h"
-#include "nnacl/op_base.h"
 #include "src/runtime/runtime_api.h"
-#include "include/errorcode.h"
 
 using mindspore::kernel::KERNEL_ARCH::kCPU;
 using mindspore::lite::KernelRegistrar;
@@ -70,6 +66,12 @@ int CastCPUKernel::DoCast(int thread_id) {
   MS_ASSERT(output_data != nullptr);
   auto input_data_type = input->data_type();
   auto output_data_type = output->data_type();
+  if (input_data_type == output_data_type) {
+    auto datalen = lite::DataTypeSize(input_data_type);
+    memcpy(reinterpret_cast<char *>(output_data) + offset * datalen,
+           reinterpret_cast<char *>(input->data_c()) + offset * datalen, data_num * datalen);
+    return RET_OK;
+  }
   if (output_data_type != kNumberTypeFloat32) {
     if (input_data_type == kNumberTypeFloat32 && output_data_type == kNumberTypeInt64) {
       Float32ToInt64(reinterpret_cast<float *>(input->data_c()) + offset,
@@ -83,9 +85,12 @@ int CastCPUKernel::DoCast(int thread_id) {
     } else if (input_data_type == kNumberTypeInt32 && output_data_type == kNumberTypeInt64) {
       Int32ToInt64(reinterpret_cast<int32_t *>(input->data_c()) + offset,
                    reinterpret_cast<int64_t *>(output_data) + offset, data_num);
-    } else if (input_data_type == kNumberTypeInt32 && output_data_type == kNumberTypeInt32) {
-      memcpy(reinterpret_cast<int32_t *>(output_data) + offset, reinterpret_cast<int32_t *>(input->data_c()) + offset,
-             data_num * sizeof(int32_t));
+    } else if (input_data_type == kNumberTypeFloat32 && output_data_type == kNumberTypeInt16) {
+      Float32ToInt16(reinterpret_cast<float *>(input->data_c()) + offset,
+                     reinterpret_cast<int16_t *>(output_data) + offset, data_num);
+    } else if (input_data_type == kNumberTypeBool && output_data_type == kNumberTypeInt32) {
+      BoolToInt32(reinterpret_cast<bool *>(input->data_c()) + offset, reinterpret_cast<int32_t *>(output_data) + offset,
+                  data_num);
     } else {
       MS_LOG(ERROR) << "Unsupported datatype from " << input_data_type << " to " << output_data_type;
       return RET_ERROR;
@@ -108,10 +113,6 @@ int CastCPUKernel::DoCast(int thread_id) {
         Fp16ToFloat32(reinterpret_cast<uint16_t *>(input->MutableData()) + offset,
                       reinterpret_cast<float *>(output_data) + offset, data_num);
         break;
-      case kNumberTypeFloat32:
-        memcpy(reinterpret_cast<float *>(output_data) + offset, reinterpret_cast<float *>(input->data_c()) + offset,
-               data_num * sizeof(float));
-        break;
       default:
         MS_LOG(ERROR) << "Unsupported input data type " << input_data_type;
         return RET_ERROR;
@@ -127,46 +128,12 @@ int CastCPUKernel::Run() {
   return ParallelLaunch(this->context_->thread_pool_, CastRun, this, op_parameter_->thread_num_);
 }
 
-kernel::LiteKernel *CpuCastFp32KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                             const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter,
-                                             const lite::InnerContext *ctx, const kernel::KernelKey &desc,
-                                             const mindspore::lite::PrimitiveC *primitive) {
-  if (opParameter == nullptr) {
-    MS_LOG(ERROR) << "Input opParameter is nullptr!";
-    return nullptr;
-  }
-  if (ctx == nullptr) {
-    MS_LOG(ERROR) << "Input context is nullptr!";
-    free(opParameter);
-    return nullptr;
-  }
-  if (ctx->thread_num_ == 0) {
-    MS_LOG(ERROR) << "context thread num is 0!";
-    free(opParameter);
-    return nullptr;
-  }
-  auto *kernel = new (std::nothrow) CastCPUKernel(opParameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "new CastCPUKernel fail!";
-    free(opParameter);
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
-}
-
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Cast, CpuCastFp32KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeUInt8, PrimitiveType_Cast, CpuCastFp32KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Cast, CpuCastFp32KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeInt32, PrimitiveType_Cast, CpuCastFp32KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeBool, PrimitiveType_Cast, CpuCastFp32KernelCreator)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Cast, LiteKernelCreator<CastCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeUInt8, PrimitiveType_Cast, LiteKernelCreator<CastCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Cast, LiteKernelCreator<CastCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt32, PrimitiveType_Cast, LiteKernelCreator<CastCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeBool, PrimitiveType_Cast, LiteKernelCreator<CastCPUKernel>)
 #ifndef ENABLE_ARM
-REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_Cast, CpuCastFp32KernelCreator)
+REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_Cast, LiteKernelCreator<CastCPUKernel>)
 #endif
 }  // namespace mindspore::kernel

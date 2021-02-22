@@ -17,9 +17,12 @@
 #define MINDSPORE_LITE_SRC_RUNTIME_KERNEL_ARM_INT8_MUL_INT8_H_
 
 #include <vector>
+#include <limits>
+#include <algorithm>
 #include "src/lite_kernel.h"
 #include "nnacl/mul_parameter.h"
-#include "nnacl/arithmetic_common.h"
+#include "nnacl/int8/mul_int8.h"
+#include "nnacl/int8/arithmetic_int8.h"
 #include "src/runtime/runtime_api.h"
 
 namespace mindspore::kernel {
@@ -35,13 +38,18 @@ class MulInt8CPUKernel : public LiteKernel {
 
   int Init() override;
   int ReSize() override;
+  void CheckSameShapeSize(std::vector<int> in_tensor0_shape, std::vector<int> in_tensor1_shape);
+  void CheckIfFastImpl();
   int Run() override;
   int DoExecute(int task_id);
+  int FastDoExecute(int task_id);
 
  private:
   const lite::InnerContext *ctx_ = nullptr;
   ArithmeticParameter *tile_para = nullptr;
   MulParameter para_;
+  bool fast_hw_broadcast_ = false;
+  bool input1_hw_broadcast_ = false;
   int thread_count_ = 1;
   int64_t elements_num_ = 0;
   int64_t count_unit_ = 0;
@@ -51,6 +59,7 @@ class MulInt8CPUKernel : public LiteKernel {
 };
 
 int MulInt8Run(void *cdata, int task_id);
+int FastHWBroadcatMulInt8Run(void *cdata, int task_id);
 }  // namespace mindspore::kernel
 
 #endif  // MINDSPORE_LITE_SRC_RUNTIME_KERNEL_ARM_INT8_MUL_INT8_H_

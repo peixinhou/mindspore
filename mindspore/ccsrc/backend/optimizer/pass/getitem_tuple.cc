@@ -45,21 +45,19 @@ const AnfNodePtr GetitemTuple::Process(const FuncGraphPtr &, const AnfNodePtr &n
   MS_EXCEPTION_IF_NULL(node);
   CNodePtr tuple_getitem = node->cast<CNodePtr>();
   MS_EXCEPTION_IF_NULL(tuple_getitem);
-  if (tuple_getitem->inputs().size() < kTupleGetitemInputNum) {
-    MS_LOG(EXCEPTION) << "tuple getitem's input num is wrong";
-  }
+  CheckCNodeInputSize(tuple_getitem, kTupleGetItemInputTensorNum);
   AnfNodePtr make_tuple_anf = tuple_getitem->input(kRealInputNodeIndexInTupleGetItem);
   MS_EXCEPTION_IF_NULL(make_tuple_anf);
   AnfNodePtr index_node = tuple_getitem->input(kInputNodeOutputIndexInTupleGetItem);
   MS_EXCEPTION_IF_NULL(index_node);
-  if (IsValueNode<Int32Imm>(index_node)) {
+  if (IsValueNode<Int64Imm>(index_node)) {
     ValueNodePtr value_node = index_node->cast<ValueNodePtr>();
     MS_EXCEPTION_IF_NULL(value_node);
-    int index = GetValue<int>(value_node->value());
+    auto index = GetValue<int64_t>(value_node->value());
     CNodePtr make_tuple = make_tuple_anf->cast<CNodePtr>();
     MS_EXCEPTION_IF_NULL(make_tuple);
-    if (make_tuple->inputs().size() > IntToSize(index + 1)) {
-      auto ret = make_tuple->input(IntToSize(index + 1));
+    if (make_tuple->inputs().size() > LongToSize(index + 1)) {
+      auto ret = make_tuple->input(LongToSize(index + 1));
       MS_EXCEPTION_IF_NULL(ret);
       return ret;
     }

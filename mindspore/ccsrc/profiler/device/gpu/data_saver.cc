@@ -153,7 +153,7 @@ void DataSaver::AddKernelEventToDevice(const Event &event, DeviceActivityInfos *
   }
 }
 
-void DataSaver::WriteFile(std::string out_path_dir) {
+void DataSaver::WriteFile(std::string out_path_dir, const BaseTime &start_time) {
   if (out_path_dir.empty()) {
     MS_LOG(WARNING) << "Output directory. Ignore the writing data.";
     return;
@@ -168,6 +168,8 @@ void DataSaver::WriteFile(std::string out_path_dir) {
   WriteOpType(out_path_dir);
   WriteActivity(out_path_dir);
   WriteOpTimestamp(out_path_dir);
+  WriteStepTrace(out_path_dir);
+  WriteStartTime(out_path_dir, start_time);
 }
 
 void DataSaver::WriteOpType(const std::string &saver_base_dir) {
@@ -262,9 +264,77 @@ void DataSaver::WriteOpTimestamp(const std::string &saver_base_dir) {
   ChangeFileMode(file_path);
 }
 
+void DataSaver::WriteStepTrace(const std::string &saver_base_dir) {
+  std::string file_path = saver_base_dir + "/step_trace_profiling_" + device_id_ + ".txt";
+  std::ofstream ofs(file_path);
+  // check if the file is writable
+  if (!ofs.is_open()) {
+    MS_LOG(WARNING) << "Open file '" << file_path << "' failed!";
+    return;
+  }
+
+  // write step trace time info into file
+  const uint32_t factor = 10;
+  std::vector<std::string> op_name_arr;
+  op_name_arr.push_back(step_trace_op_name.trace_fp_start);
+  op_name_arr.push_back(step_trace_op_name.trace_bp_end);
+  op_name_arr.push_back(step_trace_op_name.trace_iter_end);
+  if (!step_trace_op_name.trace_custom_node.empty()) {
+    auto start = step_trace_op_name.trace_custom_node.begin();
+    auto end = step_trace_op_name.trace_custom_node.end();
+    std::copy(start, end, std::back_inserter(op_name_arr));
+  }
+  for (auto op_name : op_name_arr) {
+    auto iter_op_timestamp = op_timestamps_map_.find(op_name);
+    if (iter_op_timestamp != op_timestamps_map_.end()) {
+      try {
+        ofs << op_name << " ";
+        for (auto start_end : iter_op_timestamp->second) {
+          // convert the time unit from 1ns to 10ns (keep the same with ascend)
+          uint64_t duration = start_end.duration * kTimeUnit;
+          uint64_t end_timestamp = (duration + start_end.start_timestamp) / factor;
+          uint64_t start_timestamp = start_end.start_timestamp / factor;
+          ofs << start_timestamp << "," << end_timestamp << " ";
+        }
+        ofs << std::endl;
+      } catch (const std::exception &e) {
+        MS_LOG(ERROR) << "Write " << file_path << "failed:" << e.what();
+      }
+    }
+  }
+
+  ofs.close();
+  ChangeFileMode(file_path);
+  MS_LOG(INFO) << "Write step trace infos into file: " << file_path;
+}
+
+void DataSaver::WriteStartTime(const std::string &saver_base_dir, const BaseTime &start_time) {
+  std::string file_path = saver_base_dir + "/start_time_" + device_id_ + ".txt";
+  std::ofstream ofs(file_path);
+  // check if the file is writable
+  if (!ofs.is_open()) {
+    MS_LOG(WARNING) << "Open file '" << file_path << "' failed!";
+    return;
+  }
+
+  // write start time info into file
+  try {
+    ofs << "host_monotonic_raw_time(ns): " << start_time.host_start_monotonic_raw_time << std::endl;
+    ofs << "gpu_start_time(ns): " << start_time.gpu_start_time << std::endl;
+  } catch (const std::exception &e) {
+    MS_LOG(ERROR) << "Write " << file_path << "failed:" << e.what();
+  }
+
+  ofs.close();
+  ChangeFileMode(file_path);
+  MS_LOG(INFO) << "Write profiler start time infos into file: " << file_path;
+}
+
+void DataSaver::SetStepTraceOpName(ProfilingTraceInfo trace_op_name) { step_trace_op_name = trace_op_name; }
+
 void DataSaver::ChangeFileMode(const std::string &file_path) {
-  if (chmod(common::SafeCStr(file_path), S_IRUSR | S_IWUSR) == -1) {
-    MS_LOG(INFO) << "Modify file:" << file_path << " to rw fail.";
+  if (chmod(common::SafeCStr(file_path), S_IRUSR) == -1) {
+    MS_LOG(WARNING) << "Modify file:" << file_path << " to rw fail.";
     return;
   }
 }

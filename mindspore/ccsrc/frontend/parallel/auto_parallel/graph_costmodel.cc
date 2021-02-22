@@ -39,8 +39,11 @@ size_t TENSOR_SLICE_ALIGNMENT_SIZE = DEFAULT_TENSOR_SLICE_ALIGNMENT_SIZE;
 bool FULLY_USE_DEVICES = DEFAULT_FULLY_USE_DEVICES;
 bool ELEMENTWISE_OP_STRA_FOLLOW = DEFAULT_ELEMENTWISE_OP_STRA_FOLLOW;
 bool MULTI_SUBGRAPHS = DEFAULT_IS_MULTI_SUBGRAPHS;
-int32_t RUN_PHASE = DEFAULT_RUN_PHASE;
+int64_t RUN_PHASE = DEFAULT_RUN_PHASE;
 bool TRIANGLE_STAR_STRATEGY_OVERWRITE = DEFAULT_TRIANGLE_STAR_STRATEGY_OVERWRITE;
+bool DP_ALGO_ENABLE_APPROX = DEFAULT_DP_ALGO_ENABLE_APPROX;
+double DP_ALGO_APPROX_EPSILON = DEFAULT_DP_ALGO_APPROX_EPSILON;
+bool DP_ALGO_SINGLE_LOOP = DEFAULT_DP_ALGO_SINGLE_LOOP;
 
 void CostGraph::SetDeviceMemoryAndCostParameter() {
   MS_EXCEPTION_IF_NULL(CostModelContext::GetInstance());
@@ -170,6 +173,39 @@ void CostGraph::SetDeviceMemoryAndCostParameter() {
   }
   RUN_PHASE = phase;
   MS_LOG(INFO) << "run_phase: " << RUN_PHASE << ".";
+
+  auto enable_approx = CostModelContext::GetInstance()->dp_algo_enable_approxi();
+  DP_ALGO_ENABLE_APPROX = enable_approx;
+  if (enable_approx) {
+    MS_LOG(INFO) << "dp_algo_enable_approx: true.";
+  } else {
+    MS_LOG(INFO) << "dp_algo_enable_approx: false.";
+  }
+
+  auto epsilon = CostModelContext::GetInstance()->dp_algo_approxi_epsilon();
+  if (epsilon <= 0 || epsilon > 1) {
+    MS_LOG(EXCEPTION) << "'epsilon' must be in (0, 1]";
+  }
+  DP_ALGO_APPROX_EPSILON = epsilon;
+  MS_LOG(INFO) << "epsilon: " << epsilon << ".";
+
+  auto single_loop = CostModelContext::GetInstance()->dp_algo_single_loop();
+  DP_ALGO_SINGLE_LOOP = single_loop;
+  if (single_loop) {
+    MS_LOG(INFO) << "dp_algo_single_loop: true.";
+  } else {
+    MS_LOG(INFO) << "dp_algo_single_loop: false.";
+  }
+}
+
+void CostGraph::Init() {
+  inputs_tensor_name_list_.clear();
+  tuple_getitem_list_.clear();
+  ops_.clear();
+  edges_.clear();
+  connected_compoents_.clear();
+  out_edges_.clear();
+  in_edges_.clear();
 }
 
 void CostGraph::RemoveOperator(const OperatorInfoPtr &op) {
@@ -744,7 +780,7 @@ std::vector<std::shared_ptr<Edge>> CostGraph::CheckEdgeElimination() const {
   for (auto &op : ops_) {
     MS_EXCEPTION_IF_NULL(op);
     if (!op->is_alive()) continue;
-    std::map<void *, int> count;
+    std::map<void *, int64_t> count;
     for (auto &edge : op->GetAliveSuccEdges()) {
       MS_EXCEPTION_IF_NULL(edge);
       auto v = edge->next_operator();
@@ -752,7 +788,7 @@ std::vector<std::shared_ptr<Edge>> CostGraph::CheckEdgeElimination() const {
     }
     for (auto &pair : count) {
       auto *op_ptr = pair.first;
-      int op_count = pair.second;
+      int64_t op_count = pair.second;
       if (op_count > 1) {
         std::vector<std::shared_ptr<Edge>> ret;
         for (auto &edge : op->GetAliveSuccEdges()) {
@@ -1591,7 +1627,7 @@ Status CostGraph::InitReshapeStrategy() {
       }
       if (pre_iter != in_edges.end() || reshape_is_first_op) {
         MS_LOG(DEBUG) << "Set reshape input layout by " << reshape_info->pre_operator_name();
-        int32_t pre_index = reshape_info->pre_operator_index();
+        int64_t pre_index = reshape_info->pre_operator_index();
         TensorInfo pre_info;
         std::shared_ptr<OperatorInfo> pre_op_info;
         if (reshape_is_first_op) {
@@ -1615,7 +1651,7 @@ Status CostGraph::InitReshapeStrategy() {
       }
       if (next_iter != out_edges.end()) {
         MS_LOG(DEBUG) << "Set reshape output layout by " << reshape_info->next_operator_name();
-        int32_t next_index = reshape_info->next_operator_index();
+        int64_t next_index = reshape_info->next_operator_index();
         reshape_info->SetOutputLayout((*next_iter)->next_operator()->inputs_tensor_info()[next_index].tensor_layout());
       }
       if (reshape_info->Init(nullptr) != SUCCESS) {
@@ -1681,7 +1717,7 @@ void CostGraph::TopologyOrder(std::vector<OperatorInfoPtr> *topo_order) {
     }
   }
 }
-void CostGraph::MarkCriticalOpsAndEdges(const std::map<OperatorInfoPtr, int> &candidate_ops) {
+void CostGraph::MarkCriticalOpsAndEdges(const std::map<OperatorInfoPtr, int64_t> &candidate_ops) {
   for (auto &op : ops_) {
     auto search = candidate_ops.find(op);
     if (search != candidate_ops.end()) {
@@ -1711,9 +1747,9 @@ Status CostGraph::DetermineCriticalOps(const std::vector<OperatorInfoPtr> &topo_
   }
   // The 'curr_memory_state' records <OperatorInfo, remaining_output_cnt>, where remaining_output_cnt is the number
   // of the output of OperatorInfo that currently has not been used
-  std::map<OperatorInfoPtr, int> curr_memory_state;
-  (void)curr_memory_state.emplace(std::make_pair(first_op, SizeToInt(first_op->succ_edges().size())));
-  std::map<OperatorInfoPtr, int> max_memory_state = curr_memory_state;
+  std::map<OperatorInfoPtr, int64_t> curr_memory_state;
+  (void)curr_memory_state.emplace(std::make_pair(first_op, SizeToLong(first_op->succ_edges().size())));
+  std::map<OperatorInfoPtr, int64_t> max_memory_state = curr_memory_state;
   // The 'curr_memory_size' records the current total memory size, which is the sum of outputs of operators that has
   // not been used
   double curr_memory_size = first_op->GetOutputsTotalSize();
@@ -1722,7 +1758,7 @@ Status CostGraph::DetermineCriticalOps(const std::vector<OperatorInfoPtr> &topo_
   for (size_t finished = 1; finished < topo_order.size(); ++finished) {
     // Produce
     (void)curr_memory_state.emplace(
-      std::make_pair(topo_order[finished], SizeToInt(topo_order[finished]->succ_edges().size())));
+      std::make_pair(topo_order[finished], SizeToLong(topo_order[finished]->succ_edges().size())));
     curr_memory_size += topo_order[finished]->GetOutputsTotalSize();
     // Consume
     for (const auto &prev_edge : topo_order[finished]->prev_edges()) {
@@ -1832,7 +1868,7 @@ Status CostGraph::CorrectOpsMemoryCost() {
     if ((one_op->name().find(IDENTITY_INFO) != std::string::npos) && (one_op->is_output_parameter_involve() == 1)) {
       if (one_op->GetAliveSuccEdges().size() > 1) {
         // Filter out the case when the TmpIdentity being used by multiple operators
-        std::map<size_t, int> output_count;
+        std::map<size_t, int64_t> output_count;
         for (size_t i = 0; i < one_op->GetAliveSuccEdges().size(); ++i) {
           auto output_index = one_op->GetAliveSuccEdges()[i]->prev_op_output_index();
           output_count[output_index]++;
@@ -1900,6 +1936,32 @@ Status CostGraph::CalculateMemoryCost() {
     }
   }
   return SUCCESS;
+}
+
+void CostGraph::CheckApproximateCostGraphEdges() {
+  auto approximation = CostModelContext::GetInstance()->dp_algo_enable_approxi();
+  if (!approximation) {
+    return;
+  }
+  for (auto &s_edge : edges_) {
+    auto &edges_vector = s_edge.second;
+    for (auto &edge_ptr : edges_vector) {
+      MS_EXCEPTION_IF_NULL(edge_ptr);
+      if (edge_ptr->CheckStrategyCostPossibility()) {
+        continue;
+      }
+      MS_LOG(INFO) << "Checking StrategyCost for edge: " << edge_ptr->edge_name()
+                   << " impossible, re-initing the operators and edges";
+      auto prev_op = edge_ptr->prev_operator();
+      MS_EXCEPTION_IF_NULL(prev_op);
+      auto next_op = edge_ptr->next_operator();
+      MS_EXCEPTION_IF_NULL(next_op);
+      // Check the 'prev_op'
+      prev_op->ExactStrategiesAndRelatedEdges();
+      // Check the 'next_op'
+      next_op->ExactStrategiesAndRelatedEdges();
+    }
+  }
 }
 }  // namespace parallel
 }  // namespace mindspore

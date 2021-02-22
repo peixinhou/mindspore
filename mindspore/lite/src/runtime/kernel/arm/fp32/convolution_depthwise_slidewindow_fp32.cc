@@ -53,13 +53,18 @@ int ConvolutionDepthwiseSWCPUKernel::InitWeightBias() {
   PackNCHWToNC4HW4Fp32(origin_weight, packed_weight_, 1, weight_tensor->Height() * weight_tensor->Width(),
                        weight_tensor->Batch());
 
-  bias_data_ = reinterpret_cast<float *>(malloc(C4NUM * OC4 * sizeof(float)));
+  int malloc_size = MSMAX(conv_param_->output_channel_, C4NUM * OC4);
+  if (malloc_size <= 0) {
+    MS_LOG(ERROR) << "malloc size is wrong";
+    return RET_ERROR;
+  }
+  bias_data_ = reinterpret_cast<float *>(malloc(malloc_size * sizeof(float)));
   if (bias_data_ == nullptr) {
     MS_LOG(ERROR) << "Malloc buffer failed.";
     return RET_ERROR;
   }
 
-  memset(bias_data_, 0, C4NUM * OC4 * sizeof(float));
+  memset(bias_data_, 0, malloc_size * sizeof(float));
   if (in_tensors_.size() == kInputSize2) {
     auto bias_tensor = in_tensors_.at(kBiasIndex);
     auto ori_bias = reinterpret_cast<float *>(bias_tensor->MutableData());
@@ -118,7 +123,7 @@ int ConvolutionDepthwiseSWCPUKernel::ReSize() {
 }
 
 int ConvolutionDepthwiseSWCPUKernel::Execute(int task_id) {
-  ConvDwC4Fp32(packed_output_, packed_input_, packed_weight_, reinterpret_cast<float *>(bias_data_), conv_param_,
+  ConvDwSWFp32(packed_output_, packed_input_, packed_weight_, reinterpret_cast<float *>(bias_data_), conv_param_,
                sliding_, task_id);
   return RET_OK;
 }
@@ -140,6 +145,11 @@ int ConvolutionDepthwiseSWCPUKernel::Run() {
     FreePackedInputOutput();
     return RET_ERROR;
   }
+
+  if (IsTrain() && is_trainable()) {
+    PackWeight();
+  }
+
   auto input_tensor = in_tensors_.at(kInputIndex);
   auto input_ptr = reinterpret_cast<float *>(input_tensor->MutableData());
 
@@ -178,4 +188,20 @@ void ConvolutionDepthwiseSWCPUKernel::FreePackedInputOutput() {
     packed_output_ = nullptr;
   }
 }
+
+void ConvolutionDepthwiseSWCPUKernel::PackWeight() {
+  auto weight_tensor = in_tensors_.at(kWeightIndex);
+  auto origin_weight = reinterpret_cast<float *>(weight_tensor->MutableData());
+  PackNCHWToNC4HW4Fp32(origin_weight, packed_weight_, 1, weight_tensor->Height() * weight_tensor->Width(),
+                       weight_tensor->Batch());
+}
+
+int ConvolutionDepthwiseSWCPUKernel::Eval() {
+  LiteKernel::Eval();
+  if (is_trainable()) {
+    PackWeight();
+  }
+  return RET_OK;
+}
+
 }  // namespace mindspore::kernel

@@ -18,7 +18,7 @@
 #include <cmath>
 #include "src/runtime/kernel/arm/fp32/l2_norm_fp32.h"
 #include "include/errorcode.h"
-#include "nnacl/l2_norm.h"
+#include "mindspore/lite/nnacl/fp32/l2_norm_fp32.h"
 #include "src/runtime/runtime_api.h"
 
 using mindspore::kernel::KERNEL_ARCH::kCPU;
@@ -174,30 +174,5 @@ int L2NormCPUKernel::Run() {
   return RET_OK;
 }
 
-kernel::LiteKernel *CpuL2NormFp32KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                               const std::vector<lite::Tensor *> &outputs, OpParameter *param,
-                                               const lite::InnerContext *ctx, const kernel::KernelKey &desc,
-                                               const mindspore::lite::PrimitiveC *primitive) {
-  if (param == nullptr) {
-    MS_LOG(ERROR) << "input param is nullptr!";
-    return nullptr;
-  }
-  MS_ASSERT(desc.type == schema::PrimitiveType_L2Norm);
-  auto *kernel = new (std::nothrow) L2NormCPUKernel(param, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "new L2NormCPUKernel fail!";
-    free(param);
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed, name: " << param->name_
-                  << ", type: " << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(param->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
-}
-
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_L2Norm, CpuL2NormFp32KernelCreator)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_L2Norm, LiteKernelCreator<L2NormCPUKernel>)
 }  // namespace mindspore::kernel

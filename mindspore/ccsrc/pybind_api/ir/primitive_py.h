@@ -36,9 +36,8 @@ namespace py = pybind11;
 namespace mindspore {
 class PrimitivePy : public Primitive {
  public:
-  PrimitivePy(const py::str &name, const py::object &python_obj)
-      : Primitive(name, false), python_obj_(python_obj), signatures_() {}
-  ~PrimitivePy() override = default;
+  PrimitivePy(const py::str &name, const py::object &python_obj);
+  ~PrimitivePy() override;
   MS_DECLARE_PARENT(PrimitivePy, Primitive);
   py::function GetBpropFunction();
 
@@ -50,6 +49,8 @@ class PrimitivePy : public Primitive {
 
   void AddPyAttr(const py::str &name, const py::object &obj);
 
+  void DelPyAttr(const py::str &name);
+
   py::dict GetAttrDict();
   void set_hook(const py::function &hook) { hook_ = hook; }
   py::function hook() const { return hook_; }
@@ -59,6 +60,7 @@ class PrimitivePy : public Primitive {
   bool HasComputeFunction() const;
   const bool parse_info_ = true;
   const py::object &GetPyObj() const { return python_obj_; }
+  void SetPyObj(const py::object &obj);
   py::dict RunInfer(const py::tuple &args);
   void RunCheck(const py::tuple &args);
   py::object RunInferValue(const py::tuple &args);
@@ -69,6 +71,7 @@ class PrimitivePy : public Primitive {
 
  private:
   py::function GetComputeFunction() const;
+  void ConvertCTensorToPyTensor(const py::tuple &input_args, py::tuple *convert_args) const;
   void CheckHookConsistency(const py::object &grad_out, const py::object &expected_grad_out) const;
   py::object python_obj_;
   py::function hook_;

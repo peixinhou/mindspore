@@ -25,6 +25,7 @@
 #include "ir/anf.h"
 #include "ir/tensor.h"
 #include "register/op_tiling.h"
+#include "abstract/primitive_infer_map.h"
 
 namespace mindspore {
 namespace device {
@@ -37,8 +38,7 @@ class OpTilingCalculater {
   }
 
   void Init();
-  void CalculateTiling(const NotNull<CNodePtr> &cnode,
-                       const NotNull<std::shared_ptr<nlohmann::json>> &compile_info_json,
+  void CalculateTiling(const NotNull<CNodePtr> &cnode, const optiling::OpCompileInfo &op_compile_info,
                        const std::map<uint32_t, tensor::TensorPtr> &depend_tensor_map,
                        NotNull<optiling::OpRunInfo *> op_run_info);
 

@@ -40,6 +40,7 @@ Registry LogParameterRegistry(schema::PrimitiveType_Log, PopulateArithmeticSelf)
 Registry NegParameterRegistry(schema::PrimitiveType_Neg, PopulateArithmeticSelf);
 Registry NegGradParameterRegistry(schema::PrimitiveType_NegGrad, PopulateArithmeticSelf);
 Registry LogGradParameterRegistry(schema::PrimitiveType_LogGrad, PopulateArithmeticSelf);
+Registry AbsGradParameterRegistry(schema::PrimitiveType_AbsGrad, PopulateArithmeticSelf);
 Registry SqrtParameterRegistry(schema::PrimitiveType_Sqrt, PopulateArithmeticSelf);
 Registry SquareParameterRegistry(schema::PrimitiveType_Square, PopulateArithmeticSelf);
 Registry RsqrtParameterRegistry(schema::PrimitiveType_Rsqrt, PopulateArithmeticSelf);
@@ -47,6 +48,7 @@ Registry LogicalNotParameterRegistry(schema::PrimitiveType_LogicalNot, PopulateA
 Registry FloorParameterRegistry(schema::PrimitiveType_Floor, PopulateArithmeticSelf);
 Registry CeilParameterRegistry(schema::PrimitiveType_Ceil, PopulateArithmeticSelf);
 Registry RoundParameterRegistry(schema::PrimitiveType_Round, PopulateArithmeticSelf);
+Registry ReciprocalParameterRegistry(schema::PrimitiveType_Reciprocal, PopulateArithmeticSelf);
 
 }  // namespace lite
 }  // namespace mindspore

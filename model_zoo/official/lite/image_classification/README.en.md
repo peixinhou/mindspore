@@ -2,42 +2,65 @@
 
 The following describes how to use the MindSpore Lite C++ APIs (Android JNIs) and MindSpore Lite image classification models to perform on-device inference, classify the content captured by a device camera, and display the most possible classification result on the application's image preview screen.
 
-
-### Running Dependencies
+## Running Dependencies
 
 - Android Studio 3.2 or later (Android 4.0 or later is recommended.)
-- Native development kit (NDK) 21.3
-- CMake 3.10.2 [CMake](https://cmake.org/download) 
-- Android software development kit (SDK) 26 or later
-- JDK 1.8 or later
 
-### Building and Running
+## Building and Running
 
-1. Load the sample source code to Android Studio and install the corresponding SDK. (After the SDK version is specified, Android Studio automatically installs the SDK.)
+1. Load the sample source code to Android Studio.
 
     ![start_home](images/home.png)
 
-    Start Android Studio, click `File > Settings > System Settings > Android SDK`, and select the corresponding SDK. As shown in the following figure, select an SDK and click `OK`. Android Studio automatically installs the SDK.
+    Start Android Studio, click `File > Settings > System Settings > Android SDK`, and select the corresponding `SDK Tools`. As shown in the following figure, select an SDK and click `OK`. Android Studio automatically installs the SDK.
 
-    ![start_sdk](images/sdk_management.png)
+    ![start_sdk](images/sdk_management.jpg)
 
-    (Optional) If an NDK version issue occurs during the installation, manually download the corresponding [NDK version](https://developer.android.com/ndk/downloads) (the version used in the sample code is 21.3). Specify the SDK location in `Android NDK location` of `Project Structure`.
+    > Android SDK Tools is the default installation. You can see this by unchecking the `Hide Obsolete Packages`box.
+    >
+    > If you have any Android Studio configuration problem when trying this demo, please refer to item 4 to resolve it.
 
-    ![project_structure](images/project_structure.png)
-
-2. Connect to an Android device and runs the image classification application.
+2. Connect to an Android device and runs this application.
 
     Connect to the Android device through a USB cable for debugging. Click `Run 'app'` to run the sample project on your device.
 
     ![run_app](images/run_app.PNG)
 
-    For details about how to connect the Android Studio to a device for debugging, see <https://developer.android.com/studio/run/device?hl=zh-cn>.
-
-    The mobile phone needs to be turn on "USB debugging mode" before Android Studio can recognize the mobile phone. Huawei mobile phones generally turn on "USB debugging model" in Settings > system and update > developer Options > USB debugging.
+    > Android Studio will automatically download MindSpore Lite, model files and other dependencies during the compilation process. Please be patient during this process.
+    >
+    > For details about how to connect the Android Studio to a device for debugging, see <https://developer.android.com/studio/run/device?hl=zh-cn>.
+    >
+    > The mobile phone needs to be turn on "USB debugging mode" before Android Studio can recognize the mobile phone. Huawei mobile phones generally turn on "USB debugging model" in Settings -> system and update -> developer Options -> USB debugging.
 
 3. Continue the installation on the Android device. After the installation is complete, you can view the content captured by a camera and the inference result.
 
     ![result](images/app_result.jpg)
+
+4. The solutions of configuration problems:
+
+    4.1 Problems of NDK, CMake, JDK Tools:
+
+    If the tools installed in Android Studio are not recognized, you can re-download and install them from the corresponding official website, and configure the path.
+
+    - NDK >= 21.3 [NDK](https://developer.android.google.cn/ndk/downloads?hl=zh-cn)
+    - CMake >= 3.10.2   [CMake](https://cmake.org/download)
+    - Android SDK >= 26 [SDK](https://developer.microsoft.com/zh-cn/windows/downloads/windows-10-sdk/)
+    - JDK >= 1.8 [JDK](https://www.oracle.com/cn/java/technologies/javase/javase-jdk8-downloads.html)
+
+    ![project_structure](images/project_structure.png)
+
+    4.2 NDK version does not match:
+
+    Open `Android SDK`, click `Show Package Details`, and select the appropriate NDK version according to the error message.
+    ![NDK_version](images/NDK_version.jpg)
+
+    4.3 Problem of Android Studio version:
+
+    Update the Android Studio version in `Toolbar - Help - Checkout for Updates`.
+
+    4.4 Gradle dependencies installed too slowly:
+
+    As shown in the picture, open the Demo root directory `build. Gradle` file, then add huawei mirror source address: `maven {url 'https://developer.huawei.com/repo/'}`, modify the classpath to 4.0.0 and click ` sync ` . Once the download is complete, restore the classpath version and synchronize it again.
 
 ## Detailed Description of the Sample Program  
 
@@ -45,7 +68,7 @@ This image classification sample program on the Android device includes a Java l
 
 ### Sample Program Structure
 
-```
+```text
 app
 │
 ├── src/main
@@ -58,12 +81,12 @@ app
 │   |   └── MindSporeNetnative.h # header file
 │   |
 │   ├── java # application code at the Java layer
-│   │   └── com.mindspore.himindsporedemo 
+│   │   └── com.mindspore.classification
 │   │       ├── gallery.classify # implementation related to image processing and MindSpore JNI calling
 │   │       │   └── ...
 │   │       └── widget # implementation related to camera enabling and drawing
 │   │           └── ...
-│   │   
+│   │
 │   ├── res # resource files related to Android
 │   └── AndroidManifest.xml # Android configuration file
 │
@@ -82,9 +105,9 @@ In this example, the build process automatically downloads the `mindspore-lite-1
 
 Note: if the automatic download fails, please manually download the relevant library files and put them in the corresponding location.
 
-mindspore-lite-1.0.1-runtime-arm64-cpu.tar.gz [Download link](https://ms-release.obs.cn-north-4.myhuaweicloud.com/1.0.1/lite/android_aarch64/mindspore-lite-1.0.1-runtime-arm64-cpu.tar.gz)
+mindspore-lite-1.1.0-inference-android.tar.gz [Download link](https://ms-release.obs.cn-north-4.myhuaweicloud.com/1.1.0/MindSpore/lite/release/android/mindspore-lite-1.1.0-inference-android.tar.gz)
 
-```
+```text
 android{
     defaultConfig{
         externalNativeBuild{
@@ -93,7 +116,7 @@ android{
             }
         }
 
-        ndk{ 
+        ndk{
             abiFilters'armeabi-v7a', 'arm64-v8a'  
         }
     }
@@ -102,7 +125,7 @@ android{
 
 Create a link to the `.so` library file in the `app/CMakeLists.txt` file:
 
-```
+```text
 # ============== Set MindSpore Dependencies. =============
 include_directories(${CMAKE_SOURCE_DIR}/src/main/cpp)
 include_directories(${CMAKE_SOURCE_DIR}/src/main/cpp/${MINDSPORELITE_VERSION}/third_party/flatbuffers/include)
@@ -120,7 +143,7 @@ set_target_properties(minddata-lite PROPERTIES IMPORTED_LOCATION
         ${CMAKE_SOURCE_DIR}/src/main/cpp/${MINDSPORELITE_VERSION}/lib/libminddata-lite.so)
 # --------------- MindSpore Lite set End. --------------------
 
-# Link target library.       
+# Link target library.
 target_link_libraries(
     ...
      # --- mindspore ---
@@ -132,7 +155,7 @@ target_link_libraries(
 
 ### Downloading and Deploying a Model File
 
-In this example, the  download.gradle File configuration auto download `mobilenetv2.ms `and placed in the 'app/libs/arm64-v8a' directory.
+In this example, the  download.gradle File configuration auto download `mobilenetv2.ms`and placed in the 'app/libs/arm64-v8a' directory.
 
 Note: if the automatic download fails, please manually download the relevant library files and put them in the corresponding location.
 
@@ -142,11 +165,11 @@ mobilenetv2.ms [mobilenetv2.ms]( https://download.mindspore.cn/model_zoo/officia
 
 Call MindSpore Lite C++ APIs at the JNI layer to implement on-device inference.
 
-The inference code process is as follows. For details about the complete code, see `src/cpp/MindSporeNetnative.cpp`. 
+The inference code process is as follows. For details about the complete code, see `src/cpp/MindSporeNetnative.cpp`.
 
 1. Load the MindSpore Lite model file and build the context, session, and computational graph for inference.  
 
-   - Load a model file. Create and configure the context for model inference.
+    - Load a model file. Create and configure the context for model inference.
 
      ```cpp
      // Buffer is the model data passed in by the Java layer
@@ -154,24 +177,24 @@ The inference code process is as follows. For details about the complete code, s
      char *modelBuffer = CreateLocalModelBuffer(env, buffer);  
      ```
 
-   - Create a session.
+    - Create a session.
 
      ```cpp
      void **labelEnv = new void *;
      MSNetWork *labelNet = new MSNetWork;
      *labelEnv = labelNet;
-     
+
      // Create context.
      mindspore::lite::Context *context = new mindspore::lite::Context;
      context->thread_num_ = num_thread;
-     
+
      // Create the mindspore session.
      labelNet->CreateSessionMS(modelBuffer, bufferLen, "device label", context);
      delete(context);
-     
+
      ```
 
-   - Load the model file and build a computational graph for inference.
+    - Load the model file and build a computational graph for inference.
 
      ```cpp
      void MSNetWork::CreateSessionMS(char* modelBuffer, size_t bufferLen, std::string name, mindspore::lite::Context* ctx)
@@ -183,7 +206,7 @@ The inference code process is as follows. For details about the complete code, s
      }
      ```
 
-2. Convert the input image into the Tensor format of the MindSpore model. 
+2. Convert the input image into the Tensor format of the MindSpore model.
 
    Convert the image data to be detected into the Tensor format of the MindSpore model.
 
@@ -230,9 +253,9 @@ The inference code process is as follows. For details about the complete code, s
          inputDims.channel * inputDims.width * inputDims.height * sizeof(float));
     ```
 
-3. Perform inference on the input tensor based on the model, obtain the output tensor, and perform post-processing.    
+3. Perform inference on the input tensor based on the model, obtain the output tensor, and perform post-processing.
 
-   - Perform graph execution and on-device inference.
+    - Perform graph execution and on-device inference.
 
      ```cpp
      // After the model and image tensor data is loaded, run inference.
@@ -305,5 +328,5 @@ The inference code process is as follows. For details about the complete code, s
       }
         return categoryScore;
      }
-     
+
      ```

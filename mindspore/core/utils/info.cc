@@ -25,11 +25,11 @@
 namespace mindspore {
 std::string HighLightLine(const std::string &line, int col_begin, int col_end, SourceLineTip tip) {
   std::string temp_line = line;
-  if (col_begin < col_end && col_begin != -1 && col_end <= SizeToInt(temp_line.length()) &&
+  if (col_begin < col_end && col_begin != -1 && col_end <= SizeToLong(temp_line.length()) &&
       tip != kSourceLineTipDiscard) {
-    std::string start = temp_line.substr(0, IntToSize(col_begin));
-    std::string trimmed = temp_line.substr(IntToSize(col_begin), IntToSize(col_end - col_begin));
-    std::string end = temp_line.substr(IntToSize(col_end), IntToSize(SizeToInt(temp_line.length()) - col_end));
+    std::string start = temp_line.substr(0, LongToSize(col_begin));
+    std::string trimmed = temp_line.substr(LongToSize(col_begin), LongToSize(col_end - col_begin));
+    std::string end = temp_line.substr(LongToSize(col_end), LongToSize(SizeToLong(temp_line.length()) - col_end));
     std::stringstream oss;
     std::stringstream tip_ss;
     std::string start_spaces(start.length(), ' ');
@@ -47,7 +47,7 @@ std::string HighLightLine(const std::string &line, int col_begin, int col_end, S
 // print the file name, line no and column no, and part of the content
 std::string Location::ToString(SourceLineTip tip) {
   std::stringstream debug_info_ss;
-  debug_info_ss << " In file " << file_name_ << "(" << line_ << ")" << std::endl;
+  debug_info_ss << "In file " << file_name_ << "(" << line_ << ")" << std::endl;
   if (line_ <= 0) {
     return debug_info_ss.str();
   }
@@ -190,6 +190,7 @@ void TraceManager::DebugTrace(const std::string &func_name, const LocationPtr &l
 void TraceManager::DebugTrace(const LocationPtr &location) {
   TraceContextPtr context = std::make_shared<TraceContext>(location);
   TraceManager::trace_context_stack_.push(context);
+  TraceManager::parse_or_resolve_debug_info_ = std::make_shared<DebugInfo>(location);
 }
 
 void TraceManager::DebugTrace(const TraceInfoPtr &trace_info) {
@@ -201,6 +202,7 @@ void TraceManager::DebugTrace(const TraceInfoPtr &trace_info) {
     MS_LOG(EXCEPTION) << "Trace debug info is null";
   }
   TraceManager::trace_context_stack_.push(context);
+  TraceManager::parse_or_resolve_debug_info_ = trace_info->debug_info();
 }
 
 void TraceManager::DebugTrace(const DebugInfoPtr &debug_info, const TraceInfoPtr &trace_info) {
@@ -218,5 +220,11 @@ void TraceManager::DebugTrace(const DebugInfoPtr &debug_info, const TraceInfoPtr
 
 void TraceManager::EndTrace() { TraceManager::trace_context_stack_.pop(); }
 
+DebugInfoPtr TraceManager::GetParseOrResolveDebugInfo() { return TraceManager::parse_or_resolve_debug_info_; }
+
+void TraceManager::ClearParseOrResolveDebugInfo() { TraceManager::parse_or_resolve_debug_info_ = nullptr; }
+
 std::stack<TraceContextPtr> TraceManager::trace_context_stack_;
+
+DebugInfoPtr TraceManager::parse_or_resolve_debug_info_ = nullptr;
 }  // namespace mindspore

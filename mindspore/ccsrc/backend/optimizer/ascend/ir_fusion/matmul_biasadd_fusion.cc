@@ -18,7 +18,7 @@
 #include "backend/optimizer/common/helper.h"
 #include "backend/session/anf_runtime_algorithm.h"
 #include "utils/utils.h"
-
+#include "utils/trace_base.h"
 namespace mindspore {
 namespace opt {
 const BaseRef MatmulBiasaddFusion::DefinePattern() const {
@@ -31,6 +31,18 @@ const AnfNodePtr MatmulBiasaddFusion::Process(const FuncGraphPtr &graph, const A
                                               const EquivPtr &equiv) const {
   MS_EXCEPTION_IF_NULL(node);
   MS_EXCEPTION_IF_NULL(graph);
+
+  auto matmul = GetAnfNodeByVar(equiv, matmul_var_);
+  if (matmul == nullptr || !matmul->isa<CNode>()) {
+    MS_LOG(EXCEPTION) << "Get CNode MatMul failed!"
+                      << " trace: " << trace::DumpSourceLines(node);
+  }
+
+  // If there is a side-effect operator in the fusion, do not merge
+  if (!IsStateEquivalent(node, matmul)) {
+    return node;
+  }
+
   std::vector<AnfNodePtr> inputs;
   inputs.emplace_back(NewValueNode(std::make_shared<Primitive>(prim::kPrimMatMul->name())));
   inputs.emplace_back(GetAnfNodeByVar(equiv, x0_));
@@ -41,10 +53,6 @@ const AnfNodePtr MatmulBiasaddFusion::Process(const FuncGraphPtr &graph, const A
   new_node->set_scope(node->scope());
   new_node->set_abstract(node->abstract());
 
-  auto matmul = GetAnfNodeByVar(equiv, matmul_var_);
-  if (matmul == nullptr || !matmul->isa<CNode>()) {
-    MS_LOG(EXCEPTION) << "Get CNode MatMul failed!";
-  }
   AnfAlgo::CopyNodeAttrs(matmul, new_node);
   return new_node;
 }

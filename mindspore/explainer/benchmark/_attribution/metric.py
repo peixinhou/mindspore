@@ -13,12 +13,21 @@
 # limitations under the License.
 # ============================================================================
 """Base class for XAI metrics."""
+
+import copy
+import math
+from typing import Callable
+
 import numpy as np
 
+import mindspore as ms
+from mindspore import log as logger
 from mindspore.train._utils import check_value_type
 from ..._operators import Tensor
 from ..._utils import format_tensor_to_ndarray
-from ...explanation._attribution._attribution import Attribution
+from ...explanation._attribution.attribution import Attribution
+
+_Explainer = Attribution
 
 
 def verify_argument(inputs, arg_name):
@@ -46,20 +55,92 @@ def verify_targets(targets, num_labels):
 class AttributionMetric:
     """Super class of XAI metric class used in classification scenarios."""
 
-    def __init__(self, num_labels=None):
-        self._verify_params(num_labels)
+    def __init__(self):
+        self._explainer = None
+
+    evaluate: Callable
+    """
+    This method evaluates the explainer on the given attribution and returns the evaluation results.
+    Derived class should implement this method according to specific algorithms of the metric.
+    """
+
+    def _record_explainer(self, explainer: _Explainer):
+        """Record the explainer in current evaluation."""
+        if self._explainer is None:
+            self._explainer = explainer
+        elif self._explainer is not explainer:
+            logger.info('Provided explainer is not the same as previously evaluted one. Please reset the evaluated '
+                        'results. Previous explainer: %s, current explainer: %s', self._explainer, explainer)
+            self._explainer = explainer
+
+
+class LabelAgnosticMetric(AttributionMetric):
+    """Super class add functions for label-agnostic metric."""
+
+    def __init__(self):
+        super().__init__()
+        self._global_results = []
+
+    @property
+    def performance(self) -> float:
+        """
+        Return the average evaluation result.
+
+        Return:
+            float, averaged result. If no result is aggregate in the global_results, 0.0 will be returned.
+        """
+        result_sum, count = 0, 0
+        for res in self._global_results:
+            if math.isfinite(res):
+                result_sum += res
+                count += 1
+        return 0. if count == 0 else result_sum / count
+
+    def aggregate(self, result):
+        """Aggregate single evaluation result to global results."""
+        if isinstance(result, float):
+            self._global_results.append(result)
+        elif isinstance(result, (ms.Tensor, np.ndarray)):
+            result = format_tensor_to_ndarray(result)
+            self._global_results.extend([float(res) for res in result.reshape(-1)])
+        else:
+            raise TypeError('result should have type of float, ms.Tensor or np.ndarray, but receive %s' % type(result))
+
+    def get_results(self):
+        """Return the gloabl results."""
+        return self._global_results.copy()
+
+    def reset(self):
+        """Reset global results."""
+        self._global_results.clear()
+
+    def _check_evaluate_param(self, explainer, inputs):
+        """Check the evaluate parameters."""
+        check_value_type('explainer', explainer, Attribution)
+        self._record_explainer(explainer)
+        verify_argument(inputs, 'inputs')
+
+
+class LabelSensitiveMetric(AttributionMetric):
+    """Super class add functions for label-sensitive metrics."""
+
+    def __init__(self, num_labels: int):
+        super().__init__()
+        LabelSensitiveMetric._verify_params(num_labels)
         self._num_labels = num_labels
         self._global_results = {i: [] for i in range(num_labels)}
 
+    @property
+    def num_labels(self):
+        """Number of labels used in evaluation."""
+        return self._num_labels
+
     @staticmethod
     def _verify_params(num_labels):
+        """Checks whether num_labels is valid."""
         check_value_type("num_labels", num_labels, int)
         if num_labels < 1:
             raise ValueError("Argument num_labels must be parsed with a integer > 0.")
-
-    def evaluate(self, explainer, inputs, targets, saliency=None):
-        """This function evaluates on a single sample and return the result."""
-        raise NotImplementedError
 
     def aggregate(self, result, targets):
         """Aggregates single result to global_results."""
@@ -70,17 +151,19 @@ class AttributionMetric:
                 target_np = format_tensor_to_ndarray(targets)
                 if len(target_np) > 1:
                     raise ValueError("One result can not be aggreated to multiple targets.")
-        else:
-            result_np = format_tensor_to_ndarray(result)
+        elif isinstance(result, (ms.Tensor, np.ndarray)):
+            result_np = format_tensor_to_ndarray(result).reshape(-1)
             if isinstance(targets, int):
                 for res in result_np:
                     self._global_results[targets].append(float(res))
             else:
-                target_np = format_tensor_to_ndarray(targets)
+                target_np = format_tensor_to_ndarray(targets).reshape(-1)
                 if len(target_np) != len(result_np):
                     raise ValueError("Length of result does not match with length of targets.")
                 for tar, res in zip(target_np, result_np):
                     self._global_results[int(tar)].append(float(res))
+        else:
+            raise TypeError('Result should have type of float, ms.Tensor or np.ndarray, but receive %s' % type(result))
 
     def reset(self):
         """Resets global_result."""
@@ -91,16 +174,18 @@ class AttributionMetric:
         """
         Get the class performances by global result.
 
-
         Returns:
-            (:class:`np.ndarray`): :attr:`num_labels`-dimensional vector
-                containing per-class performance.
+            (:class:`list`): a list of performances where each value is the average score of specific class.
         """
-        count = np.array(
-            [len(self._global_results[i]) for i in range(self._num_labels)])
-        result_sum = np.array(
-            [sum(self._global_results[i]) for i in range(self._num_labels)])
-        return result_sum / count.clip(min=1)
+        results_on_labels = []
+        for label_id in range(self._num_labels):
+            sum_of_label, count_of_label = 0, 0
+            for res in self._global_results[label_id]:
+                if math.isfinite(res):
+                    sum_of_label += res
+                    count_of_label += 1
+            results_on_labels.append(0. if count_of_label == 0 else sum_of_label / count_of_label)
+        return results_on_labels
 
     @property
     def performance(self):
@@ -110,27 +195,28 @@ class AttributionMetric:
         Returns:
             (:class:`float`): mean performance.
         """
-        count = sum(
-            [len(self._global_results[i]) for i in range(self._num_labels)])
-        result_sum = sum(
-            [sum(self._global_results[i]) for i in range(self._num_labels)])
-        if count == 0:
-            return 0
-        return result_sum / count
+        result_sum, count = 0, 0
+        for label_id in range(self._num_labels):
+            for res in self._global_results[label_id]:
+                if math.isfinite(res):
+                    result_sum += res
+                    count += 1
+        return 0. if count == 0 else result_sum / count
 
     def get_results(self):
         """Global result of the metric can be return"""
-        return self._global_results
+        return copy.deepcopy(self._global_results)
 
     def _check_evaluate_param(self, explainer, inputs, targets, saliency):
         """Check the evaluate parameters."""
         check_value_type('explainer', explainer, Attribution)
+        self._record_explainer(explainer)
         verify_argument(inputs, 'inputs')
-        output = explainer.model(inputs)
+        output = explainer.network(inputs)
         check_value_type("output of explainer model", output, Tensor)
-        output_dim = explainer.model(inputs).shape[1]
-        if output_dim > self._num_labels:
-            raise ValueError("The output dimension of of black-box model in explainer should not exceed the dimension "
-                             "of num_labels set in the __init__, please set num_labels larger.")
+        output_dim = explainer.network(inputs).shape[1]
+        if output_dim != self._num_labels:
+            raise ValueError("The output dimension of of black-box model in explainer does not match the dimension "
+                             "of num_labels set in the __init__, please check explainer and num_labels again.")
         verify_targets(targets, self._num_labels)
         check_value_type('saliency', saliency, (Tensor, type(None)))

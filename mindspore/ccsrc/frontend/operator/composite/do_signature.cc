@@ -96,7 +96,7 @@ TypeId GetMaxTypeId(const std::vector<TypePtr> &input_types, std::vector<size_t>
   TypeId max_type_id = kTypeUnknown;
   size_t max_type_number = 0;
   bool has_int8 = false;
-  bool has_scalar_int32 = false;
+  bool has_scalar_int64 = false;
   bool has_scalar_float32 = false;
   for (const auto &index : indices) {
     TypeId arg_type_id = kTypeUnknown;
@@ -105,8 +105,8 @@ TypeId GetMaxTypeId(const std::vector<TypePtr> &input_types, std::vector<size_t>
       continue;
     }
     if (arg_type != kObjectTypeTensorType) {
-      if (arg_type_id == kNumberTypeInt32) {
-        has_scalar_int32 = true;
+      if (arg_type_id == kNumberTypeInt64) {
+        has_scalar_int64 = true;
       } else if (arg_type_id == kNumberTypeFloat32) {
         has_scalar_float32 = true;
       }
@@ -135,8 +135,8 @@ TypeId GetMaxTypeId(const std::vector<TypePtr> &input_types, std::vector<size_t>
   // if so, it means that max is bool tensor, use scalar type instead.
   // for example: Tensor([True, True]) * 2, expect result is Tensor([2, 2])
   if (max_type_id == kNumberTypeBool) {
-    if (has_scalar_int32) {
-      max_type_id = kNumberTypeInt32;
+    if (has_scalar_int64) {
+      max_type_id = kNumberTypeInt64;
     }
     if (has_scalar_float32) {
       max_type_id = kNumberTypeFloat32;
@@ -194,7 +194,7 @@ AnfNodePtr DoCast(const AnfNodePtr &param, const TypeId &type_id, const FuncGrap
   MS_EXCEPTION_IF_NULL(prim_cast_class);
   auto dtype_node = NewValueNode(TypeIdToType(type_id));
   auto cast_node = NewCNode({NewValueNode(prim_cast_class)}, graph);
-  return NewCNode({cast_node, param, dtype_node}, graph);
+  return graph->NewCNodeAfter(param, {cast_node, param, dtype_node});
 }
 
 void DoAutoCast(const std::string &func_name, const std::vector<Signature> &signature,
@@ -203,8 +203,8 @@ void DoAutoCast(const std::string &func_name, const std::vector<Signature> &sign
   std::vector<SignatureEnumDType> dtypes;
   (void)std::transform(signature.begin(), signature.end(), std::back_inserter(dtypes),
                        [](const Signature &sig) { return sig.dtype; });
-  int empty_dtype_count = std::count(dtypes.begin(), dtypes.end(), SignatureEnumDType::kDTypeEmptyDefaultValue);
-  if (dtypes.empty() || static_cast<int>(dtypes.size()) == empty_dtype_count) {
+  int64_t empty_dtype_count = std::count(dtypes.begin(), dtypes.end(), SignatureEnumDType::kDTypeEmptyDefaultValue);
+  if (dtypes.empty() || static_cast<int64_t>(dtypes.size()) == empty_dtype_count) {
     return;
   }
   // Stat the index of the arguments with the largest type in the same SignatureEnumDType.
@@ -274,7 +274,7 @@ AnfNodePtr BuildNewCNode(const FuncGraphPtr &func_graph, const std::string &func
       continue;
     }
     SignatureEnumRW sig = SignatureEnumRW::kRWDefault;
-    // If sig_size is 0 use defalut.
+    // If sig_size is 0 use default.
     if (sig_size > 0 && i < sig_size) {
       sig = signature[i].rw;
     } else if (has_var && i >= sig_size) {
@@ -289,7 +289,7 @@ AnfNodePtr BuildNewCNode(const FuncGraphPtr &func_graph, const std::string &func
           auto source_element = source_tensor_type->element();
           if (cast_type != nullptr && IsSubType(source_element, kFloat) && *source_element != *cast_type) {
             auto cast = prim::GetPythonOps("cast", "mindspore.ops.functional");
-            param = NewCNode({NewValueNode(cast), param, NewValueNode(cast_type)}, func_graph);
+            param = func_graph->NewCNodeAfter(param, {NewValueNode(cast), param, NewValueNode(cast_type)});
             type = cast_type->type_id() == kNumberTypeFloat16 ? kTensorTypeFP16 : kTensorTypeFP32;
           }
         }
@@ -309,7 +309,7 @@ AnfNodePtr BuildNewCNode(const FuncGraphPtr &func_graph, const std::string &func
   // process default
   ProcessDefault(func_name, args_spec_list.size(), signature, has_var, &op_inputs);
   DoAutoCast(func_name, signature, input_types, func_graph, &op_inputs, write_indices);
-  return func_graph->NewCNode(op_inputs);
+  return func_graph->NewCNodeInOrder(op_inputs);
 }
 }  // namespace
 

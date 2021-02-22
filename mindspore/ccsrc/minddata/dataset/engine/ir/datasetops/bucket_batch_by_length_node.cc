@@ -1,5 +1,5 @@
 /**
- * Copyright 2020 Huawei Technologies Co., Ltd
+ * Copyright 2020-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,7 +31,7 @@ namespace dataset {
 BucketBatchByLengthNode::BucketBatchByLengthNode(
   std::shared_ptr<DatasetNode> child, const std::vector<std::string> &column_names,
   const std::vector<int32_t> &bucket_boundaries, const std::vector<int32_t> &bucket_batch_sizes,
-  std::function<TensorRow(TensorRow)> element_length_function,
+  std::shared_ptr<TensorOp> element_length_function,
   const std::map<std::string, std::pair<TensorShape, std::shared_ptr<Tensor>>> &pad_info, bool pad_to_bucket_boundary,
   bool drop_remainder)
     : column_names_(column_names),
@@ -41,26 +41,63 @@ BucketBatchByLengthNode::BucketBatchByLengthNode(
       pad_info_(pad_info),
       pad_to_bucket_boundary_(pad_to_bucket_boundary),
       drop_remainder_(drop_remainder) {
-  this->children.push_back(child);
+  this->AddChild(child);
 }
 
-std::vector<std::shared_ptr<DatasetOp>> BucketBatchByLengthNode::Build() {
-  // A vector containing shared pointer to the Dataset Ops that this object will create
-  std::vector<std::shared_ptr<DatasetOp>> node_ops;
+std::shared_ptr<DatasetNode> BucketBatchByLengthNode::Copy() {
+  auto node = std::make_shared<BucketBatchByLengthNode>(nullptr, column_names_, bucket_boundaries_, bucket_batch_sizes_,
+                                                        element_length_function_, pad_info_, pad_to_bucket_boundary_,
+                                                        drop_remainder_);
+  return node;
+}
 
-  std::shared_ptr<TensorOp> c_func;
-  if (element_length_function_ != nullptr) {
-    c_func = std::make_shared<CFuncOp>(element_length_function_);
-  } else {
-    c_func = nullptr;
+void BucketBatchByLengthNode::Print(std::ostream &out) const {
+  out << Name() + "(columns:" + PrintColumns(column_names_);
+  int i = 0;
+  for (auto it : bucket_boundaries_) {
+    if (i == 0) {
+      out << ",bucket_boundaries:{";
+    }
+    out << it;
+    if (i < bucket_boundaries_.size() - 1) {
+      out << ",";
+    } else {
+      out << "}";
+    }
+    i++;
   }
-  node_ops.push_back(std::make_shared<BucketBatchByLengthOp>(column_names_, bucket_boundaries_, bucket_batch_sizes_,
-                                                             c_func, pad_info_, pad_to_bucket_boundary_,
-                                                             drop_remainder_, connector_que_size_));
-  return node_ops;
+  i = 0;
+  for (auto it : bucket_batch_sizes_) {
+    if (i == 0) {
+      out << ",bucket_batch_sizes:{";
+    }
+    out << it;
+    if (i < bucket_batch_sizes_.size() - 1) {
+      out << ",";
+    } else {
+      out << "}";
+    }
+    i++;
+  }
+  out << ")";
+}
+
+Status BucketBatchByLengthNode::Build(std::vector<std::shared_ptr<DatasetOp>> *const node_ops) {
+  bucket_boundaries_.insert(bucket_boundaries_.begin(), 0);
+  auto op = std::make_shared<BucketBatchByLengthOp>(column_names_, bucket_boundaries_, bucket_batch_sizes_,
+                                                    element_length_function_, pad_info_, pad_to_bucket_boundary_,
+                                                    drop_remainder_, connector_que_size_);
+  op->set_total_repeats(GetTotalRepeats());
+  op->set_num_repeats_per_epoch(GetNumRepeatsPerEpoch());
+  node_ops->push_back(op);
+  if (bucket_boundaries_[0] == 0) {
+    bucket_boundaries_.erase(bucket_boundaries_.begin());
+  }
+  return Status::OK();
 }
 
 Status BucketBatchByLengthNode::ValidateParams() {
+  RETURN_IF_NOT_OK(DatasetNode::ValidateParams());
   if (element_length_function_ == nullptr && column_names_.size() != 1) {
     std::string err_msg =
       "BucketBatchByLengthNode: when element_length_function is not specified, size of column_name must be 1 but is: " +
@@ -120,6 +157,5 @@ Status BucketBatchByLengthNode::ValidateParams() {
 
   return Status::OK();
 }
-
 }  // namespace dataset
 }  // namespace mindspore

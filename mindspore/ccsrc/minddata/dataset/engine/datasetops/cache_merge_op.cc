@@ -1,5 +1,5 @@
 /**
- * Copyright 2020 Huawei Technologies Co., Ltd
+ * Copyright 2020-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,7 +23,6 @@
 #include "minddata/dataset/core/config_manager.h"
 #include "minddata/dataset/core/constants.h"
 #include "minddata/dataset/core/global_context.h"
-#include "minddata/dataset/engine/opt/pass.h"
 #include "minddata/dataset/engine/execution_tree.h"
 #include "minddata/dataset/util/system_pool.h"
 #include "minddata/dataset/util/task_manager.h"
@@ -59,13 +58,15 @@ Status CacheMergeOp::operator()() {
   static const int32_t queue_sz = 512;
   io_que_ = std::make_unique<Queue<row_id_type>>(queue_sz);
   RETURN_IF_NOT_OK(io_que_->Register(tree_->AllTasks()));
-  RETURN_IF_NOT_OK(
-    tree_->LaunchWorkers(num_workers_, std::bind(&CacheMergeOp::WorkerEntry, this, std::placeholders::_1)));
-  RETURN_IF_NOT_OK(
-    tree_->LaunchWorkers(num_workers_, std::bind(&CacheMergeOp::CacheMissWorkerEntry, this, std::placeholders::_1)));
+  RETURN_IF_NOT_OK(tree_->LaunchWorkers(
+    num_workers_, std::bind(&CacheMergeOp::WorkerEntry, this, std::placeholders::_1), Name() + "::WorkerEntry", id()));
+  RETURN_IF_NOT_OK(tree_->LaunchWorkers(num_workers_,
+                                        std::bind(&CacheMergeOp::CacheMissWorkerEntry, this, std::placeholders::_1),
+                                        Name() + "::CacheMissWorkerEntry", id()));
   // One dedicated thread to move TensorRow from the pool to the cache server
   for (auto i = 0; i < num_cleaners_; ++i) {
-    RETURN_IF_NOT_OK(tree_->AllTasks()->CreateAsyncTask("Cleaner", std::bind(&CacheMergeOp::Cleaner, this)));
+    RETURN_IF_NOT_OK(
+      tree_->AllTasks()->CreateAsyncTask("Cleaner", std::bind(&CacheMergeOp::Cleaner, this), nullptr, id()));
   }
   TaskManager::FindMe()->Post();
   return Status::OK();
@@ -122,6 +123,17 @@ Status CacheMergeOp::CacheMissWorkerEntry(int32_t workerId) {
     if (db_ptr->eoe()) {
       // Ignore it.
       MS_LOG(DEBUG) << "Ignore eoe";
+      // However we need to flush any left over from the async write buffer. But any error
+      // we are getting will just to stop caching but the pipeline will continue
+      Status rc;
+      if ((rc = cache_client_->FlushAsyncWriteBuffer()).IsError()) {
+        cache_missing_rows_ = false;
+        if (rc == StatusCode::kMDOutOfMemory || rc == kMDNoSpace) {
+          cache_client_->ServerRunningOutOfResources();
+        } else {
+          MS_LOG(INFO) << "Async row flushing not successful: " << rc.ToString();
+        }
+      }
     } else {
       while (db_ptr->NumRows() > 0) {
         TensorRow row;
@@ -143,6 +155,9 @@ Status CacheMergeOp::CacheMissWorkerEntry(int32_t workerId) {
             rc = rq->AsyncSendCacheRequest(cache_client_, row);
             if (rc.IsOk()) {
               RETURN_IF_NOT_OK(io_que_->EmplaceBack(row_id));
+            } else if (rc == StatusCode::kMDOutOfMemory || rc == kMDNoSpace) {
+              cache_missing_rows_ = false;
+              cache_client_->ServerRunningOutOfResources();
             }
           }
         }
@@ -172,9 +187,9 @@ Status CacheMergeOp::Cleaner() {
     Status rc = rq->CheckCacheResult();
     if (rc.IsError()) {
       // If interrupt, time to quit.
-      if (rc.IsInterrupted()) {
+      if (rc == StatusCode::kMDInterrupted) {
         return Status::OK();
-      } else if (rc.IsOutofMemory() || rc.IsNoSpace()) {
+      } else if (rc == StatusCode::kMDOutOfMemory || rc == kMDNoSpace) {
         // The server is hitting some limit and we will turn off caching from now on.
         cache_missing_rows_ = false;
         cache_client_->ServerRunningOutOfResources();
@@ -189,17 +204,17 @@ Status CacheMergeOp::Cleaner() {
   return Status::OK();
 }
 
-Status CacheMergeOp::PrepareNodePostAction() {  // Run any common code from super class first before adding our own
-                                                // specific logic
+Status CacheMergeOp::PrepareOperator() {  // Run any common code from super class first before adding our own
+                                          // specific logic
   CHECK_FAIL_RETURN_UNEXPECTED(child_.size() == 2, "Incorrect number of children");
-  RETURN_IF_NOT_OK(ParallelOp::PrepareNodePostAction());
+  RETURN_IF_NOT_OK(DatasetOp::PrepareOperator());
   // Get the computed check sum from all ops in the cache miss class
   uint32_t cache_crc = DatasetOp::GenerateCRC(child_[kCacheMissChildIdx]);
   // This is a mappable cache op so the id's need to be generated.
   // Construct the cache
   const bool generate_ids = false;
   Status rc = cache_client_->CreateCache(cache_crc, generate_ids);
-  if (rc.get_code() == StatusCode::kDuplicateKey) {
+  if (rc.StatusCode() == StatusCode::kMDDuplicateKey) {
     // We are told the cache has been created already.
     MS_LOG(INFO) << "Cache created already";
     rc = Status::OK();
@@ -228,12 +243,12 @@ CacheMergeOp::Builder::Builder() : build_cache_client_(nullptr), build_sampler_(
 // Check if the required parameters are set by the builder.
 Status CacheMergeOp::Builder::SanityCheck() const {
   if (build_cache_client_ == nullptr) {
-    return Status(StatusCode::kUnexpectedError, __LINE__, __FILE__,
+    return Status(StatusCode::kMDUnexpectedError, __LINE__, __FILE__,
                   "Invalid parameter, CacheMergeOp requires a CacheClient, but got nullptr.");
   }
   // Make sure the cache client has a valid session
   if (!build_cache_client_->session_id()) {
-    return Status(StatusCode::kUnexpectedError, __LINE__, __FILE__,
+    return Status(StatusCode::kMDUnexpectedError, __LINE__, __FILE__,
                   "Invalid parameter, cache client for CacheMergeOp requires a session id which is not equal to 0.");
   }
   return Status::OK();
@@ -247,37 +262,15 @@ Status CacheMergeOp::Builder::Build(std::shared_ptr<CacheMergeOp> *ptr) {
   return Status::OK();
 }
 
-// Pre-Visitor accept method for NodePass
-Status CacheMergeOp::PreAccept(NodePass *p, bool *modified) {
-  // Downcast shared pointer then call the pre-visitation
-  return p->PreRunOnNode(shared_from_base<CacheMergeOp>(), modified);
-}
-
-// Visitor accept method for NodePass
-Status CacheMergeOp::Accept(NodePass *p, bool *modified) {
-  // Downcast shared pointer then call visitor
-  return p->RunOnNode(shared_from_base<CacheMergeOp>(), modified);
-}
-
 Status CacheMergeOp::EoeReceived(int32_t worker_id) {
-  // If we are in a repeat path, send the eoe up.
-  // Otherwise ignore it.
-  if (op_total_repeats_ != 1) {
-    return DatasetOp::EoeReceived(worker_id);
-  }
-  return Status::OK();
+  // Send the eoe up.
+  MS_LOG(DEBUG) << "Cache merge sending eoe";
+  return DatasetOp::EoeReceived(worker_id);
 }
 
 // Base-class override for handling cases when an eof is received.
 Status CacheMergeOp::EofReceived(int32_t worker_id) {
-  // If we are not in a repeated path, then the merge op gets a eof by itself, without first
-  // getting an eoe.  However, the logic demands that all epochs close with an eoe first before eof.
-  // Thus, generate an eoe first, before flowing up the eof in the non-repeated case. Base class
-  // provides that for us.
-  if (op_total_repeats_ == 1) {
-    MS_LOG(DEBUG) << "Cache merge sending eoe";
-    RETURN_IF_NOT_OK(DatasetOp::EoeReceived(worker_id));
-  }
+  // Send the eof up.
   MS_LOG(DEBUG) << "Cache merge sending eof";
   return DatasetOp::EofReceived(worker_id);
 }
@@ -309,17 +302,25 @@ Status CacheMergeOp::TensorRowCacheRequest::AsyncSendCacheRequest(const std::sha
   if (st_.compare_exchange_strong(expected, State::kDirty)) {
     // We will do a deep copy but write directly into CacheRequest protobuf or shared memory
     Status rc;
-    cleaner_copy_ = std::make_shared<CacheRowRequest>(cc.get());
-    rc = cleaner_copy_->SerializeCacheRowRequest(cc.get(), row);
-    if (rc.IsOk()) {
-      // Send the request async. The cleaner will check the return code.
-      rc = cc->PushRequest(cleaner_copy_);
+    rc = cc->AsyncWriteRow(row);
+    if (rc.StatusCode() == StatusCode::kMDNotImplementedYet) {
+      cleaner_copy_ = std::make_shared<CacheRowRequest>(cc.get());
+      rc = cleaner_copy_->SerializeCacheRowRequest(cc.get(), row);
+      if (rc.IsOk()) {
+        // Send the request async. The cleaner will check the return code.
+        rc = cc->PushRequest(cleaner_copy_);
+      }
+    } else if (rc.IsOk()) {
+      // Set the state to clean even though it still sits in the cache client async buffer.
+      // The cleaner will then ignore it once the state is clean.
+      st_ = State::kClean;
     }
     if (rc.IsError()) {
       // Clean up the shared pointer and reset the state back to empty
       cleaner_copy_.reset();
       st_ = State::kEmpty;
     }
+    return rc;
   }
   return Status::OK();
 }

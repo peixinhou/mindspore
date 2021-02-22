@@ -15,10 +15,6 @@
  */
 
 #include "src/runtime/kernel/arm/int8/pad_int8.h"
-#include <string>
-#include "include/errorcode.h"
-#include "nnacl/errorcode.h"
-#include "nnacl/int8/pad_int8.h"
 #include "src/runtime/runtime_api.h"
 #include "src/kernel_registry.h"
 
@@ -95,12 +91,12 @@ int PadInt8CPUKernel::InitPadParam() {
   int out[] = {1, 1, 1, 1};
 
   for (int i = 0; i < ndims; i++) {
-    in[DEFAULT_PAD_NDIMS - ndims + i] = in_dims[i];
-    out[DEFAULT_PAD_NDIMS - ndims + i] = out_dims[i];
+    in[COMM_SHAPE_SIZE - ndims + i] = in_dims[i];
+    out[COMM_SHAPE_SIZE - ndims + i] = out_dims[i];
   }
 
-  memcpy(in_dims_, in, DEFAULT_PAD_NDIMS * sizeof(int));
-  memcpy(out_dims_, out, DEFAULT_PAD_NDIMS * sizeof(int));
+  memcpy(in_dims_, in, COMM_SHAPE_SIZE * sizeof(int));
+  memcpy(out_dims_, out, COMM_SHAPE_SIZE * sizeof(int));
 
   return RET_OK;
 }
@@ -150,7 +146,7 @@ int PadInt8CPUKernel::HandleMirrorPad() {
   if (ret != RET_OK) {
     return ret;
   }
-  ret = CheckPaddings(pad_param_->paddings_, DEFAULT_PAD_NDIMS, in_dims_, pad_param_->pad_mode_);
+  ret = CheckPaddings(pad_param_->paddings_, COMM_SHAPE_SIZE, in_dims_, pad_param_->pad_mode_);
   if (ret != RET_OK) {
     return ret;
   }
@@ -160,15 +156,15 @@ int PadInt8CPUKernel::HandleMirrorPad() {
 }
 
 void PadInt8CPUKernel::CalculateStrides() {
-  pad_param_->in_strides[DEFAULT_PAD_NDIMS - 1] = 1;
-  for (auto i = DEFAULT_PAD_NDIMS - 2; i >= 0; --i) {
+  pad_param_->in_strides[COMM_SHAPE_SIZE - 1] = 1;
+  for (auto i = COMM_SHAPE_SIZE - 2; i >= 0; --i) {
     pad_param_->in_strides[i] = in_dims_[i + 1] * pad_param_->in_strides[i + 1];
   }
-  for (auto i = 0; i < DEFAULT_PAD_NDIMS; ++i) {
+  for (auto i = 0; i < COMM_SHAPE_SIZE; ++i) {
     out_dims_[i] = in_dims_[i] + pad_param_->paddings_[i * 2] + pad_param_->paddings_[i * 2 + 1];
   }
-  pad_param_->out_strides[DEFAULT_PAD_NDIMS - 1] = 1;
-  for (auto i = DEFAULT_PAD_NDIMS - 2; i >= 0; --i) {
+  pad_param_->out_strides[COMM_SHAPE_SIZE - 1] = 1;
+  for (auto i = COMM_SHAPE_SIZE - 2; i >= 0; --i) {
     pad_param_->out_strides[i] = out_dims_[i + 1] * pad_param_->out_strides[i + 1];
   }
 }
@@ -256,11 +252,11 @@ int PadInt8CPUKernel::CopyPaddingFromInput() {
     return RET_ERROR;
   }
 
-  auto ret = ExtendPaddings(pad_param_->paddings_, MAX_PAD_SIZE, paddings, padding_tensor->ElementsNum());
+  auto ret = ExtendPaddings(pad_param_->paddings_, MAX_SHAPE_SIZE, paddings, padding_tensor->ElementsNum());
   if (ret != RET_OK) {
     return ret;
   }
-  pad_param_->padding_length = MAX_PAD_SIZE;
+  pad_param_->padding_length = MAX_SHAPE_SIZE;
   return RET_OK;
 }
 
@@ -289,27 +285,6 @@ int PadInt8CPUKernel::Run() {
 
   return RET_OK;
 }
-kernel::LiteKernel *CpuPadInt8KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                            const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter,
-                                            const lite::InnerContext *ctx, const kernel::KernelKey &desc,
-                                            const mindspore::lite::PrimitiveC *primitive) {
-  MS_ASSERT(opParameter != nullptr);
-  MS_ASSERT(desc.type == schema::PrimitiveType_Pad);
-  auto *kernel = new (std::nothrow) PadInt8CPUKernel(opParameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "new PadCPUKernel failed.";
-    free(opParameter);
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
-}
-REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Pad, CpuPadInt8KernelCreator)
 
+REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Pad, LiteKernelCreator<PadInt8CPUKernel>)
 }  // namespace mindspore::kernel

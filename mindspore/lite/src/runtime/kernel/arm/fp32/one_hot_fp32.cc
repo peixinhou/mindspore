@@ -15,7 +15,7 @@
  */
 
 #include "src/runtime/kernel/arm/fp32/one_hot_fp32.h"
-#include "nnacl/fp32/one_hot.h"
+#include "nnacl/fp32/one_hot_fp32.h"
 #include "schema/model_generated.h"
 #include "src/runtime/runtime_api.h"
 #include "src/kernel_registry.h"
@@ -134,6 +134,8 @@ int OneHotCPUKernel::GetParams() {
   one_hot_param->depth_ = *depth;
 
   if (in_tensors_.size() == kInputNum) {
+    // 4 inputs: indices, depth, on_value, off_value
+    one_hot_param->support_neg_index_ = false;
     auto on_value_tensor = in_tensors_.at(2);
     if (on_value_tensor == nullptr) {
       MS_LOG(ERROR) << "OneHot inputs[2] on_value nullptr";
@@ -156,12 +158,14 @@ int OneHotCPUKernel::GetParams() {
     }
     one_hot_param->off_value_ = *off_value;
   } else {
+    // 3 inputs: indices, depth, off_on_value
+    one_hot_param->support_neg_index_ = true;
     auto off_on_tensor = in_tensors_.at(2);
     if (off_on_tensor == nullptr) {
       MS_LOG(ERROR) << "OneHot inputs[2] on_value nullptr";
       return RET_NULL_PTR;
     }
-    const int64_t *off_on_values = static_cast<int64_t *>(off_on_tensor->MutableData());
+    const float *off_on_values = static_cast<float *>(off_on_tensor->MutableData());  // need to support int type
     if (off_on_values == nullptr) {
       MS_LOG(ERROR) << "OneHot input[2] data is nullptr";
       return RET_NULL_PTR;
@@ -185,34 +189,5 @@ int OneHotCPUKernel::Run() {
   return RET_OK;
 }
 
-kernel::LiteKernel *CpuOneHotFp32KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                               const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter,
-                                               const lite::InnerContext *ctx, const kernel::KernelKey &desc,
-                                               const mindspore::lite::PrimitiveC *primitive) {
-  if (opParameter == nullptr) {
-    MS_LOG(ERROR) << "OneHot opParameter nullptr.";
-    return nullptr;
-  }
-  if (desc.type != schema::PrimitiveType_OneHot) {
-    MS_LOG(ERROR) << "OneHot desc type should be " << schema::PrimitiveType_OneHot << " got " << desc.type;
-    free(opParameter);
-    return nullptr;
-  }
-  auto *kernel = new (std::nothrow) OneHotCPUKernel(opParameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "OneHot new kernel failed.";
-    free(opParameter);
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
-}
-
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_OneHot, CpuOneHotFp32KernelCreator)
+REG_KERNEL(kCPU, kNumberTypeInt32, PrimitiveType_OneHot, LiteKernelCreator<OneHotCPUKernel>)
 }  // namespace mindspore::kernel

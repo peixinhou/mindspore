@@ -20,21 +20,26 @@
 #include <vector>
 
 #include "src/runtime/kernel/opencl/opencl_kernel.h"
-#include "nnacl/fp32/softmax.h"
+#include "nnacl/fp32/softmax_fp32.h"
 
 namespace mindspore::kernel {
 
 class SoftmaxOpenCLKernel : public OpenCLKernel {
  public:
   SoftmaxOpenCLKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
-                      const std::vector<lite::Tensor *> &outputs)
-      : OpenCLKernel(parameter, inputs, outputs) {
+                      const std::vector<lite::Tensor *> &outputs, const lite::InnerContext *ctx,
+                      const mindspore::lite::PrimitiveC *primitive)
+      : OpenCLKernel(parameter, inputs, outputs, ctx, primitive) {
     parameter_ = reinterpret_cast<SoftmaxParameter *>(parameter);
   }
 
   ~SoftmaxOpenCLKernel() override = default;
-  int Init() override;
   int Run() override;
+  int Prepare() override;
+  int CheckSpecs() override;
+  void SetConstArgs() override;
+  void SetGlobalLocal() override;
+  int Tune() override;
 
  private:
   int InitGlobalSize();
@@ -42,14 +47,12 @@ class SoftmaxOpenCLKernel : public OpenCLKernel {
   int SetWorkGroupSize();
   std::vector<float> GetMaskForLastChannel(int channels);
 
-  cl::Kernel kernel_;
   SoftmaxParameter *parameter_;
   bool onexone_flag_{false};
   std::vector<size_t> local_size_;
   std::vector<size_t> global_size_;
-  bool enable_fp16_{false};
   int axis_{0};
-  std::vector<int> nhwc_shape_;
+  GpuTensorInfo out_shape;
 };
 
 }  // namespace mindspore::kernel

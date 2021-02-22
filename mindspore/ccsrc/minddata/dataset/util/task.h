@@ -16,8 +16,9 @@
 #ifndef MINDSPORE_CCSRC_MINDDATA_DATASET_UTIL_TASK_H_
 #define MINDSPORE_CCSRC_MINDDATA_DATASET_UTIL_TASK_H_
 
-#if !defined(_WIN32) && !defined(_WIN64) && !defined(__ANDROID__) && !defined(ANDROID)
+#if !defined(_WIN32) && !defined(_WIN64) && !defined(__ANDROID__) && !defined(ANDROID) && !defined(__APPLE__)
 #include <pthread.h>
+#include <sys/syscall.h>
 #endif
 #include <chrono>
 #include <exception>
@@ -48,7 +49,7 @@ class Task : public IntrpResource {
 
   enum class WaitFlag : int { kBlocking, kNonBlocking };
 
-  Task(const std::string &myName, const std::function<Status()> &f);
+  Task(const std::string &myName, const std::function<Status()> &f, int32_t operator_id = -1);
 
   // Future objects are not copyable.
   Task(const Task &) = delete;
@@ -87,7 +88,11 @@ class Task : public IntrpResource {
 
   std::thread::id get_id() { return id_; }
 
+  pid_t get_linux_id() { return thread_id_; }
+
   std::string MyName() const { return my_name_; }
+
+  int32_t get_operator_id() { return operator_id_; }
 
   // An operator used by std::find
   bool operator==(const Task &other) const { return (this == &other); }
@@ -100,13 +105,15 @@ class Task : public IntrpResource {
 
   static Status OverrideInterruptRc(const Status &rc);
 
-#if !defined(_WIN32) && !defined(_WIN64) && !defined(__ANDROID__) && !defined(ANDROID)
+#if !defined(_WIN32) && !defined(_WIN64) && !defined(__ANDROID__) && !defined(ANDROID) && !defined(__APPLE__)
   pthread_t GetNativeHandle() const;
 #endif
 
  private:
   mutable std::mutex mux_;
   std::string my_name_;
+  int32_t operator_id_;
+  pid_t thread_id_;
   Status rc_;
   WaitPost wp_;
   // Task need to provide definition for this function.  It
@@ -120,7 +127,7 @@ class Task : public IntrpResource {
   volatile bool running_;
   volatile bool caught_severe_exception_;
 
-#if !defined(_WIN32) && !defined(_WIN64) && !defined(__ANDROID__) && !defined(ANDROID)
+#if !defined(_WIN32) && !defined(_WIN64) && !defined(__ANDROID__) && !defined(ANDROID) && !defined(__APPLE__)
   pthread_t native_handle_;
 #else
   uint64_t native_handle_;

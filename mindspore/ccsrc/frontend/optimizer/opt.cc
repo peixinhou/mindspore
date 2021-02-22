@@ -133,6 +133,7 @@ bool SubstitutionList::ApplyTransform(const OptimizerPtr &optimizer, const AnfNo
     // apply transform on this node
     bool change = false;
     if (is_match) {
+      TraceGuard trace_guard(std::make_shared<TraceOpt>(node->debug_info()));
       auto ret = (*transform)(optimizer, node);
       if (ret != nullptr && ret != node) {
         change = true;
@@ -140,6 +141,8 @@ bool SubstitutionList::ApplyTransform(const OptimizerPtr &optimizer, const AnfNo
 #ifdef ENABLE_PROFILE
         double t = GetTime();
 #endif
+        MS_LOG(DEBUG) << "transform: " << transform->name_ << " will replace: " << node->DebugString()
+                      << " with: " << ret->DebugString();
         (void)manager->Replace(node, ret);
 #ifdef ENABLE_PROFILE
         MsProfile::StatTime("replace." + transform->name_, GetTime() - t);
@@ -204,7 +207,25 @@ bool SubstitutionList::operator()(const FuncGraphPtr &func_graph, const Optimize
       changes = changes || change;
       loop = loop || change;
 
+      // apply transform on isolate nodes.
+      auto &isolate_nodes = manager->isolate_nodes();
+      for (auto &node : isolate_nodes) {
+        change = ApplyTransform(optimizer, node, list_[i]);
+        changes = changes || change;
+        loop = loop || change;
+      }
+
       // record the status of each transform
+      static const auto enable_dump_pass_ir = (common::GetEnv("ENV_DUMP_PASS_IR") == "1");
+      if (enable_dump_pass_ir && MsContext::GetInstance()->get_param<bool>(MS_CTX_SAVE_GRAPHS_FLAG)) {
+        auto fg_name = optimizer->name() + "_" + std::to_string(optimizer->CurPass_.counter) + "_" +
+                       optimizer->CurPass_.name + "_" + list_[i]->name_;
+        DumpIR(fg_name + ".ir", func_graph);
+        if (MsContext::GetInstance()->get_param<int>(MS_CTX_EXECUTION_MODE) != kPynativeMode) {
+          func_graph->DumpFuncGraph(fg_name);
+          ExportIR(fg_name + ".dat", "", func_graph);
+        }
+      }
       if (optimizer->is_on_debug_) {
         status[list_[i]->name_ + std::to_string(i)].push_back(change);
         space = std::max(list_[i]->name_.size(), space);

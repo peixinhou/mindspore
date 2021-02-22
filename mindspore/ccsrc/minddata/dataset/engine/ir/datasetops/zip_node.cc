@@ -1,5 +1,5 @@
 /**
- * Copyright 2020 Huawei Technologies Co., Ltd
+ * Copyright 2020-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,41 +19,81 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <algorithm>
 
 #include "minddata/dataset/engine/datasetops/zip_op.h"
-
+#include "minddata/dataset/engine/opt/pass.h"
 #include "minddata/dataset/util/status.h"
 namespace mindspore {
 namespace dataset {
 
-ZipNode::ZipNode(const std::vector<std::shared_ptr<DatasetNode>> &datasets) : datasets_(datasets) {
-  for (auto dataset : datasets_) {
-    this->children.push_back(dataset);
-  }
+ZipNode::ZipNode(const std::vector<std::shared_ptr<DatasetNode>> &datasets) {
+  nary_op_ = true;
+  for (auto const &child : datasets) AddChild(child);
 }
 
+std::shared_ptr<DatasetNode> ZipNode::Copy() {
+  std::vector<std::shared_ptr<DatasetNode>> empty_vector;
+  empty_vector.clear();
+  auto node = std::make_shared<ZipNode>(empty_vector);
+  return node;
+}
+
+void ZipNode::Print(std::ostream &out) const { out << Name(); }
+
 Status ZipNode::ValidateParams() {
-  if (datasets_.empty()) {
-    std::string err_msg = "ZipNode: datasets to zip are not specified.";
+  RETURN_IF_NOT_OK(DatasetNode::ValidateParams());
+  if (children_.size() < 2) {
+    std::string err_msg = "ZipNode: input datasets are not specified.";
     MS_LOG(ERROR) << err_msg;
     RETURN_STATUS_SYNTAX_ERROR(err_msg);
   }
 
-  if (find(datasets_.begin(), datasets_.end(), nullptr) != datasets_.end()) {
-    std::string err_msg = "ZipNode: zip datasets should not be null.";
+  if (find(children_.begin(), children_.end(), nullptr) != children_.end()) {
+    std::string err_msg = "ZipNode: input datasets should not be null.";
     MS_LOG(ERROR) << err_msg;
     RETURN_STATUS_SYNTAX_ERROR(err_msg);
   }
-
   return Status::OK();
 }
 
-std::vector<std::shared_ptr<DatasetOp>> ZipNode::Build() {
-  // A vector containing shared pointer to the Dataset Ops that this object will create
-  std::vector<std::shared_ptr<DatasetOp>> node_ops;
+Status ZipNode::Build(std::vector<std::shared_ptr<DatasetOp>> *const node_ops) {
+  auto op = std::make_shared<ZipOp>(rows_per_buffer_, connector_que_size_);
+  op->set_total_repeats(GetTotalRepeats());
+  op->set_num_repeats_per_epoch(GetNumRepeatsPerEpoch());
+  node_ops->push_back(op);
+  return Status::OK();
+}
 
-  node_ops.push_back(std::make_shared<ZipOp>(rows_per_buffer_, connector_que_size_));
-  return node_ops;
+// Get Dataset size
+Status ZipNode::GetDatasetSize(const std::shared_ptr<DatasetSizeGetter> &size_getter, bool estimate,
+                               int64_t *dataset_size) {
+  if (dataset_size_ > 0) {
+    *dataset_size = dataset_size_;
+    return Status::OK();
+  }
+  std::vector<int32_t> dataset_sizes;
+  int64_t child_dataset_size;
+  for (auto child : children_) {
+    RETURN_IF_NOT_OK(child->GetDatasetSize(size_getter, estimate, &child_dataset_size));
+    dataset_sizes.push_back(child_dataset_size);
+  }
+
+  *dataset_size = *std::min_element(dataset_sizes.begin(), dataset_sizes.end());
+  dataset_size_ = *dataset_size;
+  return Status::OK();
+}
+
+// Visitor accepting method for IRNodePass
+Status ZipNode::Accept(IRNodePass *const p, bool *const modified) {
+  // Downcast shared pointer then call visitor
+  return p->Visit(shared_from_base<ZipNode>(), modified);
+}
+
+// Visitor accepting method for IRNodePass
+Status ZipNode::AcceptAfter(IRNodePass *const p, bool *const modified) {
+  // Downcast shared pointer then call visitor
+  return p->VisitAfter(shared_from_base<ZipNode>(), modified);
 }
 
 }  // namespace dataset

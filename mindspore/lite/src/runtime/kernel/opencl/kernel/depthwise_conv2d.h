@@ -21,31 +21,39 @@
 #include "src/runtime/kernel/opencl/opencl_kernel.h"
 #include "nnacl/conv_parameter.h"
 
+using mindspore::lite::opencl::MemType;
+
 namespace mindspore::kernel {
 
 class DepthwiseConv2dOpenCLKernel : public OpenCLKernel {
  public:
   DepthwiseConv2dOpenCLKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
-                              const std::vector<lite::Tensor *> &outputs)
-      : OpenCLKernel(parameter, inputs, outputs) {}
+                              const std::vector<lite::Tensor *> &outputs, const lite::InnerContext *ctx,
+                              const mindspore::lite::PrimitiveC *primitive)
+      : OpenCLKernel(parameter, inputs, outputs, ctx, primitive) {
+    bool is_adreno = ocl_runtime_->GetGpuInfo().type == lite::opencl::GpuType::ADRENO;
+    filter_type_ = is_adreno ? MemType::IMG : MemType::BUF;
+  }
 
   ~DepthwiseConv2dOpenCLKernel() override = default;
 
-  int Init() override;
-
   int Run() override;
+  int Prepare() override;
 
-  int InitBuffer() override;
-
-  int GetGlobalSize(size_t idx, std::vector<size_t> *global_size) override;
-
-  int GetLocalSize(size_t idx, const std::vector<size_t> &global_size, std::vector<size_t> *local_size) override;
+  int CheckSpecs() override;
+  int InitWeights() override;
+  void SetConstArgs() override;
+  void SetGlobalLocal() override;
 
  private:
   void *packed_weight_{nullptr};
   void *bias_data_{nullptr};
-  cl::Kernel kernel_;
-  std::vector<int> block_size_{2, 2, 1};
+  struct {
+    int H{2};
+    int W{2};
+    int C{1};
+  } block_size_;
+  MemType filter_type_{MemType::BUF};
 };
 }  // namespace mindspore::kernel
 

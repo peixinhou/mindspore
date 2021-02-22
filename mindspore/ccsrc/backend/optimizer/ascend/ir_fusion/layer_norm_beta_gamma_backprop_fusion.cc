@@ -17,7 +17,7 @@
 #include <memory>
 #include <vector>
 #include "backend/session/anf_runtime_algorithm.h"
-
+#include "utils/trace_base.h"
 namespace mindspore {
 namespace opt {
 using common::SafeCStr;
@@ -36,7 +36,7 @@ void GetOutputCastNodes(const FuncGraphPtr &func_graph, const AnfNodePtr &node, 
     MS_EXCEPTION_IF_NULL(output_cnode);
     if (AnfAlgo::GetCNodeName(output_cnode) != prim::kPrimTupleGetItem->name()) {
       MS_LOG(EXCEPTION) << "The output of node " << node->DebugString() << " should be "
-                        << prim::kPrimTupleGetItem->name();
+                        << prim::kPrimTupleGetItem->name() << " trace: " << trace::DumpSourceLines(node);
     }
     if (manager->node_users().find(output) == manager->node_users().end() ||
         manager->node_users()[output].size() != 1) {
@@ -77,9 +77,9 @@ bool CheckLayernormBetaGammaBackprop(const FuncGraphPtr &func_graph, const CNode
     MS_LOG(INFO) << "The node " << cnode->DebugString() << " has no " << kAttrShapeGamma << " attr";
     return false;
   }
-  if (cnode->inputs().size() != kLayerNormBetaGammaBackpropInputNum) {
+  if (AnfAlgo::GetInputTensorNum(cnode) != kLayerNormBetaGammaBackpropInputTensorNum) {
     MS_LOG(INFO) << "The node " << cnode->DebugString() << " inputs num is not equal to "
-                 << kLayerNormBetaGammaBackpropInputNum;
+                 << kLayerNormBetaGammaBackpropInputTensorNum;
     return false;
   }
   if (AnfAlgo::GetOutputTensorNum(cnode) != kLayerNormBetaGammaBackpropOutputNum) {
@@ -87,7 +87,8 @@ bool CheckLayernormBetaGammaBackprop(const FuncGraphPtr &func_graph, const CNode
                  << kLayerNormBetaGammaBackpropOutputNum;
     return false;
   }
-  for (size_t i = 0; i < AnfAlgo::GetInputTensorNum(cnode); ++i) {
+  size_t input_num = AnfAlgo::GetInputTensorNum(cnode);
+  for (size_t i = 0; i < input_num; ++i) {
     if (AnfAlgo::GetInputDeviceDataType(cnode, i) != kNumberTypeFloat16) {
       MS_LOG(INFO) << "The data type of node " << cnode->DebugString() << " input " << i << " is not float16";
       return false;
@@ -148,13 +149,9 @@ const AnfNodePtr LayerNormBetaGammaBackpropFusion::Process(const FuncGraphPtr &f
   // The cast_nodes size has been checked above.
   MS_EXCEPTION_IF_NULL(cast_nodes[0]);
   MS_EXCEPTION_IF_NULL(cast_nodes[1]);
-  if (cast_nodes[0]->inputs().size() != kCastInputNum) {
-    MS_LOG(EXCEPTION) << "The cast0 " << cast_nodes[0]->DebugString() << " input size should be " << kCastInputNum;
-  }
+  CheckCNodeInputSize(cast_nodes[0], kCastInputTensorNum);
+  CheckCNodeInputSize(cast_nodes[1], kCastInputTensorNum);
   (void)manager->Replace(cast_nodes[0], cast_nodes[0]->input(1));
-  if (cast_nodes[1]->inputs().size() != kCastInputNum) {
-    MS_LOG(EXCEPTION) << "The cast1 " << cast_nodes[1]->DebugString() << " input size should be " << kCastInputNum;
-  }
   (void)manager->Replace(cast_nodes[1], cast_nodes[1]->input(1));
   return nullptr;
 }

@@ -18,36 +18,36 @@
 #define MINDSPORE_LITE_SRC_RUNTIME_KERNEL_OPENCL_KERNEL_ARITHMETIC_H_
 
 #include <vector>
+#include <set>
+#include <string>
 #include "src/runtime/kernel/arm/fp32/arithmetic_fp32.h"
 #include "src/runtime/kernel/opencl/opencl_kernel.h"
 
 namespace mindspore::kernel {
 
+extern std::set<schema::PrimitiveType> SupportedOpenCLArithmetics;
+
 class ArithmeticOpenCLKernel : public OpenCLKernel {
  public:
-  ArithmeticOpenCLKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
-                         const std::vector<lite::Tensor *> &outputs)
-      : OpenCLKernel(parameter, inputs, outputs) {}
+  using OpenCLKernel::OpenCLKernel;
   ~ArithmeticOpenCLKernel() override = default;
 
-  int Init() override;
   int Run() override;
-  int InitBuffer() override;
-  int SetArgs();
+  int Prepare() override;
+  int CheckSpecs() override;
+  int InitWeights() override;
+  void SetConstArgs() override;
+  void SetGlobalLocal() override;
 
  private:
-  std::vector<size_t> InitGlobalSize() const;
-  void Image2dGetWorkGroupSize();
-
-  cl::Kernel kernel_;
   bool element_flag_{true};
   float activation_min_{-FLT_MAX};
   float activation_max_{FLT_MAX};
-  std::vector<std::vector<int>> inputs_nhwc_shapes_;
-  std::vector<void *> inputs_weight_ptrs_;
-
-  std::vector<size_t> local_size_;
-  std::vector<size_t> global_size_;
+  GpuTensorInfo in0_shape_;
+  GpuTensorInfo in1_shape_;
+  GpuTensorInfo out_shape_;
+  std::vector<void *> weight_ptrs_;
+  std::string kernel_name_;
 };
 }  // namespace mindspore::kernel
 

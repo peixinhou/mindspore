@@ -48,12 +48,10 @@ Status CachePool::DoServiceStop() {
   }
   sm_.reset();
 
-  value_allocator alloc(mp_);
-  for (auto &bl : *tree_) {
-    if (bl.ptr != nullptr) {
-      alloc.deallocate(bl.ptr, bl.sz);
-    }
-  }
+  // We used to free the memory allocated from each DataLocator but
+  // since all of them are coming from NumaMemoryPool and we will
+  // skip this and release the whole NumaMemoryPool instead. Otherwise
+  // release each buffer in the DataLocator one by one.
 
   tree_.reset();
   if (!root_.toString().empty()) {
@@ -110,7 +108,7 @@ Status CachePool::Insert(CachePool::key_type key, const std::vector<ReadableSlic
       bl.ptr = nullptr;
       return rc;
     }
-  } else if (rc.IsOutofMemory()) {
+  } else if (rc == StatusCode::kMDOutOfMemory) {
     // If no memory, write to disk.
     if (sm_ != nullptr) {
       MS_LOG(DEBUG) << "Spill to disk directly ... " << bl.sz << " bytes.";
@@ -118,7 +116,7 @@ Status CachePool::Insert(CachePool::key_type key, const std::vector<ReadableSlic
     } else {
       // If asked to spill to disk instead but there is no storage set up, simply return no memory
       // instead.
-      return Status(StatusCode::kOutOfMemory, __LINE__, __FILE__);
+      return Status(StatusCode::kMDOutOfMemory, __LINE__, __FILE__, "No enough storage for cache server to cache data");
     }
   } else {
     return rc;
@@ -127,7 +125,7 @@ Status CachePool::Insert(CachePool::key_type key, const std::vector<ReadableSlic
   try {
     rc = tree_->DoInsert(key, bl);
   } catch (const std::bad_alloc &e) {
-    rc = Status(StatusCode::kOutOfMemory, __LINE__, __FILE__);
+    rc = Status(StatusCode::kMDOutOfMemory, __LINE__, __FILE__);
   }
   // Duplicate key is treated as error and we will also free the memory.
   if (rc.IsError() && bl.ptr != nullptr) {
@@ -170,12 +168,14 @@ Path CachePool::GetSpillPath() const {
 }
 
 CachePool::CacheStat CachePool::GetStat(bool GetMissingKeys) const {
+  tree_->LockShared();  // Prevent any node split while we search.
   CacheStat cs{-1, -1, 0, 0, 0, 0};
   int64_t total_sz = 0;
   if (tree_->begin() != tree_->end()) {
     cs.min_key = tree_->begin().key();
     cs.max_key = cs.min_key;  // will adjust later.
     for (auto it = tree_->begin(); it != tree_->end(); ++it) {
+      it.LockShared();
       total_sz += it.value().sz;
       if (it.value().ptr != nullptr) {
         ++cs.num_mem_cached;
@@ -192,6 +192,7 @@ CachePool::CacheStat CachePool::GetStat(bool GetMissingKeys) const {
         }
       }
       cs.max_key = cur_key;
+      it.Unlock();
     }
   }
   if (total_sz > 0) {
@@ -201,6 +202,7 @@ CachePool::CacheStat CachePool::GetStat(bool GetMissingKeys) const {
       cs.average_cache_sz = 1;
     }
   }
+  tree_->Unlock();
   return cs;
 }
 

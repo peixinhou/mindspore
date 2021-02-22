@@ -64,20 +64,32 @@ int Fill::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> output
     MS_LOG(ERROR) << "Fill input or output is null!";
     return RET_ERROR;
   }
-  if (inputs_.size() != kSingleNum || outputs_.size() != kSingleNum) {
+  if ((inputs_.size() != kSingleNum && inputs_.size() != kDoubleNum) || outputs_.size() != kSingleNum) {
     MS_LOG(ERROR) << "input size: " << inputs_.size() << ", output size: " << outputs_.size();
     return RET_INPUT_TENSOR_ERROR;
   }
   output->set_data_type(input->data_type());
   output->set_format(input->format());
   if (!infer_flag()) {
-    return RET_OK;
+    return RET_INFER_INVALID;
   }
 
   std::vector<int> output_shape;
-  for (size_t i = 0; i < GetDims().size(); i++) {
-    output_shape.push_back(GetDims().at(i));
+  auto param_dims = GetDims();
+  for (size_t i = 0; i < param_dims.size(); i++) {
+    output_shape.push_back(param_dims.at(i));
   }
+
+  if (inputs_.size() == kDoubleNum) {
+    auto input_dims = inputs_.at(1);
+    MS_ASSERT(input_dims != nullptr);
+    if (input_dims->data_c() == nullptr) {
+      return RET_INFER_INVALID;
+    }
+    int *dims_data = reinterpret_cast<int *>(input_dims->data_c());
+    output_shape = std::vector<int>{dims_data, dims_data + input_dims->ElementsNum()};
+  }
+
   output->set_shape(output_shape);
   return RET_OK;
 }

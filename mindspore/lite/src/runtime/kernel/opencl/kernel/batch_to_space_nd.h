@@ -25,18 +25,19 @@ namespace mindspore::kernel {
 
 class BatchToSpaceNDOpenCLKernel : public OpenCLKernel {
  public:
-  BatchToSpaceNDOpenCLKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
-                             const std::vector<lite::Tensor *> &outputs)
-      : OpenCLKernel(parameter, inputs, outputs) {}
+  using OpenCLKernel::OpenCLKernel;
 
   ~BatchToSpaceNDOpenCLKernel() override = default;
 
-  int Init() override;
-
   int Run() override;
+  int Prepare() override;
+
+  int CheckSpecs() override;
+  void SetConstArgs() override;
+  void SetGlobalLocal() override;
+  int Tune() override { return lite::RET_OK; }
 
  private:
-  cl::Kernel kernel_;
 };
 }  // namespace mindspore::kernel
 #endif

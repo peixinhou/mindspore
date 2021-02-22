@@ -21,6 +21,7 @@
 #include <map>
 #include <string>
 #include <vector>
+#include <utility>
 
 #include "frontend/parallel/device.h"
 #include "frontend/parallel/status.h"
@@ -40,7 +41,7 @@ class Group {
   Status Init(const std::string &name, const std::vector<Device> &devices);
   std::vector<Device> GetDevicesList() const;
   std::string name() const { return name_; }
-  bool IsInThisGroup(int32_t device_rank);
+  bool IsInThisGroup(int64_t device_rank);
   Status GetIndex(size_t *index);
   size_t GetDevNum() const { return devices_.size(); }
 
@@ -57,11 +58,12 @@ class GroupManager {
   Status CreateGroup(const std::string &name, const std::vector<Device> &devices, Group *group);
   Status DestroyGroup(Group *group);
   Status DestroyAllGroups();
-  Status GetRankID(const std::string &name, unsigned int *rank_id);
-  Status GetRankSize(const std::string &name, unsigned int *rank_size);
+  Status GetRankID(const std::string &name, uint32_t *rank_id);
+  Status GetRankSize(const std::string &name, uint32_t *rank_size);
   Status FindGroup(const std::string &name, Group **group);
   std::string world_group() const { return world_group_; }
   void set_world_group(const std::string &name) { world_group_ = name; }
+  std::vector<std::pair<std::string, std::vector<uint32_t>>> group_info() const { return group_info_; }
   void Clear();
 
  private:
@@ -69,7 +71,10 @@ class GroupManager {
   // the key is group name (name_)
   std::map<std::string, Group> groups_;
   std::string world_group_;
+  std::vector<std::pair<std::string, std::vector<uint32_t>>> group_info_;
 };
+
+Status CreateGroups(const std::vector<std::pair<std::string, std::vector<uint32_t>>> &group_info);
 }  // namespace parallel
 }  // namespace mindspore
 

@@ -1,4 +1,4 @@
-# Copyright 2020 Huawei Technologies Co., Ltd
+# Copyright 2020-2021 Huawei Technologies Co., Ltd
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,7 +15,46 @@
 """GraphKernel model builder"""
 
 import copy
-from .model import PrimLib, Tensor, Value, Operator, Graph, AlignShape, AddControlBuddy
+from .model import PrimLib, Tensor, Value, Operator, Graph, AlignShape, AddControlBuddy, DataFormat
+
+
+def get_tile_output_shape(shape, multiples):
+    """compute output shape of tile"""
+
+    if multiples is None:
+        return shape
+    if not isinstance(shape, (list, tuple)):
+        raise TypeError("Input shape of Tile must be of type list or tuple")
+    if not isinstance(multiples, (list, tuple)):
+        raise TypeError("multiples of Tile must be of type list or tuple")
+
+    shape = list(shape)
+    multiples = list(multiples)
+    diff_len = len(multiples) - len(shape)
+    if diff_len < 0:
+        raise ValueError("Dimensions of multiples{} < dimensions of input{} in Tile".format(multiples, shape))
+    if diff_len > 0:
+        for _ in range(diff_len):
+            shape.insert(0, 1)
+
+    shape_compatible = True
+    output_shape = []
+    input_reshape = []
+    output_reshape = []
+    for sh, mul in list(zip(shape, multiples)):
+        dim = sh * mul
+        output_shape.append(dim)
+        if sh == 1 or mul == 1:
+            input_reshape.append(sh)
+            output_reshape.append(dim)
+        else:
+            shape_compatible = False
+            input_reshape.append(1)
+            input_reshape.append(sh)
+            output_reshape.append(mul)
+            output_reshape.append(sh)
+
+    return output_shape, input_reshape, output_reshape, shape_compatible
 
 
 class OpInfer:
@@ -31,7 +70,7 @@ class OpInfer:
 
         real_shape = []
         for i, _ in enumerate(shape):
-            if i not in attrs['reduce_axis']:
+            if i not in attrs['reduce_axis'] and i - len(shape) not in attrs['reduce_axis']:
                 real_shape.append(shape[i])
         return real_shape
 
@@ -51,6 +90,7 @@ class OpInfer:
 
     default_infer_shape_func = [
         None,
+        None,
         default_elementwise_infer.__func__,
         lambda inputs, attrs: max([t.shape for t in inputs]),
         default_reduce_infer.__func__,
@@ -66,17 +106,36 @@ class OpInfer:
     @staticmethod
     def default_infer_format_func(inputs, attrs):
         """Infer format"""
-        return inputs[0].data_format
+        result = inputs[0].data_format
+        # default_format and other_format results in other_format
+        for input_tensor in inputs[1:]:
+            data_format = input_tensor.data_format
+            if data_format != DataFormat.DEFAULT:
+                if result not in [DataFormat.DEFAULT, data_format]:
+                    raise RuntimeError("Incompatible data format %s and %s" % (data_format, result))
+                result = data_format
+        return result
 
     infer_shape_func = {
         # add special infer func here
+        'InplaceAssign': lambda inputs, attrs: inputs[2].shape,
+        'Reshape': lambda inputs, attrs: attrs["shape"],
+        'BroadcastTo': lambda inputs, attrs: attrs["shape"],
+        'Tile': lambda inputs, attrs: get_tile_output_shape(inputs[0].shape, attrs["multiples"])[0],
+        'ExpandDims': lambda inputs, attrs: list(inputs[0].shape).insert(attrs["axis"], 1),
     }
     infer_dtype_func = {
         # add special infer func here
         'Cast': lambda inputs, attrs: attrs['dst_type'],
+        'Less': lambda inputs, attrs: "bool",
+        'LessEqual': lambda inputs, attrs: "bool",
+        'Equal': lambda inputs, attrs: "bool",
+        'Greater': lambda inputs, attrs: "bool",
+        'GreaterEqual': lambda inputs, attrs: "bool",
     }
     infer_format_func = {
         # add special infer func here
+        'Reshape': lambda inputs, attrs: "DefaultFormat",
     }
 
     @classmethod
@@ -144,11 +203,13 @@ class GraphBuilder:
             shape = [1]
         return Tensor(name, shape, dtype, data_format, para_type=para_type)
 
-    def value(self, dtype, value, data_format, name=None):
+    def value(self, dtype, value, name=None):
         """Create a new Value"""
         if name in (None, ''):
             name = self._alloc_tensor_name()
-        return Value(name, dtype, value, data_format)
+
+        v = Value(name, dtype, value)
+        return v
 
     def op(self, prim, output, inputs, attrs=None):
         """Insert an operator into graph"""
@@ -165,9 +226,9 @@ class GraphBuilder:
         """Emit a new operation"""
         if attrs is None:
             attrs = {}
-        if isinstance(inputs, Tensor):
+        if isinstance(inputs, (Tensor, Value)):
             inputs = [inputs]
-        tensor_inputs = [t for t in inputs if isinstance(t, Tensor)]
+        tensor_inputs = [t for t in inputs if isinstance(t, (Tensor, Value))]
         out_shape, out_dtype, out_format = OpInfer.infer(prim, tensor_inputs, attrs)
         output = self.tensor(out_shape, out_dtype, out_format, name)
         self.op(prim, output, inputs, attrs)
@@ -193,6 +254,16 @@ class CompositeGraph:
     def load(self, desc):
         """Load Graph from json"""
         def _attr_of(op, inputs, output):
+            def _get_axis_while_none(input_shape, output_shape):
+                red_axis = []
+                if len(output_shape) == len(input_shape):
+                    for i, s in enumerate(output_shape):
+                        if s == 1 and input_shape[i] > 1:
+                            red_axis.append(i)
+                else:
+                    red_axis = list(range(len(output_shape)))
+                return red_axis
+
             attr = {}
             if op['name'] not in ('ReduceSum', 'ReduceMax', 'ReduceMin'):
                 return attr
@@ -200,10 +271,7 @@ class CompositeGraph:
                 if a['name'] == 'axis':
                     red_axis, dim_size = [], len(inputs[0].shape)
                     if not a['value']:
-                        assert len(output.shape) == len(inputs[0].shape)
-                        for i in range(len(output.shape)):
-                            if output.shape[i] == 1 and inputs[0].shape[i] > 1:
-                                red_axis.append(i)
+                        red_axis = _get_axis_while_none(inputs[0].shape, output.shape)
                     else:
                         if isinstance(a['value'], int):
                             a['value'] = [a['value']]
@@ -215,7 +283,7 @@ class CompositeGraph:
 
         builder = GraphBuilder()
         with builder.graph_scope(desc['op']):
-            for in_desc in desc['input_desc']:
+            for in_desc in desc['input_desc'] if desc['input_desc'] is not None else []:
                 name, shape, dtype, data_format = in_desc[0]['tensor_name'], in_desc[
                     0]['shape'], in_desc[0]['data_type'], in_desc[0]['format']
                 self.tensors[name] = builder.tensor(
@@ -253,6 +321,14 @@ class CompositeGraph:
                             cur_fusion = None
         self.graph = builder.get()[0]
         self.desc = desc
+
+    def add_stitch_info(self, subgraph, desc):
+        if subgraph.stitch_info and subgraph.stitch_info.stitch_ops:
+            buffer_stitch = {'stitch_op': list(subgraph.stitch_info.stitch_ops)}
+            if subgraph.stitch_info.stitch_atomic_ops:
+                buffer_stitch['stitch_atomic_op'] = list(subgraph.stitch_info.stitch_atomic_ops)
+            desc['buffer_stitch'] = buffer_stitch
+        return desc
 
     def dump(self, subgraph):
         """Dump Graph to json"""
@@ -309,6 +385,8 @@ class CompositeGraph:
                 desc[key] = subgraph.name
             else:
                 desc[key] = self.desc[key]
+
+        desc = self.add_stitch_info(subgraph, desc)
         return desc
 
 

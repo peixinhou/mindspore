@@ -78,18 +78,19 @@ class TensorData {
 
 using TensorDataPtr = std::shared_ptr<TensorData>;
 
-struct WaitEvent {
-  bool need_wait_{false};
-  mutable std::mutex mutex_;
-  mutable std::condition_variable cond_var_;
+class WaitEvent : public ExceptionListener {
+ public:
+  void OnException() override { set_need_wait(false); }
 
   void Wait() const {
     std::unique_lock<std::mutex> lock(mutex_);
     if (!need_wait_) {
       return;
     }
+    MsException::Instance().SetExceptionListener(const_cast<WaitEvent *>(this));
     cond_var_.wait(lock, [this] { return !need_wait_; });
-    MsException::GetInstance().CheckException();
+    MsException::Instance().SetExceptionListener(nullptr);
+    MsException::Instance().CheckException();
   }
 
   void set_need_wait(bool need_wait) {
@@ -101,6 +102,11 @@ struct WaitEvent {
   }
 
   bool need_wait() const { return need_wait_; }
+
+ private:
+  bool need_wait_{false};
+  mutable std::mutex mutex_;
+  mutable std::condition_variable cond_var_;
 };
 
 // Tensor entity class
@@ -160,7 +166,7 @@ class Tensor : public MetaTensor {
   // param data_type [TypeId] data type
   explicit Tensor(const std::vector<double> &input, const TypePtr &data_type = nullptr);
 
-  // brief Create 0 dimension tensor from an int scalar.
+  // brief Create 0 dimension tensor from an int64_t scalar.
   //
   // param input [int64] the data for tensor
   // param data_type [TypeId] data type
@@ -171,6 +177,18 @@ class Tensor : public MetaTensor {
   // param input [double] the data for tensor
   // param data_type [TypeId] data type
   explicit Tensor(double input, const TypePtr &data_type = nullptr);
+
+  // brief Create 0 dimension tensor from a uint scalar.
+  //
+  // param input [uint] the data for tensor
+  // param data_type [TypeId] data type
+  explicit Tensor(uint64_t input, const TypePtr &data_type = nullptr);
+
+  // brief Create 0 dimension tensor from a bool scalar.
+  //
+  // param input [bool] the data for tensor
+  // param data_type [TypeId] data type
+  explicit Tensor(bool input, const TypePtr &data_type = nullptr);
 
   ~Tensor() override = default;
 
@@ -188,7 +206,7 @@ class Tensor : public MetaTensor {
   // it do real value comparison.
   bool ValueEqual(const Tensor &tensor) const;
 
-  // assgin value to this tensor
+  // assign value to this tensor
   Tensor &AssignValue(const Tensor &tensor);
 
   bool operator==(const Value &other) const override {
@@ -273,6 +291,18 @@ class Tensor : public MetaTensor {
   TypePtr cast_dtype() { return cast_dtype_; }
   void set_cast_dtype(TypePtr dtype = nullptr) { cast_dtype_ = dtype; }
 
+  // used if cache_enable, in order to update tensor from cache to host
+  bool cache_enable() const { return cache_enable_; }
+  void set_cache_enable(bool cache_enable = true) { cache_enable_ = cache_enable; }
+  std::shared_ptr<Tensor> hashmap_tensor_ptr() const { return hashmap_tensor_ptr_; }
+  void set_hashmap_tensor_ptr(std::shared_ptr<Tensor> hashmap_tensor_ptr = nullptr) {
+    hashmap_tensor_ptr_ = hashmap_tensor_ptr;
+  }
+  std::shared_ptr<Tensor> cache_tensor_ptr() const { return cache_tensor_ptr_; }
+  void set_cache_tensor_ptr(std::shared_ptr<Tensor> cache_tensor_ptr = nullptr) {
+    cache_tensor_ptr_ = cache_tensor_ptr;
+  }
+
   void SetNeedWait(bool need_wait) {
     if (event_ != nullptr) {
       event_->set_need_wait(need_wait);
@@ -317,6 +347,9 @@ class Tensor : public MetaTensor {
   mutable TensorSyncStatus sync_status_{kNeedSyncHostToDevice};
   bool graph_output_{false};
   DeviceSyncPtr device_sync_{nullptr};
+  bool cache_enable_{false};
+  std::shared_ptr<Tensor> cache_tensor_ptr_{nullptr};
+  std::shared_ptr<Tensor> hashmap_tensor_ptr_{nullptr};
   std::vector<Axis> padding_type_;
   TypePtr cast_dtype_{nullptr};
 };

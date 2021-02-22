@@ -68,7 +68,7 @@ TEST_F(TestHWTopKSplit, test_topk_split) {
    *     return output
    */
   FuncGraphPtr g = get_py_fun_.CallAndParseRet("test_topk_split", "before");
-  std::vector<int> shp{4, 4};
+  std::vector<int64_t> shp{4, 4};
   auto x_abstract = std::make_shared<abstract::AbstractTensor>(kFloat32, shp);
   AbstractBasePtrList args_spec_list{x_abstract};
   auto kernel_graph = GetKernelGraph(g, args_spec_list);
@@ -89,7 +89,7 @@ TEST_F(TestHWTopKSplit, test_topk_split) {
   EXPECT_TRUE(value_node->value()->isa<tensor::Tensor>());
   auto tensor = value_node->value()->cast<tensor::TensorPtr>();
   EXPECT_EQ(tensor->shape().size(), 1);
-  EXPECT_EQ(tensor->shape()[0], 8);
+  EXPECT_EQ(tensor->shape()[0], 4096*2);
 }
 
 TEST_F(TestHWTopKSplit, test_topk_no_split) {
@@ -100,7 +100,7 @@ TEST_F(TestHWTopKSplit, test_topk_no_split) {
    *     return output
    */
   FuncGraphPtr g = get_py_fun_.CallAndParseRet("test_topk_split", "before");
-  std::vector<int> shp{4, 4};
+  std::vector<int64_t> shp{4, 4};
   auto x_abstract = std::make_shared<abstract::AbstractTensor>(kFloat32, shp);
   AbstractBasePtrList args_spec_list{x_abstract};
   auto kernel_graph = GetKernelGraph(g, args_spec_list);
@@ -113,7 +113,7 @@ TEST_F(TestHWTopKSplit, test_topk_no_split) {
   ConstInputToAttr(topk_cnode, attr_index);
   EXPECT_EQ(topk_cnode->inputs().size(), 2);
   input_names_vec = AnfAlgo::GetNodeAttr<std::vector<std::string>>(topk_cnode, kAttrInputNames);
-  EXPECT_EQ(input_names_vec.size(), 1);
+  EXPECT_EQ(input_names_vec.size(), 2);
 
   auto optimizer = std::make_shared<opt::GraphOptimizer>();
   auto pm = std::make_shared<opt::PassManager>();

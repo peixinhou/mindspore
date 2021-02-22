@@ -1,4 +1,4 @@
-# Copyright 2020 Huawei Technologies Co., Ltd
+# Copyright 2020-2021 Huawei Technologies Co., Ltd
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,14 +13,13 @@
 # limitations under the License.
 # ============================================================================
 
-""" GradCAM and GuidedGradCAM. """
+"""GradCAM."""
 
 from mindspore.ops import operations as op
+from mindspore.explainer._utils import ForwardProbe, retrieve_layer, unify_inputs, unify_targets
 
-from .backprop_utils import compute_gradients
+from .backprop_utils import get_bp_weights, GradNet
 from .intermediate_layer import IntermediateLayerAttribution
-from ...._utils import ForwardProbe, retrieve_layer, unify_inputs, unify_targets
-
 
 
 def _gradcam_aggregation(attributions):
@@ -65,8 +64,20 @@ class GradCAM(IntermediateLayerAttribution):
             layer for better practice. If it is '', the explantion will be generated at the input layer.
             Default: ''.
 
+    Inputs:
+        - **inputs** (Tensor) - The input data to be explained, a 4D tensor of shape :math:`(N, C, H, W)`.
+        - **targets** (Tensor, int) - The label of interest. It should be a 1D or 0D tensor, or an integer.
+          If it is a 1D tensor, its length should be the same as `inputs`.
+
+    Outputs:
+        Tensor, a 4D tensor of shape :math:`(N, 1, H, W)`.
+
     Examples:
+        >>> import numpy as np
+        >>> import mindspore as ms
         >>> from mindspore.explainer.explanation import GradCAM
+        >>> from mindspore.train.serialization import load_checkpoint, load_param_into_net
+        >>> # load a trained network
         >>> net = resnet50(10)
         >>> param_dict = load_checkpoint("resnet50.ckpt")
         >>> load_param_into_net(net, param_dict)
@@ -74,12 +85,12 @@ class GradCAM(IntermediateLayerAttribution):
         >>> layer_name = 'layer4'
         >>> # init GradCAM with a trained network and specify the layer to obtain attribution
         >>> gradcam = GradCAM(net, layer=layer_name)
+        >>> inputs = ms.Tensor(np.random.rand(1, 3, 224, 224), ms.float32)
+        >>> label = 5
+        >>> saliency = gradcam(inputs, label)
     """
 
-    def __init__(
-            self,
-            network,
-            layer=""):
+    def __init__(self, network, layer=""):
         super(GradCAM, self).__init__(network, layer)
 
         self._saliency_cell = retrieve_layer(self._backward_model, target_layer=layer)
@@ -98,28 +109,12 @@ class GradCAM(IntermediateLayerAttribution):
         """
         Hook function to deal with the backward gradient.
 
-        The arguments are set as required by Cell.register_back_hook
+        The arguments are set as required by `Cell.register_backward_hook`.
         """
         self._intermediate_grad = grad_input
 
     def __call__(self, inputs, targets):
-        """
-        Call function for `GradCAM`.
-
-        Args:
-            inputs (Tensor): The input data to be explained, a 4D tensor of shape :math:`(N, C, H, W)`.
-            targets (Tensor, int): The label of interest. It should be a 1D or 0D tensor, or an integer.
-                If it is a 1D tensor, its length should be the same as `inputs`.
-
-        Returns:
-            Tensor, a 4D tensor of shape :math:`(N, 1, H, W)`.
-
-        Examples:
-            >>> inputs = ms.Tensor(np.random.rand([1, 3, 224, 224]), ms.float32)
-            >>> label = 5
-            >>> # gradcam is a GradCAM object, parse data and the target label to be explained and get the attribution
-            >>> saliency = gradcam(inputs, label)
-        """
+        """Call function for `GradCAM`."""
         self._verify_data(inputs, targets)
         self._hook_cell()
 
@@ -128,8 +123,9 @@ class GradCAM(IntermediateLayerAttribution):
             inputs = unify_inputs(inputs)
             targets = unify_targets(targets)
 
-            gradients = compute_gradients(self._backward_model, *inputs, targets)
-
+            weights = get_bp_weights(self._backward_model, *inputs, targets)
+            grad_net = GradNet(self._backward_model)
+            gradients = grad_net(*inputs, weights)
             # get intermediate activation
             activation = (probe.value,)
 

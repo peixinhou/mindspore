@@ -32,7 +32,7 @@ CacheServerHW::CacheServerHW() {
   MS_LOG(DEBUG) << "Number of cpu(s) : " << num_cpus_;
 #ifdef NUMA_ENABLED
   if (numa_enabled()) {
-    MS_LOG(WARNING) << "Numa support enabled";
+    MS_LOG(INFO) << "Numa support enabled";
     for (auto i = 0; i <= numa_max_node(); ++i) {
       int64_t free_avail;
       int64_t mem_avail = numa_node_size(i, &free_avail);
@@ -115,8 +115,8 @@ Status CacheServerHW::GetNumaNodeInfo() {
   const char kCpuList[] = "cpulist";
   auto r = std::regex("[0-9]*-[0-9]*");
   for (Path p : numa_nodes_) {
-    auto node_dir = p.Basename().data();
-    numa_id_t numa_node = strtol(node_dir + strlen(kNodeName), nullptr, 10);
+    auto node_dir = p.Basename();
+    numa_id_t numa_node = strtol(node_dir.data() + strlen(kNodeName), nullptr, 10);
     Path f = p / kCpuList;
     std::ifstream fs(f.toString());
     CHECK_FAIL_RETURN_UNEXPECTED(!fs.fail(), "Fail to open file: " + f.toString());
@@ -131,6 +131,7 @@ Status CacheServerHW::GetNumaNodeInfo() {
       while (iter != end) {
         auto match = iter->str();
         auto pos = match.find_first_of('-');
+        CHECK_FAIL_RETURN_UNEXPECTED(pos != std::string::npos, "Failed to parse numa node file");
         std::string min = match.substr(0, pos);
         std::string max = match.substr(pos + 1);
         cpu_id_t cpu_min = strtol(min.data(), nullptr, 10);
@@ -154,6 +155,9 @@ Status CacheServerHW::GetNumaNodeInfo() {
 }
 
 Status CacheServerHW::SetAffinity(const Task &tk, numa_id_t numa_node) {
+#if defined(__APPLE__)
+  return Status::OK();
+#else
   auto r = numa_cpuset_.find(numa_node);
   if (r != numa_cpuset_.end()) {
     auto err = pthread_setaffinity_np(tk.GetNativeHandle(), sizeof(r->second), &r->second);
@@ -165,6 +169,7 @@ Status CacheServerHW::SetAffinity(const Task &tk, numa_id_t numa_node) {
     RETURN_STATUS_UNEXPECTED("Numa node " + std::to_string(numa_node) + " not found");
   }
   return Status::OK();
+#endif
 }
 
 std::vector<cpu_id_t> CacheServerHW::GetCpuList(numa_id_t numa_id) {
@@ -182,6 +187,9 @@ std::vector<cpu_id_t> CacheServerHW::GetCpuList(numa_id_t numa_id) {
 }
 
 numa_id_t CacheServerHW::GetMyNode() const {
+#if defined(__APPLE__)
+  numa_id_t node_id = -1;
+#else
   numa_id_t node_id = 0;
   auto cpu = sched_getcpu();
 #ifdef NUMA_ENABLED
@@ -197,7 +205,8 @@ numa_id_t CacheServerHW::GetMyNode() const {
     }
   }
   MS_LOG(DEBUG) << "cpu id " << cpu << " found : " << std::boolalpha << found;
-#endif
+#endif  // end NUMA_ENABLED
+#endif  // end __APPLE__
   return node_id;
 }
 
@@ -205,6 +214,14 @@ void CacheServerHW::InterleaveMemory(void *ptr, size_t sz) {
 #ifdef NUMA_ENABLED
   if (numa_enabled()) {
     numa_interleave_memory(ptr, sz, numa_all_nodes_ptr);
+  }
+#endif
+}
+
+void CacheServerHW::AssignToNode(numa_id_t numa_id, void *ptr, size_t sz) {
+#ifdef NUMA_ENABLED
+  if (numa_enabled()) {
+    numa_tonode_memory(ptr, sz, numa_id);
   }
 #endif
 }

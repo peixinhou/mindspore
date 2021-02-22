@@ -50,14 +50,19 @@ class ImageGradients(Cell):
         - **dy** (Tensor) - vertical image gradients, the same type and shape as input.
         - **dx** (Tensor) - horizontal image gradients, the same type and shape as input.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> net = nn.ImageGradients()
-        >>> image = Tensor(np.array([[[[1,2],[3,4]]]]), dtype=mstype.int32)
-        >>> net(image)
-        [[[[2,2]
-           [0,0]]]]
-        [[[[1,0]
-           [1,0]]]]
+        >>> image = Tensor(np.array([[[[1, 2], [3, 4]]]]), dtype=mindspore.int32)
+        >>> output = net(image)
+        >>> print(output)
+        (Tensor(shape=[1, 1, 2, 2], dtype=Int32, value=
+        [[[[2, 2],
+           [0, 0]]]]), Tensor(shape=[1, 1, 2, 2], dtype=Int32, value=
+        [[[[1, 0],
+           [1, 0]]]]))
     """
     def __init__(self):
         super(ImageGradients, self).__init__()
@@ -181,7 +186,7 @@ def _compute_multi_channel_loss(c1, c2, img1, img2, conv, concat, mean):
 
 class SSIM(Cell):
     r"""
-    Returns SSIM index between img1 and img2.
+    Returns SSIM index between two images.
 
     Its implementation is based on Wang, Z., Bovik, A. C., Sheikh, H. R., & Simoncelli, E. P. (2004). `Image quality
     assessment: from error visibility to structural similarity <https://ieeexplore.ieee.org/document/1284395>`_.
@@ -209,12 +214,17 @@ class SSIM(Cell):
     Outputs:
         Tensor, has the same dtype as img1. It is a 1-D tensor with shape N, where N is the batch num of img1.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> net = nn.SSIM()
-        >>> img1 = Tensor(np.random.random((1,3,16,16)), mindspore.float32)
-        >>> img2 = Tensor(np.random.random((1,3,16,16)), mindspore.float32)
-        >>> ssim = net(img1, img2)
-        [0.12174469]
+        >>> np.random.seed(0)
+        >>> img1 = Tensor(np.random.random((1, 3, 16, 16)), mindspore.float32)
+        >>> img2 = Tensor(np.random.random((1, 3, 16, 16)), mindspore.float32)
+        >>> output = net(img1, img2)
+        >>> print(output)
+        [-0.15189075]
     """
     def __init__(self, max_val=1.0, filter_size=11, filter_sigma=1.5, k1=0.01, k2=0.03):
         super(SSIM, self).__init__()
@@ -256,7 +266,7 @@ def _downsample(img1, img2, op):
 
 class MSSSIM(Cell):
     r"""
-    Returns MS-SSIM index between img1 and img2.
+    Returns MS-SSIM index between two images.
 
     Its implementation is based on Wang, Zhou, Eero P. Simoncelli, and Alan C. Bovik. `Multiscale structural similarity
     for image quality assessment <https://ieeexplore.ieee.org/document/1292216>`_.
@@ -286,11 +296,17 @@ class MSSSIM(Cell):
     Outputs:
         Tensor, the value is in range [0, 1]. It is a 1-D tensor with shape N, where N is the batch num of img1.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> net = nn.MSSSIM(power_factors=(0.033, 0.033, 0.033))
-        >>> img1 = Tensor(np.random.random((1,3,128,128)))
-        >>> img2 = Tensor(np.random.random((1,3,128,128)))
-        >>> msssim = net(img1, img2)
+        >>> np.random.seed(0)
+        >>> img1 = Tensor(np.random.random((1, 3, 128, 128)))
+        >>> img2 = Tensor(np.random.random((1, 3, 128, 128)))
+        >>> output = net(img1, img2)
+        >>> print(output)
+        [0.20607519]
     """
     def __init__(self, max_val=1.0, power_factors=(0.0448, 0.2856, 0.3001, 0.2363, 0.1333), filter_size=11,
                  filter_sigma=1.5, k1=0.01, k2=0.03):
@@ -316,13 +332,14 @@ class MSSSIM(Cell):
         self.reduce_mean = P.ReduceMean()
         self.prod = P.ReduceProd()
         self.pow = P.Pow()
-        self.pack = P.Pack(axis=-1)
+        self.stack = P.Stack(axis=-1)
         self.concat = P.Concat(axis=1)
 
     def construct(self, img1, img2):
         _check_input_4d(F.shape(img1), "img1", self.cls_name)
         _check_input_4d(F.shape(img2), "img2", self.cls_name)
-        _check_input_dtype(F.dtype(img1), 'img1', mstype.number_type, self.cls_name)
+        valid_type = [mstype.float64, mstype.float32, mstype.float16, mstype.uint8]
+        _check_input_dtype(F.dtype(img1), 'img1', valid_type, self.cls_name)
         P.SameTypeShape()(img1, img2)
         dtype_max_val = _get_dtype_max(F.dtype(img1))
         max_val = F.scalar_cast(self.max_val, F.dtype(img1))
@@ -343,7 +360,7 @@ class MSSSIM(Cell):
             img1, img2 = _downsample(img1, img2, self.avg_pool)
 
         mcs = mcs[0:-1:1]
-        mcs_and_ssim = self.pack(mcs + (self.relu(sim),))
+        mcs_and_ssim = self.stack(mcs + (self.relu(sim),))
         mcs_and_ssim = self.pow(mcs_and_ssim, self.weight_tensor)
         ms_ssim = self.prod(mcs_and_ssim, -1)
         loss = self.reduce_mean(ms_ssim, -1)
@@ -374,12 +391,16 @@ class PSNR(Cell):
     Outputs:
         Tensor, with dtype mindspore.float32. It is a 1-D tensor with shape N, where N is the batch num of img1.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> net = nn.PSNR()
-        >>> img1 = Tensor(np.random.random((1,3,16,16)))
-        >>> img2 = Tensor(np.random.random((1,3,16,16)))
-        >>> psnr = net(img1, img2)
-        [7.8297315]
+        >>> img1 = Tensor(np.random.random((1, 3, 16, 16)))
+        >>> img2 = Tensor(np.random.random((1, 3, 16, 16)))
+        >>> output = net(img1, img2)
+        >>> print(output)
+        [7.915369]
     """
     def __init__(self, max_val=1.0):
         super(PSNR, self).__init__()
@@ -409,15 +430,15 @@ def _raise_dims_rank_error(input_shape, param_name, func_name):
     raise ValueError(f"{func_name} {param_name} should be 3d or 4d, but got shape {input_shape}")
 
 @constexpr
-def _get_bbox(rank, shape, size_h, size_w):
+def _get_bbox(rank, shape, central_fraction):
     """get bbox start and size for slice"""
     if rank == 3:
         c, h, w = shape
     else:
         n, c, h, w = shape
 
-    bbox_h_start = int((float(h) - size_h) / 2)
-    bbox_w_start = int((float(w) - size_w) / 2)
+    bbox_h_start = int((float(h) - np.float32(h * central_fraction)) / 2)
+    bbox_w_start = int((float(w) - np.float32(w * central_fraction)) / 2)
     bbox_h_size = h - bbox_h_start * 2
     bbox_w_size = w - bbox_w_start * 2
 
@@ -443,33 +464,33 @@ class CentralCrop(Cell):
     Outputs:
         Tensor, 3-D or 4-D float tensor, according to the input.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> net = nn.CentralCrop(central_fraction=0.5)
         >>> image = Tensor(np.random.random((4, 3, 4, 4)), mindspore.float32)
         >>> output = net(image)
-        >>> output.shape
+        >>> print(output.shape)
         (4, 3, 2, 2)
     """
 
     def __init__(self, central_fraction):
         super(CentralCrop, self).__init__()
         validator.check_value_type("central_fraction", central_fraction, [float], self.cls_name)
-        self.central_fraction = validator.check_float_range(central_fraction, 0.0, 1.0, Rel.INC_RIGHT,
-                                                            'central_fraction', self.cls_name)
+        validator.check_float_range(central_fraction, 0.0, 1.0, Rel.INC_RIGHT, 'central_fraction', self.cls_name)
+        self.central_fraction = central_fraction
         self.slice = P.Slice()
 
     def construct(self, image):
         image_shape = F.shape(image)
         rank = len(image_shape)
-        h, w = image_shape[-2], image_shape[-1]
         if not rank in (3, 4):
             return _raise_dims_rank_error(image_shape, "image", self.cls_name)
         if self.central_fraction == 1.0:
             return image
 
-        size_h = self.central_fraction * h
-        size_w = self.central_fraction * w
-        bbox_begin, bbox_size = _get_bbox(rank, image_shape, size_h, size_w)
+        bbox_begin, bbox_size = _get_bbox(rank, image_shape, self.central_fraction)
         image = self.slice(image, bbox_begin, bbox_size)
 
         return image

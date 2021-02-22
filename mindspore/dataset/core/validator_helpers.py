@@ -1,4 +1,4 @@
-# Copyright 2020 Huawei Technologies Co., Ltd
+# Copyright 2020-2021 Huawei Technologies Co., Ltd
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,13 +16,13 @@
 General Validators.
 """
 import inspect
+import numbers
 from multiprocessing import cpu_count
 import os
 import numpy as np
 
 import mindspore._c_dataengine as cde
 from ..engine import samplers
-
 # POS_INT_MIN is used to limit values from starting from 0
 POS_INT_MIN = 1
 UINT8_MAX = 255
@@ -112,6 +112,14 @@ def check_pos_int64(value, arg_name=""):
     check_value(value, [UINT64_MIN, INT64_MAX])
 
 
+def check_float32(value, arg_name=""):
+    check_value(value, [FLOAT_MIN_INTEGER, FLOAT_MAX_INTEGER], arg_name)
+
+
+def check_float64(value, arg_name=""):
+    check_value(value, [DOUBLE_MIN_INTEGER, DOUBLE_MAX_INTEGER], arg_name)
+
+
 def check_pos_float32(value, arg_name=""):
     check_value(value, [UINT32_MIN, FLOAT_MAX_INTEGER], arg_name)
 
@@ -122,7 +130,7 @@ def check_pos_float64(value, arg_name=""):
 
 def check_valid_detype(type_):
     if type_ not in valid_detype:
-        raise ValueError("Unknown column type")
+        raise TypeError("Unknown column type.")
     return True
 
 
@@ -146,10 +154,10 @@ def check_columns(columns, name):
     type_check(columns, (list, str), name)
     if isinstance(columns, str):
         if not columns:
-            raise ValueError("{0} should not be an empty str".format(name))
+            raise ValueError("{0} should not be an empty str.".format(name))
     elif isinstance(columns, list):
         if not columns:
-            raise ValueError("{0} should not be empty".format(name))
+            raise ValueError("{0} should not be empty.".format(name))
         for i, column_name in enumerate(columns):
             if not column_name:
                 raise ValueError("{0}[{1}] should not be empty.".format(name, i))
@@ -250,10 +258,10 @@ def check_filename(path):
     forbidden_symbols = set(r'\/:*?"<>|`&\';')
 
     if set(filename) & forbidden_symbols:
-        raise ValueError(r"filename should not contains \/:*?\"<>|`&;\'")
+        raise ValueError(r"filename should not contain \/:*?\"<>|`&;\'")
 
     if filename.startswith(' ') or filename.endswith(' '):
-        raise ValueError("filename should not start/end with space")
+        raise ValueError("filename should not start/end with space.")
 
     return True
 
@@ -280,14 +288,16 @@ def check_sampler_shuffle_shard_options(param_dict):
     """
     shuffle, sampler = param_dict.get('shuffle'), param_dict.get('sampler')
     num_shards, shard_id = param_dict.get('num_shards'), param_dict.get('shard_id')
-
-    type_check(sampler, (type(None), samplers.BuiltinSampler, samplers.Sampler), "sampler")
+    num_samples = param_dict.get('num_samples')
+    check_sampler(sampler)
 
     if sampler is not None:
         if shuffle is not None:
             raise RuntimeError("sampler and shuffle cannot be specified at the same time.")
-        if num_shards is not None:
+        if num_shards is not None or shard_id is not None:
             raise RuntimeError("sampler and sharding cannot be specified at the same time.")
+        if num_samples is not None:
+            raise RuntimeError("sampler and num_samples cannot be specified at the same time.")
 
     if num_shards is not None:
         check_pos_int32(num_shards)
@@ -334,8 +344,9 @@ def check_num_parallel_workers(value):
 
 def check_num_samples(value):
     type_check(value, (int,), "num_samples")
-    check_value(value, [0, INT32_MAX], "num_samples")
-
+    if value < 0 or value > INT64_MAX:
+        raise ValueError(
+            "num_samples exceeds the boundary between {} and {}(INT64_MAX)!".format(0, INT64_MAX))
 
 def validate_dataset_param_value(param_list, param_dict, param_type):
     for param_name in param_list:
@@ -373,5 +384,40 @@ def check_gnn_list_or_ndarray(param, param_name):
 
 def check_tensor_op(param, param_name):
     """check whether param is a tensor op or a callable Python function"""
-    if not isinstance(param, cde.TensorOp) and not callable(param):
-        raise TypeError("{0} is not a c_transform op (TensorOp) nor a callable pyfunc.".format(param_name))
+    if not isinstance(param, cde.TensorOp) and not callable(param) and not getattr(param, 'parse', None):
+        raise TypeError("{0} is neither a c_transform op (TensorOperation) nor a callable pyfunc.".format(param_name))
+
+def check_sampler(sampler):
+    """
+    Check if the sampler is of valid input.
+
+    Args:
+        param(Union[list, samplers.Sampler, samplers.BuiltinSampler, None]): sampler
+
+    Returns:
+        Exception: TypeError if error
+    """
+    builtin = False
+    base_sampler = False
+    list_num = False
+    if sampler is not None:
+        if isinstance(sampler, samplers.BuiltinSampler):
+            builtin = True
+        elif isinstance(sampler, samplers.Sampler):
+            base_sampler = True
+        else:
+            # check for list of numbers
+            list_num = True
+            # subset sampler check
+            subset_sampler = sampler
+            if not isinstance(sampler, list):
+                subset_sampler = [sampler]
+
+            for _, item in enumerate(subset_sampler):
+                if not isinstance(item, numbers.Number):
+                    list_num = False
+        if not (builtin or base_sampler or list_num):
+            raise TypeError("Argument sampler is not of type Sampler, BuiltinSamplers, or list of numbers")
+
+def replace_none(value, default):
+    return value if value is not None else default

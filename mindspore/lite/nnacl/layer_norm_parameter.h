@@ -17,32 +17,32 @@
 #define MINDSPORE_LITE_NNACL_LAYER_NORM_PARAMETER_H_
 
 #include "nnacl/op_base.h"
-#include "nnacl/quantization/quantize.h"
+#include "mindspore/lite/nnacl/int8/quantize.h"
 
+enum ElementwiseMode { ELEMENTWISE_NOT = 0, ELEMENTWISE_PER_CHANNEL = 1, ELEMENTWISE_PER_NUM = 2 };
 typedef struct LayerNormParameter {
   // Primitive parameter
   OpParameter op_parameter_;
   float epsilon_;
-  bool elementwise_affine_;
+  int begin_norm_axis_;
+  int begin_params_axis_;
   // shape correlative
-  int *normalized_shape_;
+  int norm_inner_size_;
+  int norm_outer_size_;
+  int params_inner_size_;
+  int params_outer_size_;
   int normalized_dims_;
+  int normalized_shape_[MAX_SHAPE_SIZE];
   // other parameter
   int thread_count_;
   int thread_outsize_;
 } LayerNormParameter;
 
 typedef struct LayerNormQuantArg {
-  QuantArg in_quant_arg_;
-  QuantArg out_quant_arg_;
-  QuantArg gamma_quant_arg_;
-
-  int32_t multiplier_;
-  int32_t shift_left_;
-  int32_t shift_right_;
-
-  int output_activation_min_;
-  int output_activation_max_;
+  int32_t in_zp_;
+  int32_t out_zp_;
+  double in_scale_;
+  double out_scale_;
 } LayerNormQuantArg;
 
 #endif  // MINDSPORE_LITE_NNACL_LAYER_NORM_PARAMETER_H_

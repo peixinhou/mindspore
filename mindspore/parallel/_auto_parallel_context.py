@@ -16,6 +16,7 @@
 import threading
 import mindspore.context as context
 from mindspore.parallel._dp_allreduce_fusion import _set_fusion_strategy_by_idx, _set_fusion_strategy_by_size
+from mindspore.parallel._ps_context import _is_role_pserver
 from mindspore._c_expression import AutoParallelContext
 from mindspore._checkparam import args_type_check
 
@@ -180,6 +181,8 @@ class _AutoParallelContext:
     def get_parallel_mode(self):
         """Get parallel mode."""
         self.check_context_handle()
+        if _is_role_pserver():
+            return context.ParallelMode.STAND_ALONE
         return self._context_handle.get_parallel_mode()
 
     def set_strategy_search_mode(self, auto_parallel_search_mode):
@@ -207,9 +210,6 @@ class _AutoParallelContext:
             parameter_broadcast (bool): Parameter broadcast or not.
         """
         self.check_context_handle()
-        if parameter_broadcast is True and context.get_context("enable_ge") is False:
-            raise RuntimeError("Parameter broadcast is a developing feature. For now we suggest to"
-                               " use mindspore.common.set_seed() to share parameters among devices.")
         self._context_handle.set_parameter_broadcast(parameter_broadcast)
 
     def get_parameter_broadcast(self):
@@ -245,7 +245,24 @@ class _AutoParallelContext:
     def get_full_batch(self):
         """Get whether load full batch on each device."""
         self.check_context_handle()
+        if _is_role_pserver():
+            return False
         return self._context_handle.get_full_batch()
+
+    def set_grad_accumulation_step(self, grad_accumulation_step):
+        """
+        Set grad accumulation step.
+
+        Args:
+            grad_accumulation_step (int): The grad accumulation step.
+        """
+        self.check_context_handle()
+        self._context_handle.set_grad_accumulation_step(grad_accumulation_step)
+
+    def get_grad_accumulation_step(self):
+        """Get grad accumulation step."""
+        self.check_context_handle()
+        return self._context_handle.get_grad_accumulation_step()
 
     def set_strategy_ckpt_save_file(self, strategy_ckpt_save_file):
         """
@@ -265,6 +282,15 @@ class _AutoParallelContext:
         """Get strategy checkpoint save path."""
         self.check_context_handle()
         return self._context_handle.get_strategy_ckpt_save_file()
+
+    def set_group_ckpt_save_file(self, group_ckpt_save_file):
+        """Set group checkpoint save path."""
+        self.check_context_handle()
+        import os
+        dir_path = os.path.dirname(group_ckpt_save_file)
+        if dir_path and not os.path.exists(dir_path):
+            os.makedirs(dir_path)
+        self._context_handle.set_group_ckpt_save_file(group_ckpt_save_file)
 
     def get_parameter_broadcast_is_set(self):
         """Get parameter broadcast is set or not."""
@@ -488,8 +514,10 @@ _set_auto_parallel_context_func_map = {
     "parameter_broadcast": auto_parallel_context().set_parameter_broadcast,
     "strategy_ckpt_load_file": auto_parallel_context().set_strategy_ckpt_load_file,
     "strategy_ckpt_save_file": auto_parallel_context().set_strategy_ckpt_save_file,
+    "group_ckpt_save_file": auto_parallel_context().set_group_ckpt_save_file,
     "full_batch": auto_parallel_context().set_full_batch,
     "enable_parallel_optimizer": auto_parallel_context().set_enable_parallel_optimizer,
+    "grad_accumulation_step": auto_parallel_context().set_grad_accumulation_step,
     "all_reduce_fusion_config": auto_parallel_context().set_all_reduce_fusion_split_indices}
 
 
@@ -507,6 +535,7 @@ _get_auto_parallel_context_func_map = {
     "strategy_ckpt_save_file": auto_parallel_context().get_strategy_ckpt_save_file,
     "full_batch": auto_parallel_context().get_full_batch,
     "enable_parallel_optimizer": auto_parallel_context().get_enable_parallel_optimizer,
+    "grad_accumulation_step": auto_parallel_context().get_grad_accumulation_step,
     "all_reduce_fusion_config": auto_parallel_context().get_all_reduce_fusion_split_indices}
 
 
@@ -514,7 +543,7 @@ _get_auto_parallel_context_func_map = {
                  loss_repeated_mean=bool, parallel_mode=str, auto_parallel_search_mode=str,
                  parameter_broadcast=bool, strategy_ckpt_load_file=str,
                  strategy_ckpt_save_file=str, full_batch=bool, enable_parallel_optimizer=bool,
-                 all_reduce_fusion_config=list)
+                 grad_accumulation_step=int, all_reduce_fusion_config=list, group_ckpt_save_file=str)
 
 def _set_auto_parallel_context(**kwargs):
     """
@@ -555,6 +584,7 @@ def _set_auto_parallel_context(**kwargs):
                        broadcast. Default: False.
         strategy_ckpt_load_file (str): The path to load parallel strategy checkpoint. Default: ''
         strategy_ckpt_save_file (str): The path to save parallel strategy checkpoint. Default: ''
+        group_ckpt_save_file (str): The path to save parallel group checkpoint. Default: ''
         full_batch (bool): Whether to load the whole batch on each device. Default: False.
         enable_parallel_optimizer (bool): Enable using optimizer segmentation or not. Default: False.
         all_reduce_fusion_config (list): Set allreduce fusion strategy by parameters indices.

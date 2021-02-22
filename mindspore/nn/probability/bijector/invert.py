@@ -19,56 +19,52 @@ from .bijector import Bijector
 
 class Invert(Bijector):
     r"""
-    Invert Bijector.
+    Invert Bijector. Compute the inverse function of the input bijector.
 
     Args:
         bijector (Bijector): Base Bijector.
-        name (str): The name of the Bijector. Default: Invert.
+        name (str): The name of the Bijector. Default: 'Invert' + bijector.name.
+
+    Supported Platforms:
+        ``Ascend`` ``GPU``
 
     Examples:
-        >>> # To initialize an Invert bijector.
+        >>> import mindspore
+        >>> import mindspore.nn as nn
         >>> import mindspore.nn.probability.bijector as msb
-        >>> n = msb.Invert()
-        >>>
-        >>> # To use an Invert bijector in a network.
-        >>> class net(Cell):
-        >>>     def __init__(self):
-        >>>         super(net, self).__init__():
-        >>>         self.inv = msb.Invert(msb.Exp())
-        >>>
-        >>>     def construct(self, value):
-        >>>         # Similar calls can be made to other functions
-        >>>         # by replacing `forward` by the name of the function.
-        >>>         ans1 = self.inv.forward(value)
-        >>>         ans2 = self.inv.inverse(value)
-        >>>         ans3 = self.inv.forward_log_jacobian(value)
-        >>>         ans4 = self.inv.inverse_log_jacobian(value)
+        >>> from mindspore import Tensor
+        >>> class Net(nn.Cell):
+        ...     def __init__(self):
+        ...         super(Net, self).__init__()
+        ...         self.origin = msb.ScalarAffine(scale=2.0, shift=1.0)
+        ...         self.invert = msb.Invert(self.origin)
+        ...
+        ...     def construct(self, x_):
+        ...         return self.invert.forward(x_)
+        >>> forward = Net()
+        >>> x = np.array([2.0, 3.0, 4.0, 5.0]).astype(np.float32)
+        >>> ans = forward(Tensor(x, dtype=dtype.float32))
     """
 
     def __init__(self,
                  bijector,
-                 name='Invert'):
+                 name=""):
         param = dict(locals())
         validator.check_value_type('bijector', bijector, [Bijector], "Invert")
-        name = (name + bijector.name) if name == 'Invert' else name
+        name = name or ('Invert' + bijector.name)
+        param["name"] = name
         super(Invert, self).__init__(is_constant_jacobian=bijector.is_constant_jacobian,
                                      is_injective=bijector.is_injective,
-                                     dtype=bijector.dtype,
                                      name=name,
+                                     dtype=bijector.dtype,
                                      param=param)
         self._bijector = bijector
-        if hasattr(self._bijector, 'event_shape'):
-            self._event_shape = self.bijector.event_shape
-        else:
-            self._event_shape = ()
+        self._batch_shape = self.bijector.batch_shape
+        self._is_scalar_batch = self.bijector.is_scalar_batch
 
     @property
     def bijector(self):
         return self._bijector
-
-    @property
-    def event_shape(self):
-        return self._event_shape
 
     def inverse(self, y):
         return self.bijector("forward", y)

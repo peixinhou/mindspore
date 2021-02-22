@@ -1,5 +1,5 @@
 /**
- * Copyright 2020 Huawei Technologies Co., Ltd
+ * Copyright 2020-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,35 +27,36 @@ namespace mindspore {
 namespace dataset {
 
 // Constructor for SyncWaitNode
-SyncWaitNode::SyncWaitNode(std::shared_ptr<DatasetNode> child, const std::string &condition_name, int32_t num_batch,
-                           py::function callback)
-    : condition_name_(condition_name), num_batch_(num_batch), callback_(callback) {
-  this->children.push_back(child);
+SyncWaitNode::SyncWaitNode(std::shared_ptr<DatasetNode> child, const std::string &condition_name, py::function callback)
+    : condition_name_(condition_name), callback_(callback) {
+  this->AddChild(child);
+}
+
+std::shared_ptr<DatasetNode> SyncWaitNode::Copy() {
+  auto node = std::make_shared<SyncWaitNode>(nullptr, condition_name_, callback_);
+  return node;
+}
+
+void SyncWaitNode::Print(std::ostream &out) const {
+  out << Name() + "(cond_name:" + condition_name_ + "<pyfunc>" + ")";
 }
 
 // Function to build the BarrierOp
-std::vector<std::shared_ptr<DatasetOp>> SyncWaitNode::Build() {
-  // A vector containing shared pointer to the Dataset Ops that this object will create
-  std::vector<std::shared_ptr<DatasetOp>> node_ops;
-
-  node_ops.push_back(std::make_shared<BarrierOp>(num_batch_, connector_que_size_, condition_name_, callback_));
-  return node_ops;
+Status SyncWaitNode::Build(std::vector<std::shared_ptr<DatasetOp>> *const node_ops) {
+  // Right now barrier should only take num_rows_per_buffer = 1
+  // The reason for this is because having it otherwise can lead to blocking issues
+  // See barrier_op.h for more details
+  int32_t rows_per_buffer = 1;
+  auto op = std::make_shared<BarrierOp>(rows_per_buffer, connector_que_size_, condition_name_, callback_);
+  op->set_total_repeats(GetTotalRepeats());
+  op->set_num_repeats_per_epoch(GetNumRepeatsPerEpoch());
+  node_ops->push_back(op);
+  return Status::OK();
 }
 
 // Function to validate the parameters for SyncWaitNode
 Status SyncWaitNode::ValidateParams() {
-  if (num_batch_ <= 0) {
-    std::string err_msg = "SyncWaitNode: num_batch must be greater than 0, num_batch: " + std::to_string(num_batch_);
-    MS_LOG(ERROR) << err_msg;
-    RETURN_STATUS_SYNTAX_ERROR(err_msg);
-  }
-
-  if (condition_name_.empty()) {
-    std::string err_msg = "SyncWaitNode: condition_name must not be empty.";
-    MS_LOG(ERROR) << err_msg;
-    RETURN_STATUS_SYNTAX_ERROR(err_msg);
-  }
-
+  RETURN_IF_NOT_OK(DatasetNode::ValidateParams());
   return Status::OK();
 }
 

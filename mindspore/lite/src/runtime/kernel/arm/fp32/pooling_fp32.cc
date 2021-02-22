@@ -16,7 +16,7 @@
 
 #include "src/runtime/kernel/arm/fp32/pooling_fp32.h"
 #include <float.h>
-#include "nnacl/fp32/pooling.h"
+#include "nnacl/fp32/pooling_fp32.h"
 #include "src/kernel_registry.h"
 #include "src/runtime/runtime_api.h"
 #include "include/errorcode.h"
@@ -91,4 +91,6 @@ int PoolingCPUKernel::Run() {
   }
   return RET_OK;
 }
+
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Pooling, LiteKernelCreator<PoolingCPUKernel>)
 }  // namespace mindspore::kernel

@@ -18,32 +18,25 @@
 #define MINDSPORE_LITE_SRC_RUNTIME_KERNEL_OPENCL_KERNEL_POWER_H_
 
 #include <vector>
-#include "nnacl/power.h"
+#include "mindspore/lite/nnacl/fp32/power_fp32.h"
 #include "src/runtime/kernel/opencl/opencl_kernel.h"
 
 namespace mindspore::kernel {
 
 class PowerOpenCLKernel : public OpenCLKernel {
  public:
-  PowerOpenCLKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
-                    const std::vector<lite::Tensor *> &outputs)
-      : OpenCLKernel(parameter, inputs, outputs) {}
+  using OpenCLKernel::OpenCLKernel;
 
   ~PowerOpenCLKernel() override = default;
 
-  int Init() override;
-
+  int Prepare() override;
+  int CheckSpecs() override;
+  void SetConstArgs() override;
+  void SetGlobalLocal() override;
   int Run() override;
 
  private:
-  int InferShapeTo4D();
-  cl::Kernel kernel_;
-
- private:
-  size_t N_{1};
-  size_t H_{1};
-  size_t W_{1};
-  size_t C_{1};
+  cl_int4 out_shape_{};
   bool broadcast_{false};
   bool use_fp16_enable_{false};
   float power_{1.0};

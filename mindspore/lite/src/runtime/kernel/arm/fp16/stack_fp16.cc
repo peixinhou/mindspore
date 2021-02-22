@@ -21,7 +21,7 @@
 #include "include/errorcode.h"
 #include "src/runtime/kernel/arm/fp16/common_fp16.h"
 #include "nnacl/fp16/cast_fp16.h"
-#include "nnacl/fp16/stack_fp16.h"
+#include "nnacl/base/stack_base.h"
 
 using mindspore::lite::KernelRegistrar;
 using mindspore::lite::RET_ERROR;
@@ -29,26 +29,18 @@ using mindspore::lite::RET_OK;
 using mindspore::schema::PrimitiveType_Stack;
 
 namespace mindspore::kernel {
-
-int StackFp16CPUKernel::Init() {
-  if (!InferShapeDone()) {
-    return RET_OK;
-  }
-  return ReSize();
-}
-
 void StackFp16CPUKernel::InitMallocFlags() {
   malloc_buffers_.resize(in_tensors_.size());
   for (size_t i = 0; i < in_tensors_.size(); ++i) {
     malloc_buffers_.at(i) = in_tensors_.at(i)->data_type() == kNumberTypeFloat32;
   }
-  malloc_out = out_tensors_.at(0)->data_type() == kNumberTypeFloat32;
+  malloc_out_ = out_tensors_.at(0)->data_type() == kNumberTypeFloat32;
 }
 
 int StackFp16CPUKernel::MallocAssignBuffer() {
   buffers_.resize(in_tensors_.size(), nullptr);
   for (size_t i = 0; i < in_tensors_.size(); ++i) {
-    buffers_.at(i) = ConvertInputFp32toFp16(in_tensors_.at(i), context_);
+    buffers_.at(i) = reinterpret_cast<char *>(ConvertInputFp32toFp16(in_tensors_.at(i), context_));
     if (buffers_.at(i) == nullptr) {
       return RET_ERROR;
     }
@@ -69,62 +61,36 @@ void StackFp16CPUKernel::FreeBuffer() {
       buffers_.at(i) = nullptr;
     }
   }
-  if (malloc_out && out_buffer_ != nullptr) {
+  if (malloc_out_ && out_buffer_ != nullptr) {
     context_->allocator->Free(out_buffer_);
     out_buffer_ = nullptr;
   }
 }
 
-int StackFp16CPUKernel::Run() {
-  size_t inputs_num = in_tensors_.size();
-  auto input0 = in_tensors_.at(0);
-  if (inputs_num == 1) {
-    memcpy(out_tensors_.at(0)->MutableData(), input0->MutableData(), input0->Size());
+int StackFp16CPUKernel::Init() {
+  data_type_size_ = sizeof(float16_t);
+  if (!InferShapeDone()) {
     return RET_OK;
   }
+  return ReSize();
+}
+
+int StackFp16CPUKernel::Run() {
   InitMallocFlags();
   auto ret = MallocAssignBuffer();
   if (ret != RET_OK) {
     FreeBuffer();
     return ret;
   }
-  auto input0_shape = input0->shape();
-  DoStackFp16(buffers_.data(), inputs_num, input0_shape.data(), input0_shape.size(), axis_, out_buffer_);
+  Stack(buffers_.data(), reinterpret_cast<char *>(out_buffer_), in_tensors_.size(), copy_size_, outer_size_);
   // if output tensor is fp32, we need to transform
-  if (malloc_out) {
+  if (malloc_out_) {
     auto out_tensor = out_tensors_.at(0);
     Float16ToFloat32(out_buffer_, reinterpret_cast<float *>(out_tensor->MutableData()), out_tensor->ElementsNum());
   }
-
   FreeBuffer();
   return RET_OK;
 }
 
-kernel::LiteKernel *CpuStackFp16KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                              const std::vector<lite::Tensor *> &outputs, OpParameter *op_parameter,
-                                              const lite::InnerContext *ctx, const kernel::KernelKey &desc,
-                                              const mindspore::lite::PrimitiveC *primitive) {
-  if (op_parameter == nullptr) {
-    MS_LOG(ERROR) << "Input op_parameter is nullptr!";
-    return nullptr;
-  }
-  MS_ASSERT(desc.type == schema::PrimitiveType_Stack);
-  auto *kernel = new (std::nothrow) StackFp16CPUKernel(op_parameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "new StackFp16CPUKernel fail!";
-    free(op_parameter);
-    return nullptr;
-  }
-
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed, name: " << op_parameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(op_parameter->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
-}
-
-REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_Stack, CpuStackFp16KernelCreator)
+REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_Stack, LiteKernelCreator<StackFp16CPUKernel>)
 }  // namespace mindspore::kernel

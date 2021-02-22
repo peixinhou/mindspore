@@ -18,7 +18,7 @@
 #include <vector>
 
 #include "include/errorcode.h"
-#include "mindspore/lite/nnacl/fp32/sparse_to_dense.h"
+#include "mindspore/lite/nnacl/fp32/sparse_to_dense_fp32.h"
 #include "schema/model_generated.h"
 #include "schema/ops_generated.h"
 #include "src/kernel_registry.h"
@@ -195,31 +195,6 @@ int SparseToDenseCPUKernel::Run() {
   return RET_OK;
 }
 
-kernel::LiteKernel *CpuSparseToDenseFp32KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                                      const std::vector<lite::Tensor *> &outputs,
-                                                      OpParameter *opParameter, const lite::InnerContext *ctx,
-                                                      const kernel::KernelKey &desc,
-                                                      const mindspore::lite::PrimitiveC *primitive) {
-  if (opParameter == nullptr) {
-    MS_LOG(ERROR) << "input opParameter is nullptr!";
-    return nullptr;
-  }
-  MS_ASSERT(desc.type == schema::PrimitiveType_SparseToDense);
-  auto *kernel = new (std::nothrow) SparseToDenseCPUKernel(opParameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "new SparseToDenseCPUKernel fail!";
-    free(opParameter);
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
-}
-
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_SparseToDense, CpuSparseToDenseFp32KernelCreator)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_SparseToDense, LiteKernelCreator<SparseToDenseCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt32, PrimitiveType_SparseToDense, LiteKernelCreator<SparseToDenseCPUKernel>)
 }  // namespace mindspore::kernel

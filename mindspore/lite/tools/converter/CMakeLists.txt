@@ -9,7 +9,7 @@ set(CCSRC_SRC
 
 include(${TOP_DIR}/cmake/external_libs/glog.cmake)
 
-file(GLOB_RECURSE OPS_SRC ${CMAKE_CURRENT_SOURCE_DIR}/../../src/ops/*.cc
+file(GLOB OPS_SRC ${CMAKE_CURRENT_SOURCE_DIR}/../../src/ops/*.cc
         ${CMAKE_CURRENT_SOURCE_DIR}/../../src/ops/populate/*.cc)
 
 file(GLOB_RECURSE CONVERTER_SRC RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
@@ -39,17 +39,35 @@ file(GLOB_RECURSE CONVERTER_SRC RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
         ../optimizer/fusion/conv_transform_fusion.cc
         ../optimizer/fusion/conv_scale_fusion.cc
         ../optimizer/fusion/conv_bn_fusion.cc
+        ../optimizer/fusion/conv_tuplegetitem_fusion.cc
         ../optimizer/fusion/constant_folding_fusion.cc
         ../optimizer/fusion/quant_dtype_cast_fusion.cc
         ../optimizer/fusion/layer_norm_fusion.cc
         ../optimizer/fusion/batchmatmul_fusion.cc
         ../optimizer/fusion/sigmoid_mul_fusion.cc
+        ../optimizer/fusion/conv_conv_fusion.cc
+        ../optimizer/fusion/tflite_lstm_cell_fusion.cc
+        ../optimizer/fusion/tf_lstm_cell_fusion.cc
+        ../optimizer/fusion/bidirection_tf_gru_cell_fusion.cc
         ../optimizer/graph/weight_format_transform_pass.cc
         ../optimizer/graph/weight_format_hardcode_pass.cc
         ../optimizer/graph/clip_convert_activation_pass.cc
+        ../optimizer/graph/group_depthwise_op_convert_pass.cc
+        ../optimizer/graph/tflite_inputs_order_exchange_pass.cc
+        ../optimizer/graph/update_conv2d_param_pass.cc
         ../optimizer/graph/unused_cast_node_remove_pass.cc
         ../optimizer/graph/unused_transpose_node_remove_pass.cc
-        ../optimizer/graph/identity_remove_pass.cc
+        ../optimizer/graph/redundant_op_remove_pass.cc
+        ../optimizer/graph/infershape_pass.cc
+        ../optimizer/graph/slice_prepose_pass.cc
+        ../optimizer/graph/mindir_adjust_pass.cc
+        ../optimizer/graph/onnx_inputs_adjust_pass.cc
+        ../optimizer/graph/while_pass.cc
+        ../optimizer/graph/if_pass.cc
+        ../optimizer/graph/mindir_inputs_adjust_pass.cc
+        ../optimizer/graph/functionalize_control_op_pass.cc
+        ../optimizer/graph/functionalize_while.cc
+        ../optimizer/graph/inputs_adjust_pass.cc
         )
 
 add_subdirectory(../anf_importer anf_importer)
@@ -57,6 +75,7 @@ add_subdirectory(../anf_exporter anf_exporter)
 add_subdirectory(parser/caffe)
 add_subdirectory(parser/tflite)
 add_subdirectory(parser/onnx)
+add_subdirectory(parser/tf)
 add_subdirectory(legacy_optimizer)
 add_subdirectory(quantizer)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../../../core mindspore_core)
@@ -70,50 +89,50 @@ set(LITE_SRC
         ${SRC_DIR}/runtime/thread_pool.c
         ${SRC_DIR}/inner_context.cc
         ${SRC_DIR}/tensor.cc
+        ${SRC_DIR}/tensorlist.cc
         ${SRC_DIR}/kernel_registry.cc
         ${SRC_DIR}/lite_kernel.cc
         ${SRC_DIR}/scheduler.cc
         ${SRC_DIR}/sub_graph_kernel.cc
         ${SRC_DIR}/lite_session.cc
         ${SRC_DIR}/executor.cc
-        ${SRC_DIR}/model.cc
-        ${SRC_DIR}/model_common.cc
+        ${SRC_DIR}/lite_model.cc
         ${SRC_DIR}/errorcode.cc
+        ${SRC_DIR}/dequant.cc
+        ${SRC_DIR}/huffman_decode.cc
         )
-if (SUPPORT_TRAIN)
-    set(LITE_SRC
-            ${LITE_SRC}
-            )
-
-endif ()
 set(ARM_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../src/runtime/kernel/arm)
 file(GLOB KERNEL_SRC
         ${ARM_DIR}/base/*.cc
         ${CMAKE_CURRENT_SOURCE_DIR}/../../nnacl/*.c
         ${CMAKE_CURRENT_SOURCE_DIR}/../../nnacl/fp32/*.c
         ${CMAKE_CURRENT_SOURCE_DIR}/../../nnacl/int8/*.c
-        ${CMAKE_CURRENT_SOURCE_DIR}/../../nnacl/quantization/*.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../nnacl/base/*.c
         ${ARM_DIR}/fp32/*.cc
         ${ARM_DIR}/int8/*.cc
         )
 
-if (PLATFORM_ARM64)
+if(PLATFORM_ARM64)
     # assembly
     file(GLOB ASSEMBLY_SRC ${CMAKE_CURRENT_SOURCE_DIR}/../../nnacl/assembly/arm64/*.s
             ${CMAKE_CURRENT_SOURCE_DIR}/../../nnacl/assembly/arm64/*.S)
     set_property(SOURCE ${ASSEMBLY_SRC} PROPERTY LANGUAGE C)
     set(KERNEL_SRC ${KERNEL_SRC} ${ASSEMBLY_SRC})
-endif ()
+endif()
 
 file(GLOB PROTO_FILE ""
         ${CMAKE_CURRENT_SOURCE_DIR}/parser/caffe/caffe.proto
-        ${CMAKE_CURRENT_SOURCE_DIR}/parser/onnx/onnx.proto)
+        ${CMAKE_CURRENT_SOURCE_DIR}/parser/tf/proto/*.proto
+        ${CMAKE_CURRENT_SOURCE_DIR}/parser/onnx/onnx.proto
+        ${CCSRC_DIR}/utils/mind_ir.proto)
+
 ms_protobuf_generate(PROTO_SRCS PROTO_HDRS ${PROTO_FILE})
 add_library(proto_mid OBJECT ${PROTO_SRCS})
 set(TFLITE_FBS_FILES
         ${CMAKE_CURRENT_SOURCE_DIR}/parser/tflite/schema.fbs
         )
-ms_build_flatbuffers_lite(TFLITE_FBS_FILES ${CMAKE_CURRENT_SOURCE_DIR}/parser/tflite/ tflite_fbs_src ${CMAKE_BINARY_DIR}/schema "inner")
+ms_build_flatbuffers_lite(TFLITE_FBS_FILES ${CMAKE_CURRENT_SOURCE_DIR}/parser/tflite/ tflite_fbs_src
+        ${CMAKE_BINARY_DIR}/schema "inner")
 
 set_property(SOURCE ${CONVERTER_SRC} PROPERTY COMPILE_DEFINITIONS SUBMODULE_ID=mindspore::SubModuleId::SM_LITE)
 set_property(SOURCE ${CCSRC_SRC} PROPERTY COMPILE_DEFINITIONS SUBMODULE_ID=mindspore::SubModuleId::SM_LITE)
@@ -128,12 +147,12 @@ add_executable(converter_lite
         ${KERNEL_SRC}
         ${LITE_SRC}
         )
-add_dependencies(converter_lite tflite_fbs_src)
 add_dependencies(converter_lite fbs_src)
 add_dependencies(converter_lite fbs_inner_src)
 
 target_link_libraries(converter_lite PRIVATE
         tflite_parser_mid
+        tf_parser_mid
         caffe_parser_mid
         onnx_parser_mid
         anf_importer_mid

@@ -22,15 +22,12 @@
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
-int Unstack::GetNum() const { return this->primitive_->value.AsUnstack()->num; }
 int Unstack::GetAxis() const { return this->primitive_->value.AsUnstack()->axis; }
 
-void Unstack::SetNum(int num) { this->primitive_->value.AsUnstack()->num = num; }
 void Unstack::SetAxis(int axis) { this->primitive_->value.AsUnstack()->axis = axis; }
 
 #else
 
-int Unstack::GetNum() const { return this->primitive_->value_as_Unstack()->num(); }
 int Unstack::GetAxis() const { return this->primitive_->value_as_Unstack()->axis(); }
 int Unstack::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::FlatBufferBuilder *fbb) {
   MS_ASSERT(nullptr != primitive);
@@ -66,7 +63,7 @@ int Unstack::InferShape(std::vector<Tensor *> inputs, std::vector<Tensor *> outp
     out->set_format(input->format());
   }
   if (!infer_flag()) {
-    return RET_OK;
+    return RET_INFER_INVALID;
   }
   std::vector<int> output_shape;
   for (size_t i = 0; i < input_shape.size(); ++i) {

@@ -22,31 +22,21 @@
 
 #include "backend/optimizer/somas/somas_solver_core.h"
 #include "backend/optimizer/somas/somas_solver_pre.h"
+#include "debug/common.h"
 
 namespace mindspore {
 namespace somas {
 Status SomasSolverPre::Solving(const session::KernelGraph *graph,
                                std::unordered_map<size_t, SomasSolverTensorDescPtr> *ptensors,
-                               std::shared_ptr<Array> pConstraints, const vector<vector<size_t>> &continuous_v,
-                               bool bVerifySolution, bool ball, SortingType sorting, FittingType fitting,
-                               AlgorithmType algorithm) {
+                               const std::vector<DynamicBitSet> *pConstraints,
+                               const vector<vector<size_t>> &continuous_v, bool bVerifySolution, bool ball,
+                               SortingType sorting, FittingType fitting, AlgorithmType algorithm) {
   Status retval = SUCCESS;
 
   try {
-    size_t maxIndex = 0;
     std::unordered_map<size_t, SomasSolverTensorDescPtr> &tensors = *ptensors;
-    std::unordered_map<size_t, SomasSolverTensorDescPtr>::iterator max =
-      std::max_element(tensors.begin(), tensors.end(),
-                       [](const std::pair<size_t, SomasSolverTensorDescPtr> &a,
-                          const std::pair<size_t, SomasSolverTensorDescPtr> &b) { return a.first < b.first; });
-    maxIndex = max->first;
-    if (maxIndex > pConstraints->Rows() - 1) {
-      MS_LOG(WARNING) << "ERROR: MaxIndex invalid, MaxIndex " << maxIndex << ", Rows " << pConstraints->Rows();
-      return FAILED;
-    }
     MS_LOG(INFO) << "Filling in constraints matrix..";
     uint32_t continuous_cnt = 0;
-
     // creating S Lists
     for (auto &aux : continuous_v) {
       for (uint32_t i = 0; i < aux.size() - 1; i++) {
@@ -61,8 +51,6 @@ Status SomasSolverPre::Solving(const session::KernelGraph *graph,
           return FAILED;
         }
 
-        const size_t continuous = 2;
-        (*pConstraints)(index2, index1) = continuous;
         if (tensors[index1]->right_)
           MS_LOG(WARNING) << "Warning:tensor " << index1
                           << " already has a right tensor (id: " << tensors[index1]->right_->index_;
@@ -105,9 +93,16 @@ Status SomasSolverPre::Solving(const session::KernelGraph *graph,
 
 void SomasSolverPre::Log(const session::KernelGraph *graph,
                          const unordered_map<size_t, SomasSolverTensorDescPtr> &tensors,
-                         const std::shared_ptr<Array> &pConstraints, const vector<vector<size_t>> &continuous_v) {
-  MS_LOG(INFO) << "SomasSolver::Log Writing somas-input.txt..";
+                         const std::vector<DynamicBitSet> *pConstraints, const vector<vector<size_t>> &continuous_v) {
+  SolverInputLog(graph, tensors, pConstraints, continuous_v);
+  SolverOutputLog(graph, tensors);
+}
 
+void SomasSolverPre::SolverInputLog(const session::KernelGraph *graph,
+                                    const unordered_map<size_t, SomasSolverTensorDescPtr> &tensors,
+                                    const std::vector<DynamicBitSet> *pConstraints,
+                                    const vector<vector<size_t>> &continuous_v) {
+  MS_LOG(INFO) << "SomasSolver::Log Writing somas-input.txt..";
   auto context_ptr = MsContext::GetInstance();
   MS_EXCEPTION_IF_NULL(context_ptr);
   auto save_graphs_path = context_ptr->get_param<std::string>(MS_CTX_SAVE_GRAPHS_PATH);
@@ -116,70 +111,68 @@ void SomasSolverPre::Log(const session::KernelGraph *graph,
     MS_LOG(ERROR) << "File path " << filename << " is too long.";
     return;
   }
-  char real_path[PATH_MAX] = {0};
-#if defined(_WIN32) || defined(_WIN64)
-  if (_fullpath(real_path, filename.c_str(), PATH_MAX) == nullptr) {
-    MS_LOG(DEBUG) << "dir " << filename << " does not exit.";
+  auto real_path = Common::GetRealPath(filename);
+  if (!real_path.has_value()) {
+    MS_LOG(ERROR) << "Get real path failed. path=" << filename;
+    return;
   }
-#else
-  if (realpath(filename.c_str(), real_path) == nullptr) {
-    MS_LOG(DEBUG) << "Dir " << filename << " does not exit.";
-  }
-#endif
 
-  std::string path_string = real_path;
-  ChangeFileMode(path_string, S_IRWXU);
-  std::ofstream ofs_1(real_path);
+  ChangeFileMode(real_path.value(), S_IRWXU);
+  std::ofstream ofs(real_path.value());
 
-  if (!ofs_1.is_open()) {
-    MS_LOG(ERROR) << "Open log file '" << real_path << "' failed!";
+  if (!ofs.is_open()) {
+    MS_LOG(ERROR) << "Open log file '" << real_path.value() << "' failed!";
     return;
   }
 
   for (auto &t : tensors) {
-    ofs_1 << "T " << t.second->index_ << " " << t.second->size_ << " " << t.second->lifelong_ << std::endl;
+    ofs << "T " << t.second->index_ << " " << t.second->size_ << " " << t.second->lifelong_ << std::endl;
   }
 
   for (auto &t1 : tensors) {
     for (auto &t2 : tensors) {
       size_t idx1 = t1.first;
       size_t idx2 = t2.first;
-      if ((idx1 != idx2) && (*pConstraints)(idx1, idx2) == 1) {
-        ofs_1 << "C " << idx1 << " " << idx2 << std::endl;
+      if ((idx1 != idx2) && (*pConstraints)[idx1].IsBitTrue(idx2) == false) {
+        ofs << "C " << idx1 << " " << idx2 << std::endl;
       }
     }
   }
   for (auto &s : continuous_v) {
-    ofs_1 << "S";
+    ofs << "S";
     for (auto idx : s) {
-      ofs_1 << " " << idx;
+      ofs << " " << idx;
     }
-    ofs_1 << std::endl;
+    ofs << std::endl;
   }
-  ofs_1.close();
+  ofs.close();
 
-  MS_LOG(INFO) << "SomasSolver::Log Writing somas-output.txt..";
+  MS_LOG(INFO) << "SomasSolver input Log done";
+}
+
+void SomasSolverPre::SolverOutputLog(const session::KernelGraph *graph,
+                                     const unordered_map<size_t, SomasSolverTensorDescPtr> &tensors) const {
+  MS_LOG(INFO) << "SomasSolver::Log Writing somas output...";
+  auto context_ptr = MsContext::GetInstance();
+  MS_EXCEPTION_IF_NULL(context_ptr);
+  auto save_graphs_path = context_ptr->get_param<std::string>(MS_CTX_SAVE_GRAPHS_PATH);
   std::string out_filename =
     save_graphs_path + "/" + "somas_solver_output_" + std::to_string(graph->graph_id()) + ".ir";
   if (out_filename.size() > PATH_MAX) {
     MS_LOG(ERROR) << "File path " << out_filename << " is too long.";
     return;
   }
-#if defined(_WIN32) || defined(_WIN64)
-  if (_fullpath(real_path, out_filename.c_str(), PATH_MAX) == nullptr) {
-    MS_LOG(DEBUG) << "dir " << out_filename << " does not exit.";
+  auto out_real_path = Common::GetRealPath(out_filename);
+  if (!out_real_path.has_value()) {
+    MS_LOG(ERROR) << "Get real path failed. path=" << out_filename;
+    return;
   }
-#else
-  if (realpath(out_filename.c_str(), real_path) == nullptr) {
-    MS_LOG(DEBUG) << "Dir " << out_filename << " does not exit.";
-  }
-#endif
-  path_string = real_path;
-  ChangeFileMode(path_string, S_IRWXU);
-  std::ofstream ofs_2(real_path);
 
-  if (!ofs_2.is_open()) {
-    MS_LOG(ERROR) << "Open log file '" << real_path << "' failed!";
+  ChangeFileMode(out_real_path.value(), S_IRWXU);
+  std::ofstream ofs_out(out_real_path.value());
+
+  if (!ofs_out.is_open()) {
+    MS_LOG(ERROR) << "Open log file '" << out_real_path.value() << "' failed!";
     return;
   }
 
@@ -196,14 +189,14 @@ void SomasSolverPre::Log(const session::KernelGraph *graph,
     bool size_aligned = tensor->size_ % alignment == 0;
     bool offset_aligned = tensor->offset_ % alignment == 0;
 
-    ofs_2 << std::endl
-          << "tensor_id=" << tensor->index_ << "\tsize=" << tensor->size_ << "\toffset=" << tensor->offset_
-          << "\tcontinuous=" << continuous << "\tsize_aligned=" << size_aligned
-          << "\toffset_aligned=" << offset_aligned;
+    ofs_out << std::endl
+            << "tensor_id=" << tensor->index_ << "\tsize=" << tensor->size_ << "\toffset=" << tensor->offset_
+            << "\tcontinuous=" << continuous << "\tsize_aligned=" << size_aligned
+            << "\toffset_aligned=" << offset_aligned;
   }
-  ofs_2.close();
+  ofs_out.close();
 
-  MS_LOG(INFO) << "SomasSolver::Log done";
+  MS_LOG(INFO) << "SomasSolver output Log done";
 }
 }  // namespace somas
 }  // namespace mindspore

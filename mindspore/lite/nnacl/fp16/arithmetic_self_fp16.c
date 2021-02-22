@@ -108,3 +108,13 @@ int ElementNegativeFp16(float16_t *input, float16_t *output, int element_size) {
   }
   return NNACL_OK;
 }
+
+int ElementReciprocalFp16(float16_t *input, float16_t *output, int element_size) {
+  for (int i = 0; i < element_size; ++i) {
+    if (input[i] == 0.0f) {
+      return NNACL_ERR;
+    }
+    output[i] = 1.f / input[i];
+  }
+  return NNACL_OK;
+}

@@ -19,11 +19,13 @@
 #include <algorithm>
 #include <vector>
 #include "src/kernel_registry.h"
-#include "src/runtime/opencl/opencl_runtime.h"
-#include "src/runtime/kernel/opencl/opencl_kernel.h"
 #include "src/common/file_utils.h"
 
-using mindspore::lite::KernelRegistrar;
+using mindspore::schema::ActivationType_LEAKY_RELU;
+using mindspore::schema::ActivationType_RELU;
+using mindspore::schema::ActivationType_RELU6;
+using mindspore::schema::ActivationType_SIGMOID;
+using mindspore::schema::ActivationType_TANH;
 
 namespace mindspore::lite {
 kernel::LiteKernel *GetOpenCLKernel(const std::vector<Tensor *> &in_tensors, const std::vector<Tensor *> &out_tensors,
@@ -38,6 +40,53 @@ kernel::LiteKernel *GetOpenCLKernel(const std::vector<Tensor *> &in_tensors, con
 }  // namespace mindspore::lite
 
 namespace mindspore::kernel {
+
+const std::set<schema::PrimitiveType> ArithmeticPrimitives = {schema::PrimitiveType_Mul,
+                                                              schema::PrimitiveType_Add,
+                                                              schema::PrimitiveType_Sub,
+                                                              schema::PrimitiveType_Div,
+                                                              schema::PrimitiveType_LogicalAnd,
+                                                              schema::PrimitiveType_LogicalOr,
+                                                              schema::PrimitiveType_Maximum,
+                                                              schema::PrimitiveType_Minimum,
+                                                              schema::PrimitiveType_FloorDiv,
+                                                              schema::PrimitiveType_FloorMod,
+                                                              schema::PrimitiveType_SquaredDifference,
+                                                              schema::PrimitiveType_Equal,
+                                                              schema::PrimitiveType_NotEqual,
+                                                              schema::PrimitiveType_Less,
+                                                              schema::PrimitiveType_LessEqual,
+                                                              schema::PrimitiveType_Greater,
+                                                              schema::PrimitiveType_GreaterEqual,
+                                                              schema::PrimitiveType_Eltwise,
+                                                              schema::PrimitiveType_BiasAdd};
+
+const std::set<schema::PrimitiveType> ArithmeticSelfPrimitives = {
+  schema::PrimitiveType_Abs,        schema::PrimitiveType_Ceil,  schema::PrimitiveType_Cos,
+  schema::PrimitiveType_Exp,        schema::PrimitiveType_Floor, schema::PrimitiveType_Log,
+  schema::PrimitiveType_LogicalNot, schema::PrimitiveType_Round, schema::PrimitiveType_Rsqrt,
+  schema::PrimitiveType_Sin,        schema::PrimitiveType_Neg,   schema::PrimitiveType_Sqrt,
+  schema::PrimitiveType_Square};
+
+std::string GetActDefines() {
+  static std::string act_defines = "#define ActivationType_RELU " + std::to_string(ActivationType_RELU) +
+                                   "\n#define ActivationType_RELU6 " + std::to_string(ActivationType_RELU6) +
+                                   "\n#define ActivationType_LEAKY_RELU " + std::to_string(ActivationType_LEAKY_RELU) +
+                                   "\n#define ActivationType_TANH " + std::to_string(ActivationType_TANH) +
+                                   "\n#define ActivationType_SIGMOID " + std::to_string(ActivationType_SIGMOID) + "\n";
+  return act_defines;
+}
+
+int GetUpPow2(int n) {
+  int i = 0;
+  int j = 0;
+  while (n > 0) {
+    j += n & 1;
+    n = n >> 1;
+    i++;
+  }
+  return 1 << (i - (j == 1));
+}
 
 int GetMaxDivisor(int x, int divisor) {
   int i = divisor;
@@ -72,29 +121,6 @@ int GetMaxDivisorStrategy1(int x, int divisor) {
   } else {
     return GetMaxDivisor(x, divisor);
   }
-}
-
-std::vector<size_t> GetCommonGlobalSize(const std::vector<size_t> &local, const std::vector<size_t> &global) {
-  MS_ASSERT(local.size() == global.size() && local.size() == 3);
-  std::vector<size_t> result(3);
-  for (int i = 0; i < 3; ++i) {
-    result[i] = UP_ROUND(global[i], local[i]);
-  }
-  return result;
-}
-
-std::vector<size_t> GetCommonLocalSize(const std::vector<size_t> &global, int max_size) {
-  MS_ASSERT(global.size() == 3);
-  size_t local_z = GetMaxDivisorStrategy0(global[2], 8);
-  if (local_z == 0) {
-    MS_LOG(ERROR) << "Divide by zero";
-    return {};
-  }
-  size_t local_xy = max_size / local_z;
-  size_t local_x = std::min(UP_DIV(global[0], 2), local_xy);
-  size_t local_y = std::min(local_xy / local_x, global[1]);
-  std::vector<size_t> local = {local_x, local_y, local_z};
-  return local;
 }
 
 std::string CLErrorCode(cl_int error_code) {
@@ -246,99 +272,54 @@ int WriteToBin(const std::string &file_path, void *data, size_t size) {
   return 0;
 }
 
-void PrintTensor(const lite::Tensor *tensor, OpenCLMemType mem_type, int n, const std::string &out_file) {
-  if (tensor == nullptr || tensor->data_c() == nullptr) {
-    return;
+int GetBroadcastGpuAxis(int ndim, int ori_axis) {
+  if (ori_axis >= ndim) {
+    return ndim - 1;
   }
+  int axis = 0;
+  if (ndim == 1) {
+    axis = 3;
+  } else if (ndim == 2) {
+    axis = ori_axis == 0 ? 0 : 3;
+  } else if (ndim == 3) {
+    axis = ori_axis == 0 ? 0 : ori_axis == 1 ? 2 : 3;
+  } else if (ndim == 4) {
+    axis = ori_axis;
+  } else if (ndim > 4) {
+    MS_LOG(ERROR) << "GPU doesn't support ndim>=" << ndim;
+  }
+  return axis;
+}
 
-  Image2DInfo img_info(tensor);
-  auto size = mem_type == OpenCLMemType::BUF ? img_info.OriginSize : img_info.Image2DSize;
-  std::vector<char> data(size);
-  auto runtime_wrapper = lite::opencl::OpenCLRuntimeWrapper();
-  auto runtime = runtime_wrapper.GetInstance();
-  auto allocator = runtime->GetAllocator();
-  runtime->SyncCommandQueue();
-  allocator->MapBuffer(tensor->data_c(), CL_MAP_READ, nullptr, true);
-  if (mem_type == OpenCLMemType::BUF) {
-    memcpy(data.data(), tensor->data_c(), img_info.OriginSize);
-  } else {
-    auto row_size = img_info.width * img_info.FLT4_size;
-    for (int i = 0; i < img_info.height; ++i) {
-      memcpy(reinterpret_cast<char *>(data.data()) + i * row_size,
-             static_cast<char *>(tensor->data_c()) + i * img_info.RowPitch(), row_size);
+void PackNHWCToNHWC4(void *src, void *dst, bool src_is_fp16, bool dst_is_fp16, const GpuTensorInfo &tensor) {
+  MS_ASSERT(src);
+  MS_ASSERT(dst);
+  auto src_fp16 = reinterpret_cast<float16_t *>(src);
+  auto src_fp32 = reinterpret_cast<float32_t *>(src);
+  auto dst_fp16 = reinterpret_cast<float16_t *>(dst);
+  auto dst_fp32 = reinterpret_cast<float32_t *>(dst);
+  for (int n = 0, src_idx = 0; n < tensor.N; n++) {
+    for (int h = 0; h < tensor.H; ++h) {
+      for (int w = 0; w < tensor.W; ++w) {
+        for (int c = 0; c < tensor.C; ++c, ++src_idx) {
+          int dst_idx = ((n * tensor.H + h) * tensor.W + w) * tensor.Slice * C4NUM + c;
+          if (dst_is_fp16) {
+            dst_fp16[dst_idx] = src_is_fp16 ? src_fp16[src_idx] : static_cast<float16_t>(src_fp32[src_idx]);
+          } else {
+            dst_fp32[dst_idx] = src_is_fp16 ? static_cast<float32_t>(src_fp16[src_idx]) : src_fp32[src_idx];
+          }
+        }
+      }
     }
   }
-  allocator->UnmapBuffer(tensor->data_c());
-
-  printf("shape=(");
-  auto shape = tensor->shape();
-  for (int i = 0; i < shape.size(); ++i) {
-    printf("%4d", shape[i]);
-    if (i + 1 < shape.size()) {
-      printf(",");
-    }
-  }
-  printf(") ");
-
-  auto num = mem_type == OpenCLMemType::BUF ? img_info.ElementsNum : img_info.ElementsC4Num;
-  for (int i = 0; i < n && i < num; ++i) {
-    if (tensor->data_type() == kNumberTypeFloat16) {
-      printf("%d %7.3f | ", i, reinterpret_cast<float16_t *>(data.data())[i]);
+  // scalar
+  if (tensor.ElementsNum == 1) {
+    if (dst_is_fp16) {
+      dst_fp16[3] = dst_fp16[2] = dst_fp16[1] = dst_fp16[0];
     } else {
-      printf("%d %7.3f | ", i, reinterpret_cast<float *>(data.data())[i]);
+      dst_fp32[3] = dst_fp32[2] = dst_fp32[1] = dst_fp32[0];
     }
   }
-  printf("\n");
-
-  if (!out_file.empty()) {
-    (void)WriteToBin(out_file, data.data(), data.size());
-  }
 }
 
-void PrintKernelOutput(OpenCLKernel *kernel, int n, const std::string &out_file) {
-  if (kernel == nullptr) {
-    return;
-  }
-  printf("%-30s", kernel->name().c_str());
-  if (!kernel->out_tensors().empty()) {
-    PrintTensor(kernel->out_tensors()[0], kernel->GetMemType(), n, out_file);
-  }
-}
-
-std::vector<int> GetNHWCShape(const std::vector<int> &tensor_shape) {
-  int n, h, w, c;
-  n = h = w = c = 1;
-  if (tensor_shape.size() == 1) {
-    c = tensor_shape[0];
-  } else if (tensor_shape.size() == 2) {
-    n = tensor_shape[0];
-    c = tensor_shape[1];
-  } else if (tensor_shape.size() == 3) {
-    n = tensor_shape[0];
-    h = tensor_shape[1];
-    c = tensor_shape[2];
-  } else if (tensor_shape.size() == 4) {
-    n = tensor_shape[0];
-    h = tensor_shape[1];
-    w = tensor_shape[2];
-    c = tensor_shape[3];
-  }
-  return {n, h, w, c};
-}
-
-std::vector<size_t> GetImage2dShapeFromNHWC(const std::vector<int> &tensor_shape, schema::Format format) {
-  if (tensor_shape.size() != 4) {
-    return {1, 1};
-  }
-  size_t image_x, image_y;
-  image_x = image_y = 1;
-  if (format == schema::Format_NHWC4) {
-    image_x = tensor_shape[2] * UP_DIV(tensor_shape[3], C4NUM);
-    image_y = tensor_shape[0] * tensor_shape[1];
-  } else if (format == schema::Format_NC4HW4) {
-    image_x = tensor_shape[2];
-    image_y = tensor_shape[0] * tensor_shape[1] * UP_DIV(tensor_shape[3], C4NUM);
-  }
-  return {image_x, image_y};
-}
 }  // namespace mindspore::kernel

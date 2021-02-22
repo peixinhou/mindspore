@@ -38,9 +38,6 @@ AnfNodePtr CreateTensorInput(const AnfNodePtr &node, const KernelGraphPtr &kerne
   if (value->isa<Scalar>()) {
     tensor_ptr = ScalarToTensor(value->cast<ScalarPtr>());
   } else if (value->isa<ValueTuple>()) {
-    if (!AnfAlgo::IsRealCNodeKernel(node)) {
-      return nullptr;
-    }
     tensor_ptr = CreateTupleTensor(value->cast<ValueTuplePtr>());
   } else {
     MS_LOG(EXCEPTION) << "The value should be a scalar or value tuple";
@@ -89,7 +86,11 @@ AnfNodePtr ConstInputToTensorInput(const FuncGraphPtr &func_graph, const CNodePt
     MS_EXCEPTION_IF_NULL(func_graph);
     auto new_cnode = func_graph->NewCNode(new_inputs);
     MS_EXCEPTION_IF_NULL(new_cnode);
-    new_cnode->set_abstract(cnode->abstract());
+    if (AnfAlgo::CheckPrimitiveType(cnode, prim::kPrimDepend)) {
+      new_cnode->set_abstract(new_inputs[1]->abstract());
+    } else {
+      new_cnode->set_abstract(cnode->abstract());
+    }
     new_cnode->set_scope(cnode->scope());
     AnfAlgo::CopyNodeAttrs(cnode, new_cnode);
     if (kernel_graph != nullptr) {
@@ -106,9 +107,7 @@ AnfNodePtr ProcessGraphKernelOp(const AnfNodePtr &node) {
   auto mng = sub_graph->manager();
   MS_EXCEPTION_IF_NULL(mng);
   std::vector<AnfNodePtr> todo;
-  std::vector<std::pair<AnfNodePtr, size_t>> graph_rets;
   kernel::GetValidKernelNodes(sub_graph, &todo);
-  kernel::GetGraphRealOutput(sub_graph, &graph_rets);
 
   for (auto &t : todo) {
     auto t_new_node = ConstInputToTensorInput(sub_graph, t->cast<CNodePtr>());
@@ -123,7 +122,8 @@ AnfNodePtr ProcessGraphKernelOp(const AnfNodePtr &node) {
 
 const AnfNodePtr ConvertConstInputToTensorInput::Process(const FuncGraphPtr &func_graph, const AnfNodePtr &node,
                                                          const EquivPtr &) const {
-  if (node == nullptr || func_graph == nullptr || !AnfAlgo::IsRealCNodeKernel(node)) {
+  if (node == nullptr || func_graph == nullptr || AnfAlgo::CheckPrimitiveType(node, prim::kPrimTupleGetItem) ||
+      AnfAlgo::CheckPrimitiveType(node, prim::kPrimMakeTuple)) {
     return nullptr;
   }
   if (!node->isa<CNode>()) {

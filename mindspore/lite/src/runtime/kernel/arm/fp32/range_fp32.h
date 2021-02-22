@@ -19,7 +19,7 @@
 
 #include <vector>
 #include "src/lite_kernel.h"
-#include "nnacl/fp32/range.h"
+#include "nnacl/fp32/range_fp32.h"
 
 namespace mindspore::kernel {
 class RangeCPUKernel : public LiteKernel {
@@ -33,6 +33,9 @@ class RangeCPUKernel : public LiteKernel {
   int Init() override;
   int ReSize() override;
   int Run() override;
+
+ private:
+  LiteDataType data_type_ = kDataTypeFloat;
 };
 }  // namespace mindspore::kernel
 

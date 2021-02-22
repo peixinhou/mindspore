@@ -1,5 +1,5 @@
 /**
- * Copyright 2020 Huawei Technologies Co., Ltd
+ * Copyright 2020-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,8 +15,7 @@
  */
 #include "common/common.h"
 #include "minddata/dataset/include/datasets.h"
-
-#include "minddata/dataset/engine/ir/datasetops/source/csv_node.h"
+#include "minddata/dataset/include/vision.h"
 
 using namespace mindspore::dataset;
 
@@ -25,10 +24,7 @@ Status GetSessionFromEnv(session_id_type *session_id);
 
 class MindDataTestCacheOp : public UT::DatasetOpTesting {
  public:
-  void SetUp() override {
-    DatasetOpTesting::SetUp();
-    GlobalInit();
-  }
+  void SetUp() override { DatasetOpTesting::SetUp(); }
 };
 
 TEST_F(MindDataTestCacheOp, DISABLED_TestCacheCApiSamplerNull) {
@@ -42,7 +38,41 @@ TEST_F(MindDataTestCacheOp, DISABLED_TestCacheCApiSamplerNull) {
   // Create an ImageFolder Dataset, this folder_path only has 2 images in it
   std::string folder_path = datasets_root_path_ + "/testImageNetData/train/";
   std::shared_ptr<Dataset> ds = ImageFolder(folder_path, false, nullptr, {}, {}, some_cache);
-  EXPECT_EQ(ds, nullptr);
+  EXPECT_NE(ds, nullptr);
+
+  // Create an iterator over the result of the above dataset
+  // This will trigger the creation of the Execution Tree and launch it.
+  // Now the parameter check for ImageFolderNode would fail and we would end up with a nullptr iter.
+  std::shared_ptr<Iterator> iter = ds->CreateIterator();
+  EXPECT_EQ(iter, nullptr);
+}
+
+TEST_F(MindDataTestCacheOp, DISABLED_TestCacheCApiNestedCache) {
+  session_id_type env_session;
+  Status s = GetSessionFromEnv(&env_session);
+  EXPECT_EQ(s, Status::OK());
+
+  std::shared_ptr<DatasetCache> some_cache = CreateDatasetCache(env_session, 0, true);
+  EXPECT_NE(some_cache, nullptr);
+
+  // Create an ImageFolder Dataset, this folder_path only has 2 images in it
+  std::string folder_path = datasets_root_path_ + "/testImageNetData/train/";
+  std::shared_ptr<Dataset> ds = ImageFolder(folder_path, false, RandomSampler(), {}, {}, some_cache);
+  EXPECT_NE(ds, nullptr);
+
+  // Create objects for the tensor ops
+  std::shared_ptr<TensorTransform> decode_op = std::make_shared<vision::Decode>();
+  EXPECT_NE(decode_op, nullptr);
+
+  // Create a Map operation on ds
+  ds = ds->Map({decode_op}, {}, {}, {"image"}, some_cache);
+  EXPECT_NE(ds, nullptr);
+
+  // Create an iterator over the result of the above dataset
+  // This will trigger the creation of the Execution Tree and launch it.
+  // Now in the cache_error_pass would fail and we would end up with a nullptr iter.
+  std::shared_ptr<Iterator> iter = ds->CreateIterator();
+  EXPECT_EQ(iter, nullptr);
 }
 
 TEST_F(MindDataTestCacheOp, DISABLED_TestCacheImageFolderCApi) {
@@ -69,14 +99,14 @@ TEST_F(MindDataTestCacheOp, DISABLED_TestCacheImageFolderCApi) {
   EXPECT_NE(iter, nullptr);
 
   // Iterate the dataset and get each row
-  std::unordered_map<std::string, std::shared_ptr<Tensor>> row;
+  std::unordered_map<std::string, mindspore::MSTensor> row;
   iter->GetNextRow(&row);
 
   uint64_t i = 0;
   while (row.size() != 0) {
     i++;
-    auto image = row["image"];
-    MS_LOG(INFO) << "Tensor image shape: " << image->shape();
+    // auto image = row["image"];
+    // MS_LOG(INFO) << "Tensor image shape: " << image->shape();
     iter->GetNextRow(&row);
   }
 
@@ -112,14 +142,14 @@ TEST_F(MindDataTestCacheOp, DISABLED_TestCacheCocoCApi) {
   EXPECT_NE(iter, nullptr);
 
   // Iterate the dataset and get each row
-  std::unordered_map<std::string, std::shared_ptr<Tensor>> row;
+  std::unordered_map<std::string, mindspore::MSTensor> row;
   iter->GetNextRow(&row);
 
   uint64_t i = 0;
   while (row.size() != 0) {
     i++;
-    auto image = row["image"];
-    MS_LOG(INFO) << "Tensor image shape: " << image->shape();
+    // auto image = row["image"];
+    // MS_LOG(INFO) << "Tensor image shape: " << image->shape();
     iter->GetNextRow(&row);
   }
 
@@ -153,14 +183,14 @@ TEST_F(MindDataTestCacheOp, DISABLED_TestCacheMnistCApi) {
   EXPECT_NE(iter, nullptr);
 
   // Iterate the dataset and get each row
-  std::unordered_map<std::string, std::shared_ptr<Tensor>> row;
+  std::unordered_map<std::string, mindspore::MSTensor> row;
   iter->GetNextRow(&row);
 
   uint64_t i = 0;
   while (row.size() != 0) {
     i++;
-    auto image = row["image"];
-    MS_LOG(INFO) << "Tensor image shape: " << image->shape();
+    // auto image = row["image"];
+    // MS_LOG(INFO) << "Tensor image shape: " << image->shape();
     iter->GetNextRow(&row);
   }
 
@@ -194,14 +224,14 @@ TEST_F(MindDataTestCacheOp, DISABLED_TestCacheCelebaCApi) {
   EXPECT_NE(iter, nullptr);
 
   // Iterate the dataset and get each row
-  std::unordered_map<std::string, std::shared_ptr<Tensor>> row;
+  std::unordered_map<std::string, mindspore::MSTensor> row;
   iter->GetNextRow(&row);
 
   uint64_t i = 0;
   while (row.size() != 0) {
     i++;
-    auto image = row["image"];
-    MS_LOG(INFO) << "Tensor image shape: " << image->shape();
+    // auto image = row["image"];
+    // MS_LOG(INFO) << "Tensor image shape: " << image->shape();
     iter->GetNextRow(&row);
   }
 
@@ -235,14 +265,14 @@ TEST_F(MindDataTestCacheOp, DISABLED_TestCacheManifestCApi) {
   EXPECT_NE(iter, nullptr);
 
   // Iterate the dataset and get each row
-  std::unordered_map<std::string, std::shared_ptr<Tensor>> row;
+  std::unordered_map<std::string, mindspore::MSTensor> row;
   iter->GetNextRow(&row);
 
   uint64_t i = 0;
   while (row.size() != 0) {
     i++;
-    auto image = row["image"];
-    MS_LOG(INFO) << "Tensor image shape: " << image->shape();
+    // auto image = row["image"];
+    // MS_LOG(INFO) << "Tensor image shape: " << image->shape();
     iter->GetNextRow(&row);
   }
 
@@ -276,14 +306,14 @@ TEST_F(MindDataTestCacheOp, DISABLED_TestCacheCifar10CApi) {
   EXPECT_NE(iter, nullptr);
 
   // Iterate the dataset and get each row
-  std::unordered_map<std::string, std::shared_ptr<Tensor>> row;
+  std::unordered_map<std::string, mindspore::MSTensor> row;
   iter->GetNextRow(&row);
 
   uint64_t i = 0;
   while (row.size() != 0) {
     i++;
-    auto image = row["image"];
-    MS_LOG(INFO) << "Tensor image shape: " << image->shape();
+    // auto image = row["image"];
+    // MS_LOG(INFO) << "Tensor image shape: " << image->shape();
     iter->GetNextRow(&row);
   }
 
@@ -317,14 +347,14 @@ TEST_F(MindDataTestCacheOp, DISABLED_TestCacheCifar100CApi) {
   EXPECT_NE(iter, nullptr);
 
   // Iterate the dataset and get each row
-  std::unordered_map<std::string, std::shared_ptr<Tensor>> row;
+  std::unordered_map<std::string, mindspore::MSTensor> row;
   iter->GetNextRow(&row);
 
   uint64_t i = 0;
   while (row.size() != 0) {
     i++;
-    auto image = row["image"];
-    MS_LOG(INFO) << "Tensor image shape: " << image->shape();
+    // auto image = row["image"];
+    // MS_LOG(INFO) << "Tensor image shape: " << image->shape();
     iter->GetNextRow(&row);
   }
 
@@ -358,14 +388,14 @@ TEST_F(MindDataTestCacheOp, DISABLED_TestCacheVocCApi) {
   EXPECT_NE(iter, nullptr);
 
   // Iterate the dataset and get each row
-  std::unordered_map<std::string, std::shared_ptr<Tensor>> row;
+  std::unordered_map<std::string, mindspore::MSTensor> row;
   iter->GetNextRow(&row);
 
   uint64_t i = 0;
   while (row.size() != 0) {
     i++;
-    auto image = row["image"];
-    MS_LOG(INFO) << "Tensor image shape: " << image->shape();
+    // auto image = row["image"];
+    // MS_LOG(INFO) << "Tensor image shape: " << image->shape();
     iter->GetNextRow(&row);
   }
 
@@ -401,7 +431,7 @@ TEST_F(MindDataTestCacheOp, DISABLED_TestCacheAlbumCApi) {
   EXPECT_NE(iter, nullptr);
 
   // Iterate the dataset and get each row
-  std::unordered_map<std::string, std::shared_ptr<Tensor>> row;
+  std::unordered_map<std::string, mindspore::MSTensor> row;
   iter->GetNextRow(&row);
 
   uint64_t i = 0;
@@ -428,7 +458,7 @@ TEST_F(MindDataTestCacheOp, DISABLED_TestCacheRandomDataCApi) {
   std::shared_ptr<SchemaObj> schema = Schema();
   schema->add_column("image", mindspore::TypeId::kNumberTypeUInt8, {2});
   schema->add_column("label", mindspore::TypeId::kNumberTypeUInt8, {1});
-  std::shared_ptr<Dataset> ds = RandomData(4, schema, {}, RandomSampler(), some_cache);
+  std::shared_ptr<Dataset> ds = RandomData(4, schema, {}, some_cache);
   EXPECT_NE(ds, nullptr);
 
   // Create a Repeat operation on ds
@@ -442,7 +472,7 @@ TEST_F(MindDataTestCacheOp, DISABLED_TestCacheRandomDataCApi) {
   EXPECT_NE(iter, nullptr);
 
   // Iterate the dataset and get each row
-  std::unordered_map<std::string, std::shared_ptr<Tensor>> row;
+  std::unordered_map<std::string, mindspore::MSTensor> row;
   iter->GetNextRow(&row);
 
   uint64_t i = 0;
@@ -483,14 +513,14 @@ TEST_F(MindDataTestCacheOp, DISABLED_TestCacheTFRecordCApi1) {
   EXPECT_NE(iter, nullptr);
 
   // Iterate the dataset and get each row
-  std::unordered_map<std::string, std::shared_ptr<Tensor>> row;
+  std::unordered_map<std::string, mindspore::MSTensor> row;
   iter->GetNextRow(&row);
 
   uint64_t i = 0;
   while (row.size() != 0) {
     i++;
-    auto image = row["image"];
-    MS_LOG(INFO) << "Tensor image shape: " << image->shape();
+    // auto image = row["image"];
+    // MS_LOG(INFO) << "Tensor image shape: " << image->shape();
     iter->GetNextRow(&row);
   }
 
@@ -534,14 +564,14 @@ TEST_F(MindDataTestCacheOp, DISABLED_TestCacheTFRecordCApi2) {
   EXPECT_NE(iter, nullptr);
 
   // Iterate the dataset and get each row
-  std::unordered_map<std::string, std::shared_ptr<Tensor>> row;
+  std::unordered_map<std::string, mindspore::MSTensor> row;
   iter->GetNextRow(&row);
 
   uint64_t i = 0;
   while (row.size() != 0) {
     i++;
-    auto image = row["image"];
-    MS_LOG(INFO) << "Tensor image shape: " << image->shape();
+    // auto image = row["image"];
+    // MS_LOG(INFO) << "Tensor image shape: " << image->shape();
     iter->GetNextRow(&row);
   }
 
@@ -581,14 +611,14 @@ TEST_F(MindDataTestCacheOp, DISABLED_TestCacheTFRecordCApi3) {
   EXPECT_NE(iter, nullptr);
 
   // Iterate the dataset and get each row
-  std::unordered_map<std::string, std::shared_ptr<Tensor>> row;
+  std::unordered_map<std::string, mindspore::MSTensor> row;
   iter->GetNextRow(&row);
 
   uint64_t i = 0;
   while (row.size() != 0) {
     i++;
-    auto image = row["image"];
-    MS_LOG(INFO) << "Tensor image shape: " << image->shape();
+    // auto image = row["image"];
+    // MS_LOG(INFO) << "Tensor image shape: " << image->shape();
     iter->GetNextRow(&row);
   }
 
@@ -626,7 +656,7 @@ TEST_F(MindDataTestCacheOp, DISABLED_TestCacheTextfileCApi) {
   EXPECT_NE(iter, nullptr);
 
   // Iterate the dataset and get each row
-  std::unordered_map<std::string, std::shared_ptr<Tensor>> row;
+  std::unordered_map<std::string, mindspore::MSTensor> row;
   iter->GetNextRow(&row);
 
   uint64_t i = 0;
@@ -670,7 +700,7 @@ TEST_F(MindDataTestCacheOp, DISABLED_TestCacheCsvCApi) {
   EXPECT_NE(iter, nullptr);
 
   // Iterate the dataset and get each row
-  std::unordered_map<std::string, std::shared_ptr<Tensor>> row;
+  std::unordered_map<std::string, mindspore::MSTensor> row;
   iter->GetNextRow(&row);
 
   uint64_t i = 0;
@@ -715,7 +745,7 @@ TEST_F(MindDataTestCacheOp, DISABLED_TestCacheClueCApi) {
   EXPECT_NE(iter, nullptr);
 
   // Iterate the dataset and get each row
-  std::unordered_map<std::string, std::shared_ptr<Tensor>> row;
+  std::unordered_map<std::string, mindspore::MSTensor> row;
   iter->GetNextRow(&row);
 
   uint64_t i = 0;
@@ -728,4 +758,145 @@ TEST_F(MindDataTestCacheOp, DISABLED_TestCacheClueCApi) {
 
   // Manually terminate the pipeline
   iter->Stop();
+}
+
+TEST_F(MindDataTestCacheOp, DISABLED_TestCApiCacheShare1) {
+  session_id_type env_session;
+  Status s = GetSessionFromEnv(&env_session);
+  EXPECT_EQ(s, Status::OK());
+
+  std::shared_ptr<DatasetCache> some_cache = CreateDatasetCache(env_session, 0, true);
+  EXPECT_NE(some_cache, nullptr);
+
+  // Create an ImageFolder Dataset, this folder_path only has 2 images in it
+  std::string folder_path = datasets_root_path_ + "/testImageNetData/train/";
+  std::shared_ptr<Dataset> ds1 = ImageFolder(folder_path, false, RandomSampler(), {}, {}, some_cache);
+  EXPECT_NE(ds1, nullptr);
+  std::shared_ptr<Dataset> ds2 = ImageFolder(folder_path, false, RandomSampler(), {}, {}, some_cache);
+  EXPECT_NE(ds2, nullptr);
+
+  // Create and launch the Execution Tree for ds1
+  std::shared_ptr<Iterator> iter1 = ds1->CreateIterator();
+  EXPECT_NE(iter1, nullptr);
+  // Iterate the dataset and get each row
+  std::unordered_map<std::string, mindspore::MSTensor> row;
+  iter1->GetNextRow(&row);
+
+  uint64_t i = 0;
+  while (row.size() != 0) {
+    i++;
+    // auto image = row["image"];
+    // MS_LOG(INFO) << "Tensor image shape: " << image->shape();
+    iter1->GetNextRow(&row);
+  }
+  EXPECT_EQ(i, 2);
+  // Manually terminate the pipeline
+  iter1->Stop();
+
+  // Create and launch the Execution Tree for ds2
+  std::shared_ptr<Iterator> iter2 = ds2->CreateIterator();
+  EXPECT_NE(iter2, nullptr);
+  // Iterate the dataset and get each row
+  iter2->GetNextRow(&row);
+
+  i = 0;
+  while (row.size() != 0) {
+    i++;
+    // auto image = row["image"];
+    // MS_LOG(INFO) << "Tensor image shape: " << image->shape();
+    iter2->GetNextRow(&row);
+  }
+  EXPECT_EQ(i, 2);
+
+  // Manually terminate the pipeline
+  iter2->Stop();
+}
+
+TEST_F(MindDataTestCacheOp, DISABLED_TestCApiCacheShare2) {
+  session_id_type env_session;
+  Status s = GetSessionFromEnv(&env_session);
+  EXPECT_EQ(s, Status::OK());
+
+  std::shared_ptr<DatasetCache> some_cache = CreateDatasetCache(env_session, 0, true);
+  EXPECT_NE(some_cache, nullptr);
+
+  // Create an ImageFolder Dataset, this folder_path only has 2 images in it
+  std::string folder_path = datasets_root_path_ + "/testImageNetData/train/";
+  // The first pipeline is ImageFolder with RandomSampler, the second pipeline is ImageFolder with SequentialSampler
+  // Since sampler does not influence the data in the source, these two pipelines can share a common cache.
+  std::shared_ptr<Dataset> ds1 = ImageFolder(folder_path, true, RandomSampler(), {}, {}, some_cache);
+  EXPECT_NE(ds1, nullptr);
+  std::shared_ptr<Dataset> ds2 = ImageFolder(folder_path, true, SequentialSampler(), {}, {}, some_cache);
+  EXPECT_NE(ds2, nullptr);
+
+  // Create and launch the Execution Tree for ds1
+  std::shared_ptr<Iterator> iter1 = ds1->CreateIterator();
+  EXPECT_NE(iter1, nullptr);
+  // Iterate the dataset and get each row
+  std::unordered_map<std::string, mindspore::MSTensor> row;
+  iter1->GetNextRow(&row);
+
+  uint64_t i = 0;
+  while (row.size() != 0) {
+    i++;
+    // auto image = row["image"];
+    iter1->GetNextRow(&row);
+  }
+  EXPECT_EQ(i, 2);
+  // Manually terminate the pipeline
+  iter1->Stop();
+
+  // Create and launch the Execution Tree for ds2
+  std::shared_ptr<Iterator> iter2 = ds2->CreateIterator();
+  EXPECT_NE(iter2, nullptr);
+  // Iterate the dataset and get each row
+  iter2->GetNextRow(&row);
+
+  i = 0;
+  while (row.size() != 0) {
+    i++;
+    // auto image = row["image"];
+    iter2->GetNextRow(&row);
+  }
+  EXPECT_EQ(i, 2);
+
+  // Manually terminate the pipeline
+  iter2->Stop();
+}
+
+TEST_F(MindDataTestCacheOp, DISABLED_TestCApiCacheShareFailure1) {
+  session_id_type env_session;
+  Status s = GetSessionFromEnv(&env_session);
+  EXPECT_EQ(s, Status::OK());
+
+  std::shared_ptr<DatasetCache> some_cache = CreateDatasetCache(env_session, 0, true);
+  EXPECT_NE(some_cache, nullptr);
+
+  // Create an ImageFolder Dataset, this folder_path only has 2 images in it
+  std::string folder_path = datasets_root_path_ + "/testImageNetData/train/";
+  std::shared_ptr<Dataset> ds1 = ImageFolder(folder_path, true, RandomSampler(), {}, {}, some_cache);
+  EXPECT_NE(ds1, nullptr);
+  std::shared_ptr<Dataset> ds2 = ImageFolder(folder_path, false, RandomSampler(), {}, {}, some_cache);
+  EXPECT_NE(ds2, nullptr);
+
+  // Create and launch the Execution Tree for ds1
+  std::shared_ptr<Iterator> iter1 = ds1->CreateIterator();
+  EXPECT_NE(iter1, nullptr);
+  // Iterate the dataset and get each row
+  std::unordered_map<std::string, mindspore::MSTensor> row;
+  iter1->GetNextRow(&row);
+
+  uint64_t i = 0;
+  while (row.size() != 0) {
+    i++;
+    // auto image = row["image"];
+    iter1->GetNextRow(&row);
+  }
+  EXPECT_EQ(i, 2);
+  // Manually terminate the pipeline
+  iter1->Stop();
+
+  // Re-use a cache for the second pipeline would fail
+  std::shared_ptr<Iterator> iter2 = ds2->CreateIterator();
+  EXPECT_EQ(iter2, nullptr);
 }

@@ -17,8 +17,11 @@
 #define MINDSPORE_LITE_SRC_RUNTIME_KERNEL_ARM_INT8_DEPTH_TO_SPACE_INT8_H_
 
 #include <vector>
+#include "include/errorcode.h"
+#include "nnacl/base/depth_to_space_base.h"
+#include "nnacl/int8/depth_to_space_int8.h"
+#include "mindspore/lite/nnacl/int8/quantize.h"
 #include "src/runtime/kernel/arm/base/depth_to_space_base.h"
-#include "nnacl/quantization/quantize.h"
 
 namespace mindspore::kernel {
 class DepthToSpaceInt8CPUKernel : public DepthToSpaceBaseCPUKernel {
@@ -27,7 +30,6 @@ class DepthToSpaceInt8CPUKernel : public DepthToSpaceBaseCPUKernel {
                             const std::vector<lite::Tensor *> &outputs, const lite::InnerContext *ctx,
                             const mindspore::lite::PrimitiveC *primitive)
       : DepthToSpaceBaseCPUKernel(parameter, inputs, outputs, ctx, primitive) {}
-
   ~DepthToSpaceInt8CPUKernel() = default;
 
   int Init() override;

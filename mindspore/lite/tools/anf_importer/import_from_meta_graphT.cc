@@ -38,10 +38,17 @@ int AnfImporterFromMetaGraphT::ConverterConstTensor() {
     std::copy(tensor->dims.begin(), tensor->dims.end(), shape.begin());
     auto type_id = static_cast<TypeId>(tensor->dataType);
     auto type_ptr = TypeIdToType(type_id);
-    auto abstract_tensor = std::make_shared<abstract::AbstractTensor>(type_ptr, shape);
+    std::vector<int64_t> shape_vector;
+    (void)std::transform(shape.begin(), shape.end(), std::back_inserter(shape_vector),
+                         [](const int32_t &value) { return static_cast<int64_t>(value); });
+    auto abstract_tensor = std::make_shared<abstract::AbstractTensor>(type_ptr, shape_vector);
     MS_ASSERT(nullptr != abstract_tensor);
     parameter->set_abstract(abstract_tensor);
-    parameter->set_name("const_" + std::to_string(i) + "_parameter");
+    if (!tensor->name.empty()) {
+      parameter->set_name(tensor->name);
+    } else {
+      parameter->set_name("const-" + std::to_string(i));
+    }
 
     ParamValueLitePtr param_value = std::make_shared<ParamValueLite>();
     MS_ASSERT(nullptr != param_value);
@@ -61,8 +68,10 @@ int AnfImporterFromMetaGraphT::ConverterConstTensor() {
         delete[] tensor_data;
         return RET_MEMORY_FAILED;
       }
-      param_value->set_tensor_addr(tensor_data);
-      param_value->set_tensor_size(size);
+      param_value->SetTensorData(tensor_data, size);
+      parameter->set_default_param(param_value);
+    } else if (std::find(meta_graph_->inputIndex.begin(), meta_graph_->inputIndex.end(), i) ==
+               meta_graph_->inputIndex.end()) {
       parameter->set_default_param(param_value);
     }
     AddNode(i, parameter);
@@ -117,7 +126,10 @@ abstract::AbstractTensorPtr AnfImporterFromMetaGraphT::ConvertTensorToAbstractTe
   std::copy(tensor->dims.begin(), tensor->dims.end(), shape.begin());
   auto type_id = static_cast<TypeId>(tensor->dataType);
   auto type_ptr = TypeIdToType(type_id);
-  auto ptr = std::make_shared<abstract::AbstractTensor>(type_ptr, shape);
+  std::vector<int64_t> shape_vector;
+  (void)std::transform(shape.begin(), shape.end(), std::back_inserter(shape_vector),
+                       [](const int32_t &value) { return static_cast<int64_t>(value); });
+  auto ptr = std::make_shared<abstract::AbstractTensor>(type_ptr, shape_vector);
   MS_ASSERT(nullptr != ptr);
   return ptr;
 }
@@ -188,10 +200,7 @@ int AnfImporterFromMetaGraphT::ConverterCNode() {
       op_inputs.push_back(node);
     }
     auto new_cnode = func_graph_->NewCNode(op_inputs);
-    if (new_cnode == nullptr) {
-      MS_LOG(ERROR) << "NewCNode is nullptr";
-      return RET_NULL_PTR;
-    }
+    MS_ASSERT(nullptr != new_cnode);
     new_cnode->set_fullname_with_scope(cNode->name);
     auto status = ConvertAbstract(cNode, new_cnode);
     if (status != RET_OK) {
@@ -239,10 +248,7 @@ int AnfImporterFromMetaGraphT::AddReturnCNode() {
     op_inputs.emplace_back(value_node);
     op_inputs.emplace_back(make_tuple_cnode);
     auto cnode = func_graph_->NewCNode(op_inputs);
-    if (cnode == nullptr) {
-      MS_LOG(ERROR) << "NewCNode is nullptr";
-      return RET_NULL_PTR;
-    }
+    MS_ASSERT(nullptr != cnode);
     cnode->set_fullname_with_scope("return");
     func_graph_->set_return(cnode);
   } else {

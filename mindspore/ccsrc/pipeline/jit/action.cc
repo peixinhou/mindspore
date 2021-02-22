@@ -31,6 +31,7 @@
 #include "pipeline/jit/pass.h"
 #include "pipeline/jit/parse/parse_base.h"
 #include "pipeline/jit/parse/data_converter.h"
+#include "pipeline/jit/static_analysis/auto_monad.h"
 #include "abstract/abstract_value.h"
 #include "pipeline/jit/static_analysis/static_analysis.h"
 #include "pipeline/jit/static_analysis/program_specialize.h"
@@ -106,7 +107,9 @@ FuncGraphPtr Renormalize(const ResourcePtr &res, const FuncGraphPtr &func_graph,
   MsProfile::StatTime("renormalize.infer", t2 - t1);
   MsProfile::StatTime("renormalize.specialize", t3 - t2);
 #endif
+
   MS_LOG(DEBUG) << "Renormalize end";
+
   return ret;
 }
 
@@ -167,14 +170,13 @@ bool CombineLikeGraphs(const ResourcePtr &res) {
     auto base_graph = cloner->cloned_func_graph()[fg];
     MS_LOG(DEBUG) << "Basegraph:" << base_graph->ToString();
 
-    if (fg->paramter_obj_nodes().size() == 0 || graphs.size() <= 1) {
+    if (fg->used_global_parameters().empty() || graphs.size() <= 1) {
       continue;
     }
     auto &cloned_nodes = *cloner->cloned_node();
-    for (auto &fv : fg->paramter_obj_nodes()) {
-      TraceManager::DebugTrace(std::make_shared<TraceCombileLikeGraphs>(fv->debug_info()));
+    for (auto &fv : fg->used_global_parameters()) {
+      TraceGuard guard(std::make_shared<TraceCombileLikeGraphs>(fv->debug_info()));
       auto param = base_graph->add_parameter();
-      TraceManager::EndTrace();
       auto &node_users = res->manager()->node_users()[fv];
       for (auto &n : node_users) {
         // If the user is not in this graph, no need to change.
@@ -186,10 +188,10 @@ bool CombineLikeGraphs(const ResourcePtr &res) {
         repl_n->set_input(n.second, param);
       }
     }
-    MS_LOG(DEBUG) << "Fg0 paramter_obj_nodes size :" << fg->paramter_obj_nodes().size();
+    MS_LOG(DEBUG) << "Fg0 used_global_parameters size :" << fg->used_global_parameters().size();
 
     for (auto &g : graphs) {
-      auto fvs = g->paramter_obj_nodes();
+      auto &fvs = g->used_global_parameters();
       std::vector<AnfNodePtr> new_node_inputs;
       new_node_inputs.push_back(NewValueNode(base_graph));
       for (auto &p : g->parameters()) {
@@ -197,7 +199,7 @@ bool CombineLikeGraphs(const ResourcePtr &res) {
         new_node_inputs.push_back(para_after_cast);
       }
       (void)new_node_inputs.insert(new_node_inputs.end(), fvs.begin(), fvs.end());
-      AnfNodePtr out = g->NewCNode(new_node_inputs);
+      AnfNodePtr out = g->NewCNodeBefore(g->get_return(), new_node_inputs);
       g->set_output(out);
       MS_LOG(DEBUG) << "Combine graph newout:" << out->DebugString(4);
     }
@@ -210,21 +212,33 @@ bool SymbolResolveAction(const ResourcePtr &res) {
   if (res->manager() == nullptr) {
     MS_LOG(EXCEPTION) << "SymbolResolve error, manager is null";
   }
-  if (res->func_graph() == nullptr) {
+  auto func_graph = res->func_graph();
+  if (func_graph == nullptr) {
     MS_LOG(EXCEPTION) << "SymbolResolve error, graph is null";
   }
-  FuncGraphPtr func_graph = res->func_graph();
-  auto succ = parse::ResolveFuncGraph(func_graph, res);
-
+  bool ret = parse::ResolveFuncGraph(func_graph, res);
   // Remove unused nodes in cnode order list.
-  func_graph->EraseUnusedNodeInOrder();
-  func_graph->ReleaseFullOrderToEffectOrder();
-  for (auto fg : func_graph->func_graphs_used_total()) {
-    MS_EXCEPTION_IF_NULL(fg);
-    fg->EraseUnusedNodeInOrder();
-    fg->ReleaseFullOrderToEffectOrder();
+  if (func_graph) {
+    func_graph->EraseUnusedNodeInOrder();
+    for (auto fg : func_graph->func_graphs_used_total()) {
+      if (fg) {
+        fg->EraseUnusedNodeInOrder();
+      }
+    }
   }
-  return succ;
+  return ret;
+}
+
+bool AutoMonadAction(const ResourcePtr &res) {
+  if (res->manager() == nullptr) {
+    MS_LOG(EXCEPTION) << "Auto-Monad failed, manager is null";
+  }
+  auto func_graph = res->func_graph();
+  if (func_graph == nullptr) {
+    MS_LOG(EXCEPTION) << "Auto-Monad failed, graph is null";
+  }
+  (void)pipeline::AutoMonad(func_graph);
+  return true;
 }
 
 bool InferenceOptPrepareAction(const ResourcePtr &res) {
@@ -271,6 +285,16 @@ bool AbstractSpecializeAction(const ResourcePtr &res) {
   FuncGraphPtr new_fg = ProgramSpecialize(res, result.context->func_graph(), result.context);
   res->set_func_graph(new_fg);
 
+  // Remove unused nodes in cnode order list, this is prepared for auto-monad.
+  if (new_fg) {
+    new_fg->EraseUnusedNodeInOrder();
+    for (auto fg : new_fg->func_graphs_used_total()) {
+      if (fg) {
+        fg->EraseUnusedNodeInOrder();
+      }
+    }
+  }
+
   MS_LOG(DEBUG) << "End graph: " << new_fg->ToString() << ", return: " << new_fg->get_return()->DebugString(true);
   return true;
 }
@@ -302,6 +326,10 @@ bool OptimizeAction(const ResourcePtr &res, const std::vector<PassItem> &passes)
 }
 
 bool OptInlineAction(const ResourcePtr &res) {
+  if (parallel::ParallelContext::GetInstance()->parallel_mode() == "semi_auto_parallel" ||
+      parallel::ParallelContext::GetInstance()->parallel_mode() == "auto_parallel") {
+    return OptimizeAction(res, kInlinePasses);
+  }
   if (opt::python_pass::PyPassManager::GetInstance()->GetPassGroup(opt::python_pass::Phase::PREAD)->size() != 0) {
     return OptimizeAction(res, kInlinePasses);
   }
@@ -312,7 +340,14 @@ bool GeOptimizeAction(const ResourcePtr &res) { return OptimizeAction(res, kGePa
 
 bool VmOptimizeAction(const ResourcePtr &res) { return OptimizeAction(res, kVmPasses); }
 
-bool PynativeOptimizeAction(const ResourcePtr &res) { return OptimizeAction(res, kPynativePasses); }
+bool PynativeOptimizeAction(const ResourcePtr &resource) {
+  WITH(MsProfile::GetProfile())[&resource]() { (void)OptimizeAction(resource, kPynativePasses); };
+#ifdef ENABLE_PROFILE
+  MsProfile::Print();
+  MsProfile::Reset();
+#endif
+  return true;
+}
 
 bool PynativeElimOpt(const ResourcePtr &res) {
   if (res->manager() == nullptr) {
@@ -354,7 +389,7 @@ bool TaskEmitAction(const ResourcePtr &res) {
   auto context_ptr = MsContext::GetInstance();
   std::string backend = MsContext::GetInstance()->backend_policy();
   MS_EXCEPTION_IF_NULL(context_ptr);
-  if (CompileGraphs::ContainMixedTarget(func_graph)) {
+  if (func_graph->ContainMultiTarget()) {
     bc_ptr->set_is_multi_graph_sink(false);
     context_ptr->set_param<bool>(MS_CTX_IS_MULTI_GRAPH_SINK, false);
     context_ptr->set_param<bool>(MS_CTX_ENABLE_LOOP_SINK, false);
@@ -437,14 +472,14 @@ bool StartPSSchedulerAction(const ResourcePtr &res) {
 #endif
 
 // The parallel primitive related valuenode might be partitioned so that its value changes by device,
-// that will result in a syncronization error due to different executing order.
+// that will result in a synchronization error due to different executing order.
 // Here we temporarily avoid the problem by skipping valuenode merging used by parallel related primitive,
 // the final solution will be proposed later as a parallel feature.
 bool KeepValueNodeDuplication(const AnfNodePtr &value_node, const ResourcePtr &res) {
   auto &node_users = res->manager()->node_users();
   auto &users = node_users[value_node];
   auto used_by_keep_value_prim =
-    std::any_of(users.begin(), users.end(), [](const std::pair<AnfNodePtr, int> &user) -> bool {
+    std::any_of(users.begin(), users.end(), [](const std::pair<AnfNodePtr, int64_t> &user) -> bool {
       MS_EXCEPTION_IF_NULL(user.first);
       auto cnode = user.first->cast<CNodePtr>();
       if (cnode == nullptr) {
@@ -480,6 +515,7 @@ bool RemoveValueNodeDuplicationsAction(const ResourcePtr &res) {
   return true;
 }
 
+bool PipelineSplitAction(const ResourcePtr &res) { return PipelineSplitPass(res); }
 bool ValidateAction(const ResourcePtr &res) { return ValidatePass(res); }
 
 bool ActionPyStub(const ResourcePtr &res, opt::python_pass::Phase phase) {
@@ -547,6 +583,7 @@ static std::vector<ActionItem> CommonPipeline() {
 
   // Resolve the python func
   actions.emplace_back(std::make_pair("symbol_resolve", SymbolResolveAction));
+
   auto multi_graphs = parallel::CostModelContext::GetInstance()->is_multi_subgraphs();
   if (!multi_graphs) {
     actions.emplace_back(std::make_pair("combine_like_graphs", CombineLikeGraphs));
@@ -555,10 +592,14 @@ static std::vector<ActionItem> CommonPipeline() {
   actions.emplace_back(std::make_pair("inference_opt_prepare", InferenceOptPrepareAction));
   // Evaluate type and shape, and specialize
   actions.emplace_back(std::make_pair("abstract_specialize", AbstractSpecializeAction));
+  // Auto-monad for side-effects handling.
+  actions.emplace_back(std::make_pair("auto_monad", AutoMonadAction));
   // Do data structure simplifications and inline
   actions.emplace_back(std::make_pair("inline", OptInlineAction));
   // Add pre-ad, post-inline python pass stub
   actions.emplace_back(std::make_pair("py_pre_ad", PreAdActionPyStub));
+  // Do PipelineSplit
+  actions.emplace_back(std::make_pair("pipeline_split", PipelineSplitAction));
 
   return actions;
 }

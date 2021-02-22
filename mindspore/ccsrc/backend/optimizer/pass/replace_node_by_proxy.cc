@@ -30,11 +30,13 @@ kernel::KernelBuildInfoPtr ReplaceNodeByProxy::GenerateKernelBuildInfo(const CNo
   std::vector<TypeId> outputs_device_type;
   std::vector<std::vector<size_t>> outputs_shape;
   kernel::KernelBuildInfo::KernelBuildInfoBuilder builder;
-  for (size_t input_index = 0; input_index < AnfAlgo::GetInputTensorNum(cnode); ++input_index) {
+  size_t input_num = AnfAlgo::GetInputTensorNum(cnode);
+  for (size_t input_index = 0; input_index < input_num; ++input_index) {
     inputs_device_format.push_back(AnfAlgo::GetInputFormat(cnode, input_index));
     inputs_device_type.push_back(AnfAlgo::GetInputDeviceDataType(cnode, input_index));
   }
-  for (size_t output_index = 0; output_index < AnfAlgo::GetOutputTensorNum(cnode); ++output_index) {
+  size_t output_num = AnfAlgo::GetOutputTensorNum(cnode);
+  for (size_t output_index = 0; output_index < output_num; ++output_index) {
     outputs_device_format.push_back(AnfAlgo::GetOutputFormat(cnode, output_index));
     outputs_device_type.push_back(AnfAlgo::GetOutputDeviceDataType(cnode, output_index));
     outputs_shape.push_back(AnfAlgo::GetOutputInferShape(cnode, output_index));
@@ -57,6 +59,7 @@ bool ReplaceNodeByProxy::Run(const FuncGraphPtr &func_graph) {
   std::vector<AnfNodePtr> node_list = TopoSort(func_graph->get_return());
   for (auto node : node_list) {
     if (node != nullptr && node->isa<CNode>() && AnfAlgo::GetCNodeName(node) == kEmbeddingLookupOpName) {
+      TraceGuard guard(std::make_shared<TraceOpt>(node->debug_info()));
       CNodePtr cnode = node->cast<CNodePtr>();
       auto prim = std::make_shared<Primitive>(kEmbeddingLookupProxyOpName);
       MS_EXCEPTION_IF_NULL(prim);

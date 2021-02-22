@@ -17,18 +17,23 @@
 #ifndef MINDSPORE_CCSRC_FRONTEND_PARALLEL_OPS_INFO_OPS_UTILS_H_
 #define MINDSPORE_CCSRC_FRONTEND_PARALLEL_OPS_INFO_OPS_UTILS_H_
 
+#include "base/core_ops.h"
+
 namespace mindspore {
 namespace parallel {
 constexpr size_t PRELU_INPUTS_SIZE = 2;
 constexpr size_t PRELU_OUTPUTS_SIZE = 1;
 constexpr size_t PRELU_SECOND_INPUT_SIZE = 1;
-constexpr int32_t PRELU_CHANNEL_INDEX = 1;
-constexpr int32_t PRELU_CHANNEL_STRATEGY = 1;
-constexpr int32_t NO_SPLIT_MAP = -1;
-constexpr int32_t NO_SPLIT_STRATEGY = 1;
-constexpr int32_t SPLIT_FLAG = 1;
-constexpr int32_t NO_SPLIT_FLAG = 0;
+constexpr int64_t PRELU_CHANNEL_INDEX = 1;
+constexpr int64_t PRELU_CHANNEL_STRATEGY = 1;
+constexpr int64_t NO_SPLIT_MAP = -1;
+constexpr int64_t NO_SPLIT_STRATEGY = 1;
+constexpr int64_t SPLIT_FLAG = 1;
+constexpr int64_t NO_SPLIT_FLAG = 0;
 constexpr size_t MATMUL_ATTRS_SIZE = 2;
+constexpr size_t SLICE_BEGIN_INDEX = 1;
+constexpr size_t SLICE_SIZE_INDEX = 2;
+constexpr size_t SLICE_INPUTS_SIZE = 3;
 constexpr size_t STRIDED_SLICE_ATTRS_SIZE = 5;
 constexpr size_t STRIDED_SLICE_INPUTS_SIZE = 4;
 constexpr size_t STRIDED_SLICE_BEGIN_INDEX = 1;
@@ -65,6 +70,7 @@ constexpr char REDUCE_OP_MAX[] = "max";
 constexpr char REDUCE_OP_MIN[] = "min";
 constexpr char OP_PATH[] = "mindspore.ops.operations";
 constexpr char INNER_OP_PATH[] = "mindspore.ops.operations._inner_ops";
+constexpr char FUNCTIONAL_OP_PATH[] = "mindspore.ops.functional";
 constexpr char GET_OP_FUNCTION_PATH[] = "mindspore.parallel._utils";
 constexpr char GET_OP_FUNCTION[] = "_get_python_op";
 constexpr char KEEP_DIMS[] = "keep_dims";
@@ -98,11 +104,22 @@ constexpr char ELLIPSIS_MASK[] = "ellipsis_mask";
 constexpr char NEW_AXIS_MASK[] = "new_axis_mask";
 constexpr char SHRINK_AXIS_MASK[] = "shrink_axis_mask";
 constexpr char BEGIN[] = "begin";
+constexpr char SIZE[] = "size";
 constexpr char END[] = "end";
 constexpr char STRIDES[] = "strides";
 constexpr char GROUP[] = "group";
 constexpr char FUSION[] = "fusion";
+constexpr char NUM_SAMPLED[] = "num_sampled";
+constexpr char NUM_TRUE[] = "num_true";
+constexpr char SEED[] = "seed";
+constexpr char RANGE_MAX[] = "range_max";
+constexpr char REMOVE_ACCIDENTAL_HITS[] = "remove_accidental_hits";
+constexpr char UNIQUE_STRING[] = "unique";
 constexpr char AXIS[] = "axis";
+constexpr char AXES[] = "axes";
+constexpr char START[] = "start";
+constexpr char LIMIT[] = "limit";
+constexpr char DELTA[] = "delta";
 constexpr char OUTPUT_NUM[] = "output_num";
 constexpr char SPLIT_COUNT[] = "split_count";
 constexpr char SPLIT_DIM[] = "split_dim";
@@ -132,8 +149,10 @@ constexpr char IS_IN_FORWARD[] = "is_in_forward";
 constexpr char DTYPE[] = "DType";
 constexpr char DEV_NUM[] = "dev_num";
 constexpr char MEAN_FLAG[] = "mean_flag";
+constexpr char GRAD_ACCUMULATION_STEP[] = "grad_accumulation_step";
 constexpr char TYPES[] = "types";
 constexpr char SHAPES[] = "shapes";
+constexpr char ACCU_GRADS[] = "accu_grads";
 constexpr char GETNEXT_NUM[] = "output_num";
 constexpr char SHARED_NAME[] = "shared_name";
 constexpr char MIRROR_OP[] = "mirror_op";
@@ -145,6 +164,7 @@ constexpr char FIELD_SIZE[] = "field_size";
 constexpr char OPTIMIZER_SUB_STRING[] = "optimizer";
 constexpr char DEVICE[] = "Device";
 constexpr char PARALLEL_OPTIMIZER_ALLGATHER[] = "parallel_optimizer_allgather";
+constexpr char CELLLIST_KEYWORD_PATTERN[] = "-CellList/(\\d+)-";
 
 // Operator
 constexpr char VIRTUAL_DIV[] = "_VirtualDiv";
@@ -156,6 +176,8 @@ constexpr char CONCAT_BY_AXIS[] = "ConcatByAxis";
 constexpr char SPLIT_BY_AXIS[] = "SplitByAxis";
 constexpr char ALL_REDUCE[] = "AllReduce";
 constexpr char MIRROR_OPERATOR[] = "_MirrorOperator";
+constexpr char MIRROR_MINI_STEP_OPERATOR[] = "_MirrorMiniStepOperator";
+constexpr char LOCAL_STEP[] = "local_step";
 constexpr char STRIDED_SLICE[] = "StridedSlice";
 constexpr char ALL_GATHER[] = "AllGather";
 constexpr char REDUCE_SCATTER[] = "ReduceScatter";
@@ -165,8 +187,10 @@ constexpr char CONCAT[] = "Concat";
 constexpr char SOFTMAX_CROSS_ENTROPY_WITH_LOGITS[] = "SoftmaxCrossEntropyWithLogits";
 constexpr char SIGMOID_CROSS_ENTROPY_WITH_LOGITS[] = "SigmoidCrossEntropyWithLogits";
 constexpr char MATMUL[] = "MatMul";
-constexpr char GELU[] = "Gelu";
+constexpr char GELU[] = "GeLU";
 constexpr char TANH[] = "Tanh";
+constexpr char RECEIVE[] = "Receive";
+constexpr char SEND[] = "Send";
 constexpr char SHAPE_OP[] = "Shape";
 constexpr char SOFTMAX[] = "Softmax";
 constexpr char LOG_SOFTMAX[] = "LogSoftmax";
@@ -178,7 +202,7 @@ constexpr char MAXPOOLV2[] = "MaxPoolV2";
 constexpr char L2_NORMALIZE[] = "L2Normalize";
 constexpr char TRANSPOSE[] = "Transpose";
 constexpr char RESHAPE[] = "Reshape";
-constexpr char TENSOR_ADD[] = "TensorAdd";
+constexpr char ADD[] = "Add";
 constexpr char BIAS_ADD[] = "BiasAdd";
 constexpr char SUB[] = "Sub";
 constexpr char MUL[] = "Mul";
@@ -186,10 +210,14 @@ constexpr char DIV[] = "Div";
 constexpr char REAL_DIV[] = "RealDiv";
 constexpr char ASSIGN_SUB[] = "AssignSub";
 constexpr char GREATER[] = "Greater";
+constexpr char UNIFORM_CANDIDATE_SAMPLER[] = "UniformCandidateSampler";
 constexpr char VIRTUAL_DATA_SET[] = "_VirtualDataset";
 constexpr char VIRTUAL_DATA_SET_INFO[] = "VirtualDatasetInfo";
 constexpr char SPARSE_SOFTMAX_CROSS_ENTROPY_WITH_LOGITS[] = "SparseSoftmaxCrossEntropyWithLogits";
 constexpr char RELU[] = "ReLU";
+constexpr char REPEAT_ELEMENTS[] = "RepeatElements";
+constexpr char TENSOR_DOT[] = "TensorDot";
+constexpr char RANGE[] = "Range";
 constexpr char ONEHOT[] = "OneHot";
 constexpr char DROPOUT_DO_MASK[] = "DropoutDoMask";
 constexpr char DROPOUT_GEN_MASK[] = "DropoutGenMask";
@@ -223,9 +251,10 @@ constexpr char MINIMUM[] = "Minimum";
 constexpr char EQUAL[] = "Equal";
 constexpr char NOT_EQUAL[] = "NotEqual";
 constexpr char LOGICALNOT[] = "LogicalNot";
-constexpr char GATHERV2[] = "GatherV2";
+constexpr char GATHERV2[] = "Gather";
 constexpr char SPARSE_GATHERV2[] = "SparseGatherV2";
 constexpr char STRIDEDSLICE[] = "StridedSlice";
+constexpr char SLICE[] = "Slice";
 constexpr char BROADCAST[] = "Broadcast";
 constexpr char BROADCAST_TO[] = "BroadcastTo";
 constexpr char SQRT[] = "Sqrt";
@@ -285,15 +314,14 @@ constexpr char UNSORTEF_SEGMENT_MIND[] = "UnsortedSegmentMinD";
 constexpr char UNSORTEF_SEGMENT_PRODD[] = "UnsortedSegmentProdD";
 constexpr char UNSORTED_SEGMENT_SUM[] = "UnsortedSegmentSum";
 constexpr char UNSORTED_SEGMENT_MIN[] = "UnsortedSegmentMin";
+constexpr char UNSORTED_SEGMENT_MAX[] = "UnsortedSegmentMax";
 constexpr char DEPTHWISE_CONV2D_NATIVE[] = "DepthwiseConv2dNative";
 constexpr char DEPTHWISE_CONV2D[] = "DepthwiseConv2D";
-constexpr char ADD[] = "Add";
 constexpr char DROPOUT[] = "Dropout";
 constexpr char KStridedSlice[] = "StridedSlice";
 constexpr char UNIQUE[] = "Unique";
 
 // Parallel don't care
-constexpr char TUPLE_GETITEM[] = "tuple_getitem";
 constexpr char STRING_EQUAL[] = "string_equal";
 constexpr char MAKE_TUPLE[] = "make_tuple";
 constexpr char MAKE_LIST[] = "make_list";
@@ -346,11 +374,13 @@ constexpr char EMBED[] = "embed";
 constexpr char CREATINSTANCE[] = "create_instance";
 constexpr char REF_TO_EMBED[] = "RefToEmbed";
 constexpr char STOP_GRADIENT[] = "stop_gradient";
+constexpr char UPDATESTATE[] = "UpdateState";
+constexpr char LOAD[] = "Load";
 
 // Batch parallel black list
 constexpr char TENSOR_SCATTER_UPDATE[] = "TensorScatterUpdate";
 constexpr char MIN_MAX_UPDATE_PER_LAYER[] = "MinMaxUpdatePerLayer";
-constexpr char PACK[] = "Pack";
+constexpr char STACK[] = "Stack";
 
 constexpr size_t LAST_INDEX(size_t s) { return s - 1; }
 constexpr size_t SECOND_FROM_END(size_t s) { return s - 2; }

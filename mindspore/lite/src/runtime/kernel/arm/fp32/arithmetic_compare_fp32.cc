@@ -15,7 +15,7 @@
  */
 #include "src/runtime/kernel/arm/fp32/arithmetic_compare_fp32.h"
 #include "src/kernel_registry.h"
-#include "nnacl/fp32/arithmetic_compare.h"
+#include "nnacl/fp32/arithmetic_compare_fp32.h"
 
 using mindspore::lite::KernelRegistrar;
 using mindspore::lite::RET_ERROR;
@@ -28,100 +28,97 @@ using mindspore::schema::PrimitiveType_LessEqual;
 using mindspore::schema::PrimitiveType_NotEqual;
 
 namespace mindspore::kernel {
-namespace {
-typedef struct {
-  int primitive_type_;
-  ArithmeticCompareFp32Func func_;
-} TYPE_FUNC_INFO;
-}  // namespace
-
-ArithmeticCompareFp32Func ArithmeticCompareCPUKernel::GetArithmeticCompareFun(int primitive_type) {
-  TYPE_FUNC_INFO type_func_table[] = {
-    {PrimitiveType_Equal, ElementEqualFp32},     {PrimitiveType_NotEqual, ElementNotEqualFp32},
-    {PrimitiveType_Less, ElementLessFp32},       {PrimitiveType_LessEqual, ElementLessEqualFp32},
-    {PrimitiveType_Greater, ElementGreaterFp32}, {PrimitiveType_GreaterEqual, ElementGreaterEqualFp32}};
-  for (size_t i = 0; i < sizeof(type_func_table) / sizeof(TYPE_FUNC_INFO); i++) {
-    if (type_func_table[i].primitive_type_ == primitive_type) {
-      return type_func_table[i].func_;
+int ArithmeticCompareCPUKernel::BroadcastRun(void *input0, void *input1, void *output, int dim, int out_count,
+                                             int out_thread_stride) {
+  if (dim > break_pos_) {
+    if (data_type_ == kDataTypeInt) {
+      return func_int32_(reinterpret_cast<int *>(input0) + out_thread_stride,
+                         reinterpret_cast<int *>(input1) + out_thread_stride,
+                         reinterpret_cast<uint8_t *>(output) + out_thread_stride, out_count);
+    }
+    return func_fp32_(reinterpret_cast<float *>(input0) + out_thread_stride,
+                      reinterpret_cast<float *>(input1) + out_thread_stride,
+                      reinterpret_cast<uint8_t *>(output) + out_thread_stride, out_count);
+  }
+  for (int i = 0; i < arithmeticParameter_->out_shape_[dim]; ++i) {
+    int pos0_ = arithmeticParameter_->in_shape0_[dim] == 1 ? 0 : i;
+    int pos1_ = arithmeticParameter_->in_shape1_[dim] == 1 ? 0 : i;
+    int error_code;
+    if (data_type_ == kDataTypeInt) {
+      error_code = BroadcastRun(reinterpret_cast<int *>(input0) + pos0_ * arithmeticParameter_->in_strides0_[dim],
+                                reinterpret_cast<int *>(input1) + pos1_ * arithmeticParameter_->in_strides1_[dim],
+                                reinterpret_cast<uint8_t *>(output) + i * arithmeticParameter_->out_strides_[dim],
+                                dim + 1, out_count, out_thread_stride);
+    } else {
+      error_code = BroadcastRun(reinterpret_cast<float *>(input0) + pos0_ * arithmeticParameter_->in_strides0_[dim],
+                                reinterpret_cast<float *>(input1) + pos1_ * arithmeticParameter_->in_strides1_[dim],
+                                reinterpret_cast<uint8_t *>(output) + i * arithmeticParameter_->out_strides_[dim],
+                                dim + 1, out_count, out_thread_stride);
+    }
+    if (error_code != RET_OK) {
+      return error_code;
     }
   }
-  return nullptr;
+  return RET_OK;
 }
 
-int ArithmeticCompareCPUKernel::Init() {
-  if (!InferShapeDone()) {
-    return RET_OK;
-  }
-  return ReSize();
-}
+int ArithmeticCompareCPUKernel::DoArithmetic(int task_id) {
+  auto element_num = out_tensors_[0]->ElementsNum();
 
-int ArithmeticCompareCPUKernel::ReSize() { return RET_OK; }
-
-int ArithmeticCompareCPUKernel::DoExecute(int task_id) {
-  int elements_num = in_tensors_.at(0)->ElementsNum();
-  int stride = UP_DIV(elements_num, op_parameter_->thread_num_);
-  int offset = task_id * stride;
-  int count = MSMIN(stride, elements_num - offset);
+  MS_ASSERT(thread_count_ != 0);
+  int stride = UP_DIV(element_num, thread_count_);
+  int count = MSMIN(stride, element_num - stride * task_id);
   if (count <= 0) {
     return RET_OK;
   }
-  if (func_ == nullptr) {
-    MS_LOG(ERROR) << "Run function is null! ";
+
+  if (func_fp32_ == nullptr) {
+    MS_LOG(ERROR) << "func_fp32_ function is nullptr!";
     return RET_ERROR;
   }
-  // two inputs have the same shape, support broadcast later
-  auto *input0_ptr = reinterpret_cast<float *>(in_tensors_.at(0)->MutableData());
-  auto *input1_ptr = reinterpret_cast<float *>(in_tensors_.at(1)->MutableData());
-  auto *output_ptr = reinterpret_cast<uint8_t *>(out_tensors_.at(0)->MutableData());
-  auto ret = func_(input0_ptr + offset, input1_ptr + offset, output_ptr + offset, count);
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Run failed, illegal input! ";
+
+  int error_code;
+  if (arithmeticParameter_->broadcasting_) {  // need broadcast
+    stride = UP_DIV(outside_, thread_count_);
+    int out_count = MSMIN(stride, outside_ - stride * task_id);
+    int out_thread_stride = stride * task_id;
+    if (out_count <= 0) {
+      return RET_OK;
+    }
+    if (data_type_ == kDataTypeFloat) {
+      error_code =
+        BroadcastRun(reinterpret_cast<float *>(input0_ptr_), reinterpret_cast<float *>(input1_ptr_),
+                     reinterpret_cast<uint8_t *>(out_tensors_[0]->data_c()), 0, out_count, out_thread_stride);
+    } else {
+      error_code =
+        BroadcastRun(reinterpret_cast<int *>(input0_ptr_), reinterpret_cast<int *>(input1_ptr_),
+                     reinterpret_cast<uint8_t *>(out_tensors_[0]->data_c()), 0, out_count, out_thread_stride);
+    }
+  } else {  // no broadcast, neither is scalar, two same shape
+    if (data_type_ == kDataTypeFloat) {
+      error_code = func_fp32_(reinterpret_cast<float *>(input0_ptr_) + stride * task_id,
+                              reinterpret_cast<float *>(input1_ptr_) + stride * task_id,
+                              reinterpret_cast<uint8_t *>(out_tensors_[0]->data_c()) + stride * task_id, count);
+    } else {
+      error_code = func_int32_(reinterpret_cast<int *>(input0_ptr_) + stride * task_id,
+                               reinterpret_cast<int *>(input1_ptr_) + stride * task_id,
+                               reinterpret_cast<uint8_t *>(out_tensors_[0]->data_c()) + stride * task_id, count);
+    }
   }
-  return ret;
+  if (error_code != RET_OK) {
+    return RET_ERROR;
+  }
+  return RET_OK;
 }
 
-int ArithmeticCompareRun(void *cdata, int task_id) {
-  auto kernel = reinterpret_cast<ArithmeticCompareCPUKernel *>(cdata);
-  auto ret = kernel->DoExecute(task_id);
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "ArithmeticSelfRuns error task_id[" << task_id << "] error_code[" << ret << "]";
-  }
-  return ret;
-}
-
-int ArithmeticCompareCPUKernel::Run() {
-  auto ret = ParallelLaunch(this->context_->thread_pool_, ArithmeticCompareRun, this, op_parameter_->thread_num_);
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "ArithmeticSelfRun error error_code[" << ret << "]";
-  }
-  return ret;
-}
-
-kernel::LiteKernel *CpuArithmeticCompareFp32KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                                          const std::vector<lite::Tensor *> &outputs,
-                                                          OpParameter *parameter, const lite::InnerContext *ctx,
-                                                          const kernel::KernelKey &desc,
-                                                          const mindspore::lite::PrimitiveC *primitive) {
-  auto *kernel = new (std::nothrow) ArithmeticCompareCPUKernel(parameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "new ArithmeticSelfCPUKernel fail!";
-    free(parameter);
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed, name: " << parameter->name_
-                  << ", type: " << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(parameter->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
-}
-
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Equal, CpuArithmeticCompareFp32KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_NotEqual, CpuArithmeticCompareFp32KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Less, CpuArithmeticCompareFp32KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_LessEqual, CpuArithmeticCompareFp32KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Greater, CpuArithmeticCompareFp32KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_GreaterEqual, CpuArithmeticCompareFp32KernelCreator)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Equal, LiteKernelCreator<ArithmeticCompareCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt32, PrimitiveType_Equal, LiteKernelCreator<ArithmeticCompareCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_NotEqual, LiteKernelCreator<ArithmeticCompareCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Less, LiteKernelCreator<ArithmeticCompareCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt32, PrimitiveType_Less, LiteKernelCreator<ArithmeticCompareCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_LessEqual, LiteKernelCreator<ArithmeticCompareCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt32, PrimitiveType_LessEqual, LiteKernelCreator<ArithmeticCompareCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Greater, LiteKernelCreator<ArithmeticCompareCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_GreaterEqual, LiteKernelCreator<ArithmeticCompareCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt32, PrimitiveType_GreaterEqual, LiteKernelCreator<ArithmeticCompareCPUKernel>)
 }  // namespace mindspore::kernel
