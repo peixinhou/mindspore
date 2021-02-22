@@ -24,6 +24,7 @@
 #include "tools/converter/legacy_optimizer/fusion/format_trans_fusion_pass.h"
 #include "tools/converter/legacy_optimizer/fusion/quant_cast_fusion_pass.h"
 #include "tools/converter/legacy_optimizer/fusion/mul_add_fusion_pass.h"
+#include "tools/converter/legacy_optimizer/fusion/transpose_reshape_fusion_pass.h"
 #include "tools/converter/legacy_optimizer/graph/trans_format_remove_pass.h"
 #include "tools/converter/legacy_optimizer/graph/infershape_pass.h"
 #include "tools/converter/legacy_optimizer/graph/batchnorm_convert_scale_pass.h"
@@ -43,6 +44,7 @@
 #include "tools/converter/legacy_optimizer/graph/subgraph_node_pass.h"
 #include "tools/converter/legacy_optimizer/graph/subgraph_tensor_pass.h"
 #include "tools/converter/legacy_optimizer/graph/nested_loop_expand_pass.h"
+#include "tools/converter/legacy_optimizer/graph/same_parallel_node_merge_pass.h"
 
 using std::string;
 namespace mindspore::lite {
@@ -246,6 +248,32 @@ int GraphDefTransform::Transform(const converter::Flags &ctx) {
     status = switchOptimizer.Run(graphDefT);
     if (status != RET_OK && status != RET_NO_CHANGE) {
       MS_LOG(ERROR) << "Run switch graphPasses Failed";
+      return status;
+    }
+  }
+
+  {
+    auto old_nodes = GetGraphNodes();
+    Optimizer sameParallelNodeMergeOptimizer;
+    sameParallelNodeMergeOptimizer.AddPass(new (std::nothrow) SameParallelNodeMergePass());
+    sameParallelNodeMergeOptimizer.AddPass(new (std::nothrow) IsolatedNodeRemovePass());
+    sameParallelNodeMergeOptimizer.AddPass(new (std::nothrow) SubgraphNodePass(old_nodes));
+    status = sameParallelNodeMergeOptimizer.Run(graphDefT);
+    if (status != RET_OK && status != RET_NO_CHANGE) {
+      MS_LOG(ERROR) << "Run sameParallelNodeMergeOptimizer graphPasses Failed";
+      return status;
+    }
+  }
+
+  {
+    auto old_nodes = GetGraphNodes();
+    Optimizer transposeReshapeFusionPass;
+    transposeReshapeFusionPass.AddPass(new (std::nothrow) TransposeReshapeFusionPass());
+    transposeReshapeFusionPass.AddPass(new (std::nothrow) IsolatedNodeRemovePass());
+    transposeReshapeFusionPass.AddPass(new (std::nothrow) SubgraphNodePass(old_nodes));
+    status = transposeReshapeFusionPass.Run(graphDefT);
+    if (status != RET_OK && status != RET_NO_CHANGE) {
+      MS_LOG(ERROR) << "Run transposeReshapeFusionPass fusionPass Failed";
       return status;
     }
   }
