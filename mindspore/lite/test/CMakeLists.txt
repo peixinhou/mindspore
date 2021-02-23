@@ -342,6 +342,8 @@ endif()
 
 if(PLATFORM_ARM)
     target_link_libraries(lite-test log)
+else()
+    target_link_libraries(lite-test ${SECUREC_LIBRARY} pthread)
 endif()
 
 if(SUPPORT_NPU)
@@ -361,12 +363,10 @@ if(ENABLE_CONVERTER)
             fusion_mid
             quantizer_mid
             proto_mid
-            pthread
             mindspore::protobuf
             mindspore::eigen
             mindspore::json
             mindspore_core
             mindspore::glog
-            ${SECUREC_LIBRARY}
             )
 endif()
