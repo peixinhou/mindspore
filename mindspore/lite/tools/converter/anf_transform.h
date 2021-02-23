@@ -45,6 +45,8 @@ class AnfTransform {
 
   int AddGraphPass(const std::shared_ptr<opt::GraphOptimizer> &optimizer, const converter::Flags *config);
 
+  int InputsOrderExchangePass(const std::shared_ptr<opt::GraphOptimizer> &optimizer, const converter::Flags *config);
+
   int AddConvertPass(const std::shared_ptr<opt::GraphOptimizer> &optimizer, const converter::Flags *config);
 
   int AddConstFoldPass(const std::shared_ptr<opt::GraphOptimizer> &optimizer, const converter::Flags *config);

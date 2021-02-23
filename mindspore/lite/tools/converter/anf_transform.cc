@@ -129,13 +129,22 @@ int AnfTransform::AddGraphPass(const std::shared_ptr<opt::GraphOptimizer> &optim
   return RET_OK;
 }
 
+int AnfTransform::InputsOrderExchangePass(const std::shared_ptr<opt::GraphOptimizer> &optimizer,
+                                          const converter::Flags *config) {
+  auto convert_pm = std::make_shared<opt::PassManager>("anf graph convert pass manager", true);
+  if (config->fmk == lite::converter::FmkType_TFLITE) {
+    convert_pm->AddPass(std::make_shared<opt::TfliteInputsOrderExchangePass>());
+  }
+  optimizer->AddPassManager(convert_pm);
+  return RET_OK;
+}
+
 int AnfTransform::AddConvertPass(const std::shared_ptr<opt::GraphOptimizer> &optimizer,
                                  const converter::Flags *config) {
   auto convert_pm = std::make_shared<opt::PassManager>("anf graph convert pass manager", true);
   convert_pm->AddPass(std::make_shared<opt::ClipConvertActivationPass>());
   if (config->fmk == lite::converter::FmkType_TFLITE) {
     convert_pm->AddPass(std::make_shared<opt::GroupDepthwiseOpConvertPass>());
-    convert_pm->AddPass(std::make_shared<opt::TfliteInputsOrderExchangePass>());
   }
   optimizer->AddPassManager(convert_pm);
   return RET_OK;
@@ -261,6 +270,12 @@ FuncGraphPtr AnfTransform::TransformSingleFuncGraph(const FuncGraphPtr &old_grap
   }
 
   auto optimizer = std::make_shared<opt::GraphOptimizer>();
+
+  status = InputsOrderExchangePass(optimizer, config);
+  if (status != RET_OK) {
+    MS_LOG(ERROR) << "Inputs order exchange pass failed.";
+    return nullptr;
+  }
 
   status = AddConstFoldPass(optimizer, config);
   if (status != RET_OK) {
