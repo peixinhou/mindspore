@@ -1636,62 +1636,6 @@ function Run_arm64() {
         fi
     done < ${models_tflite_awaretraining_config}
 
-    # Run gpu tflite converted models:
-    while read line; do
-        model_name=${line}
-        if [[ $model_name == \#* ]]; then
-          continue
-        fi
-        echo ${model_name} >> "${run_arm64_log_file}"
-        echo 'cd  /data/local/tmp/benchmark_test' > adb_run_cmd.txt
-        echo 'export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/data/local/tmp/benchmark_test;./benchmark --device=GPU --modelFile='${model_name}'.ms --inDataFile=/data/local/tmp/input_output/input/'${model_name}'.ms.bin --benchmarkDataFile=/data/local/tmp/input_output/output/'${model_name}'.ms.out' >> "${run_arm64_log_file}"
-        echo 'export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/data/local/tmp/benchmark_test;./benchmark --device=GPU --modelFile='${model_name}'.ms --inDataFile=/data/local/tmp/input_output/input/'${model_name}'.ms.bin --benchmarkDataFile=/data/local/tmp/input_output/output/'${model_name}'.ms.out' >> adb_run_cmd.txt
-        adb -s ${device_id} shell < adb_run_cmd.txt >> "${run_arm64_log_file}"
-        if [ $? = 0 ]; then
-            run_result='arm64_gpu: '${model_name}' pass'; echo ${run_result} >> ${run_benchmark_result_file}
-        else
-            run_result='arm64_gpu: '${model_name}' failed'; echo ${run_result} >> ${run_benchmark_result_file}; return 1
-        fi
-    done < ${models_gpu_fp32_config}
-
-    # Run GPU fp16 converted models:
-    while read line; do
-        model_name=${line}
-        if [[ $model_name == \#* ]]; then
-          continue
-        fi
-        echo ${model_name} >> "${run_arm64_log_file}"
-        echo 'cd  /data/local/tmp/benchmark_test' > adb_run_cmd.txt
-        echo 'export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/data/local/tmp/benchmark_test;./benchmark --device=GPU --modelFile='${model_name}'.ms --inDataFile=/data/local/tmp/input_output/input/'${model_name}'.ms.bin --benchmarkDataFile=/data/local/tmp/input_output/output/'${model_name}'.ms.out --enableFp16=true --accuracyThreshold=5' >> "${run_arm64_log_file}"
-        echo 'export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/data/local/tmp/benchmark_test;./benchmark --device=GPU --modelFile='${model_name}'.ms --inDataFile=/data/local/tmp/input_output/input/'${model_name}'.ms.bin --benchmarkDataFile=/data/local/tmp/input_output/output/'${model_name}'.ms.out --enableFp16=true --accuracyThreshold=5' >> adb_run_cmd.txt
-        adb -s ${device_id} shell < adb_run_cmd.txt >> "${run_arm64_log_file}"
-        if [ $? = 0 ]; then
-            run_result='arm64_gpu_fp16: '${model_name}' pass'; echo ${run_result} >> ${run_benchmark_result_file}
-        else
-            run_result='arm64_gpu_fp16: '${model_name}' failed'; echo ${run_result} >> ${run_benchmark_result_file}; return 1
-        fi
-    #sleep 1
-    done < ${models_gpu_fp16_config}
-
-    # Run GPU weightquant converted models:
-    while read line; do
-        model_name=${line}
-        if [[ $model_name == \#* ]]; then
-          continue
-        fi
-        echo ${model_name} >> "${run_arm64_log_file}"
-        echo 'cd  /data/local/tmp/benchmark_test' > adb_run_cmd.txt
-        echo 'export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/data/local/tmp/benchmark_test;./benchmark --device=GPU --modelFile='${model_name}'_weightquant.ms --inDataFile=/data/local/tmp/input_output/input/'${model_name}'.ms.bin --benchmarkDataFile=/data/local/tmp/input_output/output/'${model_name}'.ms.out --enableFp16=true --accuracyThreshold=5' >> "${run_arm64_log_file}"
-        echo 'export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/data/local/tmp/benchmark_test;./benchmark --device=GPU --modelFile='${model_name}'_weightquant.ms --inDataFile=/data/local/tmp/input_output/input/'${model_name}'.ms.bin --benchmarkDataFile=/data/local/tmp/input_output/output/'${model_name}'.ms.out --enableFp16=true --accuracyThreshold=5' >> adb_run_cmd.txt
-        adb -s ${device_id} shell < adb_run_cmd.txt >> "${run_arm64_log_file}"
-        if [ $? = 0 ]; then
-            run_result='arm64_gpu_weightquant: '${model_name}' pass'; echo ${run_result} >> ${run_benchmark_result_file}
-        else
-            run_result='arm64_gpu_weightquant: '${model_name}' failed'; echo ${run_result} >> ${run_benchmark_result_file}; return 1
-        fi
-    #sleep 1
-    done < ${models_gpu_weightquant_config}
-
     # Run mindir converted models:
     while read line; do
         mindspore_line_info=${line}
@@ -1771,33 +1715,6 @@ function Run_arm64() {
             run_result='arm64: '${model_name}'[weightQuant] failed'; echo ${run_result} >> ${run_benchmark_result_file}; return 1
         fi
     done < ${models_mindspore_weightquant_config}
-
-    # Run npu converted models:
-    while read line; do
-        model_name=`echo ${line}|awk -F ' ' '{print $1}'`
-        accuracy_limit=`echo ${line}|awk -F ' ' '{print $2}'`
-        input_num=`echo ${line}|awk -F ' ' '{print $3}'`
-        data_path="/data/local/tmp/input_output/"
-        input_files=''
-        if [[ -z "$input_num" || $input_num == 1 ]]; then
-          input_files=${data_path}'input/'$model_name'.ms.bin'
-        elif [[ ! -z "$input_num" && $input_num -gt 1 ]]; then
-          for i in $(seq 1 $input_num)
-          do
-            input_files=$input_files${data_path}'input/'$model_name'.ms.bin_'$i','
-          done
-        fi
-        echo "mindspore run npu: ${model_name}, accuracy limit:${accuracy_limit}" >> "${run_arm64_log_file}"
-        echo 'cd  /data/local/tmp/benchmark_test' > adb_run_cmd.txt
-        echo 'export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/data/local/tmp/benchmark_test;./benchmark --device=NPU --modelFile='${model_name}'.ms --inDataFile='${input_files}' --benchmarkDataFile=/data/local/tmp/input_output/output/'${model_name}'.ms.out --accuracyThreshold='${accuracy_limit} >> "${run_arm64_log_file}"
-        echo 'export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/data/local/tmp/benchmark_test;./benchmark --device=NPU --modelFile='${model_name}'.ms --inDataFile='${input_files}' --benchmarkDataFile=/data/local/tmp/input_output/output/'${model_name}'.ms.out --accuracyThreshold='${accuracy_limit} >> adb_run_cmd.txt
-        adb -s ${device_id} shell < adb_run_cmd.txt >> "${run_arm64_log_file}"
-        if [ $? = 0 ]; then
-            run_result='arm64_npu: '${model_name}' pass'; echo ${run_result} >> ${run_benchmark_result_file}
-        else
-            run_result='arm64_npu: '${model_name}' failed'; echo ${run_result} >> ${run_benchmark_result_file}; return 1
-        fi
-    done < ${models_npu_config}
 
     # Run converted models which has multiple inputs:
     while read line; do
@@ -1916,6 +1833,156 @@ function Run_arm32() {
     done < ${models_arm32_config}
 }
 
+function Run_gpu() {
+    # Unzip arm64
+    cd ${arm64_path} || exit 1
+    tar -zxf mindspore-lite-${version}-inference-android-aarch64.tar.gz || exit 1
+
+    # If build with minddata, copy the minddata related libs
+    cd ${benchmark_test_path} || exit 1
+    if [ -f ${arm64_path}/mindspore-lite-${version}-inference-android-aarch64/lib/libminddata-lite.so ]; then
+        cp -a ${arm64_path}/mindspore-lite-${version}-inference-android-aarch64/third_party/libjpeg-turbo/lib/libjpeg.so ${benchmark_test_path}/libjpeg.so || exit 1
+        cp -a ${arm64_path}/mindspore-lite-${version}-inference-android-aarch64/third_party/libjpeg-turbo/lib/libturbojpeg.so ${benchmark_test_path}/libturbojpeg.so || exit 1
+        cp -a ${arm64_path}/mindspore-lite-${version}-inference-android-aarch64/third_party/opencv/lib/libopencv_core.so ${benchmark_test_path}/libopencv_core.so || exit 1
+        cp -a ${arm64_path}/mindspore-lite-${version}-inference-android-aarch64/third_party/opencv/lib/libopencv_imgcodecs.so ${benchmark_test_path}/libopencv_imgcodecs.so || exit 1
+        cp -a ${arm64_path}/mindspore-lite-${version}-inference-android-aarch64/third_party/opencv/lib/libopencv_imgproc.so ${benchmark_test_path}/libopencv_imgproc.so || exit 1
+        cp -a ${arm64_path}/mindspore-lite-${version}-inference-android-aarch64/lib/libminddata-lite.so ${benchmark_test_path}/libminddata-lite.so || exit 1
+    fi
+    cp -a ${arm64_path}/mindspore-lite-${version}-inference-android-aarch64/third_party/hiai_ddk/lib/libhiai.so ${benchmark_test_path}/libhiai.so || exit 1
+    cp -a ${arm64_path}/mindspore-lite-${version}-inference-android-aarch64/third_party/hiai_ddk/lib/libhiai_ir.so ${benchmark_test_path}/libhiai_ir.so || exit 1
+    cp -a ${arm64_path}/mindspore-lite-${version}-inference-android-aarch64/third_party/hiai_ddk/lib/libhiai_ir_build.so ${benchmark_test_path}/libhiai_ir_build.so || exit 1
+
+    cp -a ${arm64_path}/mindspore-lite-${version}-inference-android-aarch64/lib/libmindspore-lite.so ${benchmark_test_path}/libmindspore-lite.so || exit 1
+    cp -a ${arm64_path}/mindspore-lite-${version}-inference-android-aarch64/benchmark/benchmark ${benchmark_test_path}/benchmark || exit 1
+
+    # adb push all needed files to the phone
+    adb -s ${device_id} push ${benchmark_test_path} /data/local/tmp/ > adb_push_log.txt
+
+    # run adb ,run session ,check the result:
+    echo 'cd  /data/local/tmp/benchmark_test' > adb_cmd.txt
+    echo 'cp  /data/local/tmp/libc++_shared.so ./' >> adb_cmd.txt
+    echo 'chmod 777 benchmark' >> adb_cmd.txt
+
+    adb -s ${device_id} shell < adb_cmd.txt
+
+    # Run gpu tflite converted models:
+    while read line; do
+        model_name=${line}
+        if [[ $model_name == \#* ]]; then
+          continue
+        fi
+        echo ${model_name} >> "${run_gpu_log_file}"
+        echo 'cd  /data/local/tmp/benchmark_test' > adb_run_cmd.txt
+        echo 'export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/data/local/tmp/benchmark_test;./benchmark --device=GPU --modelFile='${model_name}'.ms --inDataFile=/data/local/tmp/input_output/input/'${model_name}'.ms.bin --benchmarkDataFile=/data/local/tmp/input_output/output/'${model_name}'.ms.out' >> "${run_gpu_log_file}"
+        echo 'export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/data/local/tmp/benchmark_test;./benchmark --device=GPU --modelFile='${model_name}'.ms --inDataFile=/data/local/tmp/input_output/input/'${model_name}'.ms.bin --benchmarkDataFile=/data/local/tmp/input_output/output/'${model_name}'.ms.out' >> adb_run_cmd.txt
+        adb -s ${device_id} shell < adb_run_cmd.txt >> "${run_gpu_log_file}"
+        if [ $? = 0 ]; then
+            run_result='arm64_gpu: '${model_name}' pass'; echo ${run_result} >> ${run_benchmark_result_file}
+        else
+            run_result='arm64_gpu: '${model_name}' failed'; echo ${run_result} >> ${run_benchmark_result_file}; return 1
+        fi
+    done < ${models_gpu_fp32_config}
+
+    # Run GPU fp16 converted models:
+    while read line; do
+        model_name=${line}
+        if [[ $model_name == \#* ]]; then
+          continue
+        fi
+        echo ${model_name} >> "${run_gpu_log_file}"
+        echo 'cd  /data/local/tmp/benchmark_test' > adb_run_cmd.txt
+        echo 'export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/data/local/tmp/benchmark_test;./benchmark --device=GPU --modelFile='${model_name}'.ms --inDataFile=/data/local/tmp/input_output/input/'${model_name}'.ms.bin --benchmarkDataFile=/data/local/tmp/input_output/output/'${model_name}'.ms.out --enableFp16=true --accuracyThreshold=5' >> "${run_gpu_log_file}"
+        echo 'export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/data/local/tmp/benchmark_test;./benchmark --device=GPU --modelFile='${model_name}'.ms --inDataFile=/data/local/tmp/input_output/input/'${model_name}'.ms.bin --benchmarkDataFile=/data/local/tmp/input_output/output/'${model_name}'.ms.out --enableFp16=true --accuracyThreshold=5' >> adb_run_cmd.txt
+        adb -s ${device_id} shell < adb_run_cmd.txt >> "${run_gpu_log_file}"
+        if [ $? = 0 ]; then
+            run_result='arm64_gpu_fp16: '${model_name}' pass'; echo ${run_result} >> ${run_benchmark_result_file}
+        else
+            run_result='arm64_gpu_fp16: '${model_name}' failed'; echo ${run_result} >> ${run_benchmark_result_file}; return 1
+        fi
+    #sleep 1
+    done < ${models_gpu_fp16_config}
+
+    # Run GPU weightquant converted models:
+    while read line; do
+        model_name=${line}
+        if [[ $model_name == \#* ]]; then
+          continue
+        fi
+        echo ${model_name} >> "${run_gpu_log_file}"
+        echo 'cd  /data/local/tmp/benchmark_test' > adb_run_cmd.txt
+        echo 'export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/data/local/tmp/benchmark_test;./benchmark --device=GPU --modelFile='${model_name}'_weightquant.ms --inDataFile=/data/local/tmp/input_output/input/'${model_name}'.ms.bin --benchmarkDataFile=/data/local/tmp/input_output/output/'${model_name}'.ms.out --enableFp16=true --accuracyThreshold=5' >> "${run_gpu_log_file}"
+        echo 'export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/data/local/tmp/benchmark_test;./benchmark --device=GPU --modelFile='${model_name}'_weightquant.ms --inDataFile=/data/local/tmp/input_output/input/'${model_name}'.ms.bin --benchmarkDataFile=/data/local/tmp/input_output/output/'${model_name}'.ms.out --enableFp16=true --accuracyThreshold=5' >> adb_run_cmd.txt
+        adb -s ${device_id} shell < adb_run_cmd.txt >> "${run_gpu_log_file}"
+        if [ $? = 0 ]; then
+            run_result='arm64_gpu_weightquant: '${model_name}' pass'; echo ${run_result} >> ${run_benchmark_result_file}
+        else
+            run_result='arm64_gpu_weightquant: '${model_name}' failed'; echo ${run_result} >> ${run_benchmark_result_file}; return 1
+        fi
+    #sleep 1
+    done < ${models_gpu_weightquant_config}
+}
+
+function Run_npu() {
+        # Unzip arm64
+    cd ${arm64_path} || exit 1
+    tar -zxf mindspore-lite-${version}-inference-android-aarch64.tar.gz || exit 1
+
+    # If build with minddata, copy the minddata related libs
+    cd ${benchmark_test_path} || exit 1
+    if [ -f ${arm64_path}/mindspore-lite-${version}-inference-android-aarch64/lib/libminddata-lite.so ]; then
+        cp -a ${arm64_path}/mindspore-lite-${version}-inference-android-aarch64/third_party/libjpeg-turbo/lib/libjpeg.so ${benchmark_test_path}/libjpeg.so || exit 1
+        cp -a ${arm64_path}/mindspore-lite-${version}-inference-android-aarch64/third_party/libjpeg-turbo/lib/libturbojpeg.so ${benchmark_test_path}/libturbojpeg.so || exit 1
+        cp -a ${arm64_path}/mindspore-lite-${version}-inference-android-aarch64/third_party/opencv/lib/libopencv_core.so ${benchmark_test_path}/libopencv_core.so || exit 1
+        cp -a ${arm64_path}/mindspore-lite-${version}-inference-android-aarch64/third_party/opencv/lib/libopencv_imgcodecs.so ${benchmark_test_path}/libopencv_imgcodecs.so || exit 1
+        cp -a ${arm64_path}/mindspore-lite-${version}-inference-android-aarch64/third_party/opencv/lib/libopencv_imgproc.so ${benchmark_test_path}/libopencv_imgproc.so || exit 1
+        cp -a ${arm64_path}/mindspore-lite-${version}-inference-android-aarch64/lib/libminddata-lite.so ${benchmark_test_path}/libminddata-lite.so || exit 1
+    fi
+    cp -a ${arm64_path}/mindspore-lite-${version}-inference-android-aarch64/third_party/hiai_ddk/lib/libhiai.so ${benchmark_test_path}/libhiai.so || exit 1
+    cp -a ${arm64_path}/mindspore-lite-${version}-inference-android-aarch64/third_party/hiai_ddk/lib/libhiai_ir.so ${benchmark_test_path}/libhiai_ir.so || exit 1
+    cp -a ${arm64_path}/mindspore-lite-${version}-inference-android-aarch64/third_party/hiai_ddk/lib/libhiai_ir_build.so ${benchmark_test_path}/libhiai_ir_build.so || exit 1
+
+    cp -a ${arm64_path}/mindspore-lite-${version}-inference-android-aarch64/lib/libmindspore-lite.so ${benchmark_test_path}/libmindspore-lite.so || exit 1
+    cp -a ${arm64_path}/mindspore-lite-${version}-inference-android-aarch64/benchmark/benchmark ${benchmark_test_path}/benchmark || exit 1
+
+    # adb push all needed files to the phone
+    adb -s ${device_id} push ${benchmark_test_path} /data/local/tmp/ > adb_push_log.txt
+
+    # run adb ,run session ,check the result:
+    echo 'cd  /data/local/tmp/benchmark_test' > adb_cmd.txt
+    echo 'cp  /data/local/tmp/libc++_shared.so ./' >> adb_cmd.txt
+    echo 'chmod 777 benchmark' >> adb_cmd.txt
+
+    adb -s ${device_id} shell < adb_cmd.txt
+
+    # Run npu converted models:
+    while read line; do
+        model_name=`echo ${line}|awk -F ' ' '{print $1}'`
+        accuracy_limit=`echo ${line}|awk -F ' ' '{print $2}'`
+        input_num=`echo ${line}|awk -F ' ' '{print $3}'`
+        data_path="/data/local/tmp/input_output/"
+        input_files=''
+        if [[ -z "$input_num" || $input_num == 1 ]]; then
+          input_files=${data_path}'input/'$model_name'.ms.bin'
+        elif [[ ! -z "$input_num" && $input_num -gt 1 ]]; then
+          for i in $(seq 1 $input_num)
+          do
+            input_files=$input_files${data_path}'input/'$model_name'.ms.bin_'$i','
+          done
+        fi
+        echo "mindspore run npu: ${model_name}, accuracy limit:${accuracy_limit}" >> "${run_npu_log_file}"
+        echo 'cd  /data/local/tmp/benchmark_test' > adb_run_cmd.txt
+        echo 'export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/data/local/tmp/benchmark_test;./benchmark --device=NPU --modelFile='${model_name}'.ms --inDataFile='${input_files}' --benchmarkDataFile=/data/local/tmp/input_output/output/'${model_name}'.ms.out --accuracyThreshold='${accuracy_limit} >> "${run_npu_log_file}"
+        echo 'export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/data/local/tmp/benchmark_test;./benchmark --device=NPU --modelFile='${model_name}'.ms --inDataFile='${input_files}' --benchmarkDataFile=/data/local/tmp/input_output/output/'${model_name}'.ms.out --accuracyThreshold='${accuracy_limit} >> adb_run_cmd.txt
+        adb -s ${device_id} shell < adb_run_cmd.txt >> "${run_npu_log_file}"
+        if [ $? = 0 ]; then
+            run_result='arm64_npu: '${model_name}' pass'; echo ${run_result} >> ${run_benchmark_result_file}
+        else
+            run_result='arm64_npu: '${model_name}' failed'; echo ${run_result} >> ${run_benchmark_result_file}; return 1
+        fi
+    done < ${models_npu_config}
+
+}
+
 # Print start msg before run testcase
 function MS_PRINT_TESTCASE_START_MSG() {
     echo ""
@@ -1929,12 +1996,30 @@ function MS_PRINT_TESTCASE_END_MSG() {
     echo -e "-----------------------------------------------------------------------------------------------------------------------------------"
 }
 
+function Print_Converter_Result() {
+    MS_PRINT_TESTCASE_END_MSG
+    while read line; do
+        arr=("${line}")
+        printf "%-15s %-20s %-90s %-7s\n" ${arr[0]} ${arr[1]} ${arr[2]} ${arr[3]}
+    done < ${run_converter_result_file}
+    MS_PRINT_TESTCASE_END_MSG
+}
+
+function Print_Benchmark_Result() {
+    MS_PRINT_TESTCASE_START_MSG
+    while read line; do
+        arr=("${line}")
+        printf "%-20s %-100s %-7s\n" ${arr[0]} ${arr[1]} ${arr[2]}
+    done < ${run_benchmark_result_file}
+    MS_PRINT_TESTCASE_END_MSG
+}
+
 basepath=$(pwd)
 echo ${basepath}
 #set -e
 
-# Example:sh run_benchmark_nets.sh -r /home/temp_test -m /home/temp_test/models -d "8KE5T19620002408"
-while getopts "r:m:d:" opt; do
+# Example:sh run_benchmark_nets.sh -r /home/temp_test -m /home/temp_test/models -d "8KE5T19620002408" -e x86
+while getopts "r:m:d:e:" opt; do
     case ${opt} in
         r)
             release_path=${OPTARG}
@@ -1947,6 +2032,10 @@ while getopts "r:m:d:" opt; do
         d)
             device_id=${OPTARG}
             echo "device_id is ${OPTARG}"
+            ;;
+        e)
+            backend=${OPTARG}
+            echo "backend is ${OPTARG}"
             ;;
         ?)
         echo "unknown para"
@@ -2018,15 +2107,6 @@ sleep 1
 wait ${Run_converter_PID}
 Run_converter_status=$?
 
-function Print_Converter_Result() {
-    MS_PRINT_TESTCASE_END_MSG
-    while read line; do
-        arr=("${line}")
-        printf "%-15s %-20s %-90s %-7s\n" ${arr[0]} ${arr[1]} ${arr[2]} ${arr[3]}
-    done < ${run_converter_result_file}
-    MS_PRINT_TESTCASE_END_MSG
-}
-
 # Check converter result and return value
 if [[ ${Run_converter_status} = 0 ]];then
     echo "Run converter success"
@@ -2058,6 +2138,12 @@ echo 'run arm64 logs: ' > ${run_arm64_log_file}
 run_arm32_log_file=${basepath}/run_arm32_log.txt
 echo 'run arm32 logs: ' > ${run_arm32_log_file}
 
+run_gpu_log_file=${basepath}/run_gpu_log.txt
+echo 'run gpu logs: ' > ${run_gpu_log_file}
+
+run_npu_log_file=${basepath}/run_npu_log.txt
+echo 'run npu logs: ' > ${run_npu_log_file}
+
 # Copy the MindSpore models:
 echo "Push files to the arm and run benchmark"
 benchmark_test_path=${basepath}/benchmark_test
@@ -2067,90 +2153,115 @@ cp -a ${ms_models_path}/*.ms ${benchmark_test_path} || exit 1
 # Copy models converted using old release of mslite converter for compatibility test
 cp -a ${models_path}/compatibility_test/*.ms ${benchmark_test_path} || exit 1
 
-# Run on x86
-echo "start Run x86 ..."
-Run_x86 &
-Run_x86_PID=$!
-sleep 1
+backend=${backend:-'all'}
+isFailed=0
 
-# Run on x86-sse
-echo "start Run x86 sse ..."
-Run_x86_sse &
-Run_x86_sse_PID=$!
-sleep 1
+if [[ ${backend} == "all" || ${backend} == "x86" ]]; then
+      echo "start Run x86 ..."
+      Run_x86 &
+      Run_x86_PID=$!
+      sleep 1
 
-# Run on x86-avx
-echo "start Run x86 avx ..."
-Run_x86_avx &
-Run_x86_avx_PID=$!
-sleep 1
+      echo "start Run x86 sse ..."
+      Run_x86_sse &
+      Run_x86_sse_PID=$!
+      sleep 1
 
-# Run on arm64
-echo "start Run arm64 ..."
-Run_arm64
-Run_arm64_status=$?
-sleep 1
+      echo "start Run x86 avx ..."
+      Run_x86_avx &
+      Run_x86_avx_PID=$!
+      sleep 1
+fi
 
-# Run on arm32
-echo "start Run arm32 ..."
-Run_arm32
-Run_arm32_status=$?
-sleep 1
+if [[ ${backend} == "all" || ${backend} == "arm_cpu" ]]; then
+      echo "start Run arm64 ..."
+      Run_arm64
+      Run_arm64_status=$?
+      sleep 1
 
-wait ${Run_x86_PID}
-Run_x86_status=$?
+      echo "start Run arm32 ..."
+      Run_arm32
+      Run_arm32_status=$?
+      sleep 1
+fi
 
-function Print_Benchmark_Result() {
-    MS_PRINT_TESTCASE_START_MSG
-    while read line; do
-        arr=("${line}")
-        printf "%-20s %-100s %-7s\n" ${arr[0]} ${arr[1]} ${arr[2]}
-    done < ${run_benchmark_result_file}
-    MS_PRINT_TESTCASE_END_MSG
-}
+if [[ ${backend} == "all" || ${backend} == "gpu" ]]; then
+      echo "start Run gpu ..."
+      Run_gpu
+      Run_gpu_status=$?
+      sleep 1
+fi
+
+if [[ ${backend} == "all" || ${backend} == "npu" ]]; then
+      echo "start Run npu ..."
+      Run_npu
+      Run_npu_status=$?
+      sleep 1
+fi
 
 # Check benchmark result and return value
-if [[ ${Run_x86_status} != 0 ]];then
-    echo "Run_x86 failed"
-    cat ${run_x86_log_file}
-    Print_Benchmark_Result
-    exit 1
+if [[ ${backend} == "all" || ${backend} == "x86" ]]; then
+      wait ${Run_x86_PID}
+      Run_x86_status=$?
+
+      if [[ ${Run_x86_status} != 0 ]];then
+          echo "Run_x86 failed"
+          cat ${run_x86_log_file}
+          isFailed=1
+      fi
+
+      wait ${Run_x86_sse_PID}
+      Run_x86_sse_status=$?
+
+      if [[ ${Run_x86_sse_status} != 0 ]];then
+          echo "Run_x86 sse failed"
+          cat ${run_x86_sse_log_file}
+          isFailed=1
+      fi
+
+      wait ${Run_x86_avx_PID}
+      Run_x86_avx_status=$?
+
+      if [[ ${Run_x86_avx_status} != 0 ]];then
+          echo "Run_x86 avx failed"
+          cat ${run_x86_avx_log_file}
+          isFailed=1
+      fi
 fi
 
-wait ${Run_x86_sse_PID}
-Run_x86_sse_status=$?
+if [[ ${backend} == "all" || ${backend} == "arm_cpu" ]]; then
+      if [[ ${Run_arm64_status} != 0 ]];then
+          echo "Run_arm64 failed"
+          cat ${run_arm64_log_file}
+          isFailed=1
+      fi
 
-if [[ ${Run_x86_sse_status} != 0 ]];then
-      echo "Run_x86 sse failed"
-      cat ${run_x86_sse_log_file}
-      Print_Benchmark_Result
-      exit 1
+      if [[ ${Run_arm32_status} != 0 ]];then
+          echo "Run_arm32 failed"
+          cat ${run_arm32_log_file}
+          isFailed=1
+      fi
 fi
 
-wait ${Run_x86_avx_PID}
-Run_x86_avx_status=$?
-
-if [[ ${Run_x86_avx_status} != 0 ]];then
-      echo "Run_x86 avx failed"
-      cat ${run_x86_avx_log_file}
-      Print_Benchmark_Result
-      exit 1
+if [[ ${backend} == "all" || ${backend} == "gpu" ]]; then
+      if [[ ${Run_gpu_status} != 0 ]];then
+          echo "Run_gpu failed"
+          cat ${run_gpu_log_file}
+          isFailed=1
+      fi
 fi
 
-if [[ ${Run_arm64_status} != 0 ]];then
-    echo "Run_arm64 failed"
-    cat ${run_arm64_log_file}
-    Print_Benchmark_Result
-    exit 1
+if [[ ${backend} == "all" || ${backend} == "npu" ]]; then
+      if [[ ${Run_npu_status} != 0 ]];then
+          echo "Run_npu failed"
+          cat ${run_npu_log_file}
+          isFailed=1
+      fi
 fi
 
-if [[ ${Run_arm32_status} != 0 ]];then
-    echo "Run_arm32 failed"
-    cat ${run_arm32_log_file}
-    Print_Benchmark_Result
-    exit 1
-fi
-
-echo "Run_x86 and Run_x86_sse and Run_arm64 and Run_arm32 is ended"
 Print_Benchmark_Result
+if [[ ${isFailed} == 1 ]]; then
+  exit 1
+fi
+echo "============Test end============"
 exit 0
