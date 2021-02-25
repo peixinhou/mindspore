@@ -63,7 +63,7 @@ int Scheduler::Schedule(std::vector<kernel::LiteKernel *> *dst_kernels) {
     MS_LOG(ERROR) << "op infer shape failed.";
     return ret;
   }
-  ret = ScheduleSubGraphToKernels(kMainSubGraphIndex, dst_kernels, nullptr, nullptr);
+  ret = ScheduleSubGraphToKernels(kMainSubGraphIndex, dst_kernels, nullptr, nullptr, false);
   if (ret != RET_OK) {
     MS_LOG(ERROR) << "Schedule main subgraph to kernels failed.";
     return ret;
@@ -180,8 +180,8 @@ int Scheduler::InferSubGraphShape(size_t subgraph_index, bool *infer_shape_inter
 
 kernel::LiteKernel *Scheduler::FindBackendKernel(const std::vector<Tensor *> &in_tensors,
                                                  const std::vector<Tensor *> &out_tensors,
-                                                 const mindspore::lite::PrimitiveC *primitive,
-                                                 const Model::Node *node) {
+                                                 const mindspore::lite::PrimitiveC *primitive, const Model::Node *node,
+                                                 bool is_partial) {
   MS_ASSERT(primitive != nullptr);
   TypeId data_type = GetFirstFp32Fp16OrInt8Type(in_tensors);
   bool need_restore = true;
@@ -228,7 +228,7 @@ kernel::LiteKernel *Scheduler::FindBackendKernel(const std::vector<Tensor *> &in
     }
   }
 #endif
-  if (mindspore::lite::IsSupportFloat16() &&
+  if (!is_partial && mindspore::lite::IsSupportFloat16() &&
       ((context_->IsCpuFloat16Enabled() && data_type == kNumberTypeFloat32) || data_type == kNumberTypeFloat16)) {
     kernel::KernelKey fp16_cpu_desc{desc.arch, kNumberTypeFloat16, desc.type};
     auto tensor_origin_data_map =
@@ -249,10 +249,7 @@ kernel::LiteKernel *Scheduler::FindBackendKernel(const std::vector<Tensor *> &in
   auto tensor_origin_data_map = DequantUtil::DequantTensor(primitive, in_tensors, desc.data_type, need_restore);
   auto *kernel = KernelRegistry::GetInstance()->GetKernel(in_tensors, out_tensors, primitive, context_, desc);
   DequantUtil::RestoreTensorData(tensor_origin_data_map);
-  if (kernel != nullptr) {
-    return kernel;
-  }
-  return nullptr;
+  return kernel;
 }
 
 kernel::LiteKernel *Scheduler::SchedulePartialToKernel(const lite::Model::Node *src_node) {
@@ -268,7 +265,7 @@ kernel::LiteKernel *Scheduler::SchedulePartialToKernel(const lite::Model::Node *
   std::vector<kernel::LiteKernel *> sub_kernels;
   std::vector<lite::Tensor *> in_tensors;
   std::vector<lite::Tensor *> out_tensors;
-  auto ret = ScheduleSubGraphToKernels(sub_graph_index, &sub_kernels, &in_tensors, &out_tensors);
+  auto ret = ScheduleSubGraphToKernels(sub_graph_index, &sub_kernels, &in_tensors, &out_tensors, true);
   if (ret != RET_OK) {
     MS_LOG(ERROR) << "Schedule partial failed, name: " << src_node->name_;
     return nullptr;
@@ -279,13 +276,13 @@ kernel::LiteKernel *Scheduler::SchedulePartialToKernel(const lite::Model::Node *
   return subgraph;
 }
 
-kernel::LiteKernel *Scheduler::ScheduleNodeToKernel(const lite::Model::Node *src_node) {
+kernel::LiteKernel *Scheduler::ScheduleNodeToKernel(const lite::Model::Node *src_node, bool is_partial) {
   auto *primitive = src_node->primitive_;
   MS_ASSERT(primitive != nullptr);
   std::vector<Tensor *> inputs;
   std::vector<Tensor *> outputs;
   FindNodeInoutTensors(*src_node, &inputs, &outputs);
-  auto *kernel = this->FindBackendKernel(inputs, outputs, primitive, src_node);
+  auto *kernel = this->FindBackendKernel(inputs, outputs, primitive, src_node, is_partial);
   if (kernel == nullptr) {
     MS_LOG(ERROR) << "FindBackendKernel return nullptr, name: " << src_node->name_
                   << ", type: " << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(primitive->Type()));
@@ -298,7 +295,7 @@ kernel::LiteKernel *Scheduler::ScheduleNodeToKernel(const lite::Model::Node *src
 
 int Scheduler::ScheduleSubGraphToKernels(size_t subgraph_index, std::vector<kernel::LiteKernel *> *dst_kernels,
                                          std::vector<lite::Tensor *> *in_tensors,
-                                         std::vector<lite::Tensor *> *out_tensors) {
+                                         std::vector<lite::Tensor *> *out_tensors, bool is_partial) {
   MS_ASSERT(src_model_ != nullptr);
   MS_ASSERT(!src_model_->sub_graphs_.empty());
   MS_ASSERT(src_model_->sub_graphs_.size() > subgraph_index);
@@ -314,7 +311,7 @@ int Scheduler::ScheduleSubGraphToKernels(size_t subgraph_index, std::vector<kern
     if (primitive->Type() == schema::PrimitiveType_Partial) {  // sub_graph
       kernel = SchedulePartialToKernel(node);
     } else {  // kernel
-      kernel = ScheduleNodeToKernel(node);
+      kernel = ScheduleNodeToKernel(node, is_partial);
     }
     if (kernel == nullptr) {
       MS_LOG(ERROR) << "FindBackendKernel return nullptr, name: " << node->name_ << ", type: "

@@ -27,14 +27,7 @@ using mindspore::schema::PrimitiveType_TensorListReserve;
 
 namespace mindspore::kernel {
 
-int TensorListReserveCPUKernel::Init() {
-#ifdef ENABLE_FP16
-  if (lite::IsSupportFloat16() && context_->IsCpuFloat16Enabled() && element_dtype_ == kNumberTypeFloat32) {
-    element_dtype_ = kNumberTypeFloat16;
-  }
-#endif
-  return RET_OK;
-}
+int TensorListReserveCPUKernel::Init() { return RET_OK; }
 
 int TensorListReserveCPUKernel::Run() {
   auto input0 = in_tensors_.at(0);
