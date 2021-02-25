@@ -135,12 +135,18 @@ kernel::LiteKernel *CpuConvDwFp16KernelCreator(const std::vector<lite::Tensor *>
   MS_ASSERT(desc.type == schema::PrimitiveType_DepthwiseConv2D);
 
   auto conv_param = reinterpret_cast<ConvParameter *>(opParameter);
+  auto weight_data_type = inputs.at(1)->data_type();
+  TypeId bias_data_type = kTypeUnknown;
+  if (inputs.size() == 3) {
+    bias_data_type = inputs.at(2)->data_type();
+  }
   kernel::LiteKernel *kernel;
   if (conv_param->input_channel_ < 32) {
-    kernel =
-      new (std::nothrow) kernel::ConvolutionDepthwiseSWFp16CPUKernel(opParameter, inputs, outputs, ctx, primitive);
+    kernel = new (std::nothrow) kernel::ConvolutionDepthwiseSWFp16CPUKernel(
+      opParameter, inputs, outputs, ctx, primitive, weight_data_type, bias_data_type);
   } else {
-    kernel = new (std::nothrow) kernel::ConvolutionDepthwiseFp16CPUKernel(opParameter, inputs, outputs, ctx, primitive);
+    kernel = new (std::nothrow) kernel::ConvolutionDepthwiseFp16CPUKernel(opParameter, inputs, outputs, ctx, primitive,
+                                                                          weight_data_type, bias_data_type);
   }
   if (kernel == nullptr) {
     MS_LOG(ERROR) << "kernel is nullptr.";

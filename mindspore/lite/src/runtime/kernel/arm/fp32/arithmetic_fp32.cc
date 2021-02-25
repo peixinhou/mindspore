@@ -194,10 +194,6 @@ int ArithmeticCPUKernel::CheckDataType() {
 }
 
 int ArithmeticCPUKernel::ReSize() {
-  if (CheckDataType() != RET_OK) {
-    MS_LOG(ERROR) << "ArithmeticCPUKernel resize failed.";
-    return RET_ERROR;
-  }
   InitParam();
   return InitBroadCastCase();
 }
@@ -426,6 +422,11 @@ void ArithmeticCPUKernel::InitParamInRunTime() {
 }
 
 int ArithmeticCPUKernel::Run() {
+  if (CheckDataType() != RET_OK) {
+    MS_LOG(ERROR) << "ArithmeticCPUKernel resize failed.";
+    return RET_ERROR;
+  }
+
   InitParamInRunTime();
 
   int error_code = ParallelLaunch(this->context_->thread_pool_, ArithmeticsRun, this, thread_count_);

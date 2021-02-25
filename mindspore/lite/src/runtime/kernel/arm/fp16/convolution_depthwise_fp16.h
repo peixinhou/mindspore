@@ -36,8 +36,10 @@ class ConvolutionDepthwiseFp16CPUKernel : public ConvolutionBaseFP16CPUKernel {
  public:
   ConvolutionDepthwiseFp16CPUKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
                                     const std::vector<lite::Tensor *> &outputs, const InnerContext *ctx,
-                                    const mindspore::lite::PrimitiveC *primitive)
-      : ConvolutionBaseFP16CPUKernel(parameter, inputs, outputs, ctx, primitive) {}
+                                    const mindspore::lite::PrimitiveC *primitive, TypeId origin_weight_data_type,
+                                    TypeId origin_bias_data_type)
+      : ConvolutionBaseFP16CPUKernel(parameter, inputs, outputs, ctx, primitive, origin_weight_data_type,
+                                     origin_bias_data_type) {}
   ~ConvolutionDepthwiseFp16CPUKernel() override;
 
   int Init() override;
