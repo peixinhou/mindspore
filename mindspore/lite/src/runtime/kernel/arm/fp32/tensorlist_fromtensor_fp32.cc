@@ -71,6 +71,7 @@ int TensorListFromTensorCPUKernel::Run() {
     MS_LOG(ERROR) << "IsNotCompatibleShape!";
     return RET_ERROR;
   }
+  dtype_ = in_tensors_[0]->data_type();
   if (input0_->shape().size() == 0) {
     MS_LOG(ERROR) << "input0_->shape().size():" << input0_->shape().size() << " must be greater than 0";
   }

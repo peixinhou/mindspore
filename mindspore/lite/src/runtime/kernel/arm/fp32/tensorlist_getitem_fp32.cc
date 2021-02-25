@@ -48,10 +48,7 @@ int TensorListGetItemCPUKernel::Run() {
   if (input0->root_tensor() != nullptr) {
     input0 = reinterpret_cast<lite::TensorList *>(input0->root_tensor());
   }
-  if (dtype_ != input0->tensors_data_type()) {
-    MS_LOG(ERROR) << "op dtype: " << dtype_ << " is not equal in_tensor[0] dtype: " << input0->tensors_data_type();
-    return RET_ERROR;
-  }
+  dtype_ = input0->tensors_data_type();
   MS_ASSERT(in_tensors_.at(1)->data_c() != nullptr);
   index_ = reinterpret_cast<int *>(in_tensors_.at(1)->data_c())[0];
   int dim0 = input0->ElementsNum() - 1;

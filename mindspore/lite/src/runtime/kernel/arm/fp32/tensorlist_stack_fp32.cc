@@ -31,11 +31,6 @@ using mindspore::schema::PrimitiveType_TensorListStack;
 namespace mindspore::kernel {
 
 int TensorListStackCPUKernel::CheckParam() {
-  if (dtype_ != kTypeUnknown && input0_->tensors_data_type() != dtype_) {
-    MS_LOG(ERROR) << "in_tensors_[0].tensors_data_type:[" << input0_->tensors_data_type() << "] must be equal "
-                  << "param.data_type:[" << dtype_ << "]";
-    return RET_ERROR;
-  }
   if (num_element_ != -1 && input0_->ElementsNum() != num_element_) {
     MS_LOG(ERROR) << "in_tensors_[0].ElementsNum():[" << input0_->ElementsNum() << "] must be equal "
                   << "param.elements_num:[" << num_element_ << "]";
@@ -148,6 +143,7 @@ int TensorListStackCPUKernel::Run() {
     MS_LOG(ERROR) << "CheckParam failed!";
     return RET_ERROR;
   }
+  dtype_ = input0_->tensors_data_type();
   if (output0_->ElementsNum() == 0) {
     return RET_OK;
   }

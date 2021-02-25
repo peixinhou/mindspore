@@ -38,10 +38,6 @@ int TensorListSetItemCPUKernel::Init() {
 }
 
 int TensorListSetItemCPUKernel::CheckParam() {
-  if (dtype_ != kTypeUnknown && dtype_ != input0_->tensors_data_type()) {
-    MS_LOG(ERROR) << "op dtype:" << dtype_ << " is not equal in_tensors[0] dtype:" << input0_->tensors_data_type();
-    return RET_ERROR;
-  }
   if (in_tensors_[1]->data_type() != kNumberTypeInt && in_tensors_[1]->data_type() != kNumberTypeInt32) {
     MS_LOG(ERROR) << "in_tensors_[1]->data_type():" << in_tensors_[1]->data_type() << " must be int";
     return RET_ERROR;
@@ -69,6 +65,7 @@ int TensorListSetItemCPUKernel::IncrementOutputSize(int origin_size) {
 
 int TensorListSetItemCPUKernel::Run() {
   input0_ = reinterpret_cast<lite::TensorList *>(in_tensors_[0]);
+  dtype_ = input0_->tensors_data_type();
 
   if (CheckParam() != RET_OK) {
     MS_LOG(ERROR) << "check param failed.";
