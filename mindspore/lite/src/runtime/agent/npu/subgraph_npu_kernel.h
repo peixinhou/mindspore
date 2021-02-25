@@ -18,6 +18,7 @@
 #define MINDSPORE_LITE_SRC_RUNTIME_AGENT_SUBGRAPH_NPU_KERNEL_H_
 #include <vector>
 #include <string>
+#include <memory>
 #include "include/hiai_ir_build.h"
 #include "src/sub_graph_kernel.h"
 #include "src/runtime/agent/npu/npu_executor.h"
@@ -56,7 +57,7 @@ class SubGraphNpuKernel : public SubGraphKernel {
   }
 
  private:
-  domi::ModelBufferData *BuildIRModel();
+  std::shared_ptr<domi::ModelBufferData> BuildIRModel();
 
   int BuildNPUInputOp();
 
@@ -76,6 +77,8 @@ class SubGraphNpuKernel : public SubGraphKernel {
   std::vector<ge::Operator> subgraph_output_op_;
 
   std::vector<lite::Tensor *> out_tensor_sorted_;
+
+  std::vector<ge::Operator *> op_buffer_;
 };
 }  // namespace mindspore::kernel
 #endif  // MINDSPORE_LITE_SRC_RUNTIME_AGENT_SUBGRAPH_NPU_KERNEL_H_

@@ -33,7 +33,7 @@ static std::set<mindspore::schema::PrimitiveType> npu_trans_nodes = {
   schema::PrimitiveType_Resize,          schema::PrimitiveType_Pooling};
 struct SubGraphModel {
  public:
-  SubGraphModel(int index, std::string model_name, domi::ModelBufferData *model_buffer_data)
+  SubGraphModel(int index, std::string model_name, std::shared_ptr<domi::ModelBufferData> model_buffer_data)
       : index_(index), model_name_(std::move(model_name)), model_buffer_data_(model_buffer_data) {}
 
   bool is_freed_ = false;
@@ -56,7 +56,7 @@ class NPUManager {
   bool IsSupportNPU();
 
   // provide to subgraph to add model.
-  int AddModel(domi::ModelBufferData *model_buffer_data, const std::string &model_name, int frequency);
+  int AddModel(std::shared_ptr<domi::ModelBufferData> model_buffer_data, const std::string &model_name, int frequency);
 
   // scheduler to load om model.
   int LoadOMModel();
@@ -86,7 +86,7 @@ class NPUManager {
   int index_ = 0;
   bool is_check_version_ = false;
   bool is_support_ = false;
-  std::unordered_map<std::string, SubGraphModel *> models_;
+  std::unordered_map<std::string, std::shared_ptr<SubGraphModel>> models_;
   std::vector<std::shared_ptr<hiai::AiModelMngerClient>> clients_;
 };
 

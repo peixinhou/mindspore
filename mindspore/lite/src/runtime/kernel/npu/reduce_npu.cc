@@ -41,18 +41,18 @@ int ReduceNPUKernel::SetNPUInputs(const std::vector<lite::Tensor *> &inputs, con
   for (int i = 0; i < reduce_param_->num_axes_; i++) {
     axes.push_back(reduce_param_->axes_[i]);
   }
-  auto axes_op = new (std::nothrow) hiai::op::Const(name_ + "_reduce_axes");
+  axes_op_ = new (std::nothrow) hiai::op::Const(name_ + "_reduce_axes");
   ge::TensorDesc axes_tensor_desc(ge::Shape({reduce_param_->num_axes_}), ge::FORMAT_NCHW, ge::DT_INT32);
   ge::TensorPtr axes_tensor = std::make_shared<hiai::Tensor>(axes_tensor_desc);
   axes_tensor->SetData(reinterpret_cast<uint8_t *>(axes.data()), reduce_param_->num_axes_ * sizeof(int32_t));
-  axes_op->set_attr_value(axes_tensor);
+  axes_op_->set_attr_value(axes_tensor);
 
   auto reduce_mean_ = new (std::nothrow) hiai::op::ReduceMean(name_);
   if (reduce_mean_ == nullptr) {
     MS_LOG(ERROR) << "New reduce operator for op " << name_ << " failed.";
     return RET_ERROR;
   }
-  reduce_mean_->set_input_x(*npu_inputs[0]).set_input_axes(*axes_op).set_attr_keep_dims(reduce_param_->keep_dims_);
+  reduce_mean_->set_input_x(*npu_inputs[0]).set_input_axes(*axes_op_).set_attr_keep_dims(reduce_param_->keep_dims_);
   reduce_ = reduce_mean_;
   return RET_OK;
 }
@@ -63,6 +63,10 @@ ReduceNPUKernel::~ReduceNPUKernel() {
   if (reduce_ != nullptr) {
     delete reduce_;
     reduce_ = nullptr;
+  }
+  if (axes_op_ != nullptr) {
+    delete axes_op_;
+    axes_op_ = nullptr;
   }
 }
 

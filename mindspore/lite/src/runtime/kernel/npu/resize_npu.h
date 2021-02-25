@@ -41,6 +41,7 @@ class ResizeNPUKernel : public NPUKernel {
 
  private:
   ge::Operator *op_ = nullptr;
+  hiai::op::Const *out_size_ = nullptr;
   ResizeParameter *resize_parameter_;
 };
 }  // namespace mindspore::kernel

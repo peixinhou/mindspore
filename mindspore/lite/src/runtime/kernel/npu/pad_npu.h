@@ -40,6 +40,8 @@ class PadNPUKernel : public NPUKernel {
 
  private:
   hiai::op::PadV2 *op_ = nullptr;
+  hiai::op::Const *paddings_ = nullptr;
+  hiai::op::Const *constant_ = nullptr;
   const mindspore::lite::Pad *pad_;
 };
 }  // namespace mindspore::kernel
