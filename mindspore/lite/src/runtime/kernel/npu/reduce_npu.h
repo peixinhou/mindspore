@@ -40,6 +40,7 @@ class ReduceNPUKernel : public NPUKernel {
  private:
   ReduceParameter *reduce_param_;
   hiai::Operator *reduce_ = nullptr;
+  hiai::op::Const *axes_op_ = nullptr;
 };
 }  // namespace mindspore::kernel
 #endif  // MINDSPORE_LITE_SRC_RUNTIME_KERNEL_NPU_REDUCE_NPU_H_

@@ -39,6 +39,7 @@ class ReshapeNPUKernel : public NPUKernel {
 
  private:
   hiai::op::Reshape *op_ = nullptr;
+  hiai::op::Const *shape_op_ = nullptr;
   ReshapeParameter *reshape_param_;
 };
 }  // namespace mindspore::kernel

@@ -36,12 +36,15 @@ using mindspore::lite::RET_OK;
 SubGraphNpuKernel::~SubGraphNpuKernel() {
   subgraph_input_op_.clear();
   subgraph_output_op_.clear();
+  for (auto op : op_buffer_) {
+    delete op;
+  }
   if (executor_ != nullptr) {
     delete executor_;
   }
 }
 
-domi::ModelBufferData *SubGraphNpuKernel::BuildIRModel() {
+std::shared_ptr<domi::ModelBufferData> SubGraphNpuKernel::BuildIRModel() {
   ge::Graph graph("NPUGraph");
 
   auto ret = BuildNPUInputOp();
@@ -58,20 +61,18 @@ domi::ModelBufferData *SubGraphNpuKernel::BuildIRModel() {
   ge::Model model(GetOMModelName(), mindspore::lite::Version());
   model.SetGraph(graph);
   domi::HiaiIrBuild ir_build;
-  auto om_model_buff = new (std::nothrow) domi::ModelBufferData;
+  auto om_model_buff = std::make_shared<domi::ModelBufferData>();
   if (om_model_buff == nullptr) {
     MS_LOG(ERROR) << "OM model buffer is nullptr.";
     return nullptr;
   }
   if (!ir_build.CreateModelBuff(model, *om_model_buff)) {
     MS_LOG(ERROR) << "Create model buffer failed.";
-    delete om_model_buff;
     return nullptr;
   }
   if (!ir_build.BuildIRModel(model, *om_model_buff)) {
     MS_LOG(ERROR) << "Build IR model failed.";
     ir_build.ReleaseModelBuff(*om_model_buff);
-    delete om_model_buff;
     return nullptr;
   }
   return om_model_buff;
@@ -85,6 +86,7 @@ int SubGraphNpuKernel::Run() {
 int SubGraphNpuKernel::BuildNPUInputOp() {
   int count = 0;
   subgraph_input_op_.clear();
+  op_buffer_.clear();
   for (auto node : this->nodes_) {
     std::vector<ge::Operator *> node_input_op;
     for (auto in_tensor : node->in_tensors()) {
@@ -94,6 +96,7 @@ int SubGraphNpuKernel::BuildNPUInputOp() {
         data = mindspore::lite::ConverterToNPUData(in_tensor, tensor_name);
         subgraph_input_op_.push_back(*data);
         node_input_op.push_back(data);
+        op_buffer_.push_back(data);
         continue;
       }
 
@@ -130,6 +133,7 @@ int SubGraphNpuKernel::BuildNPUInputOp() {
           auto weight_tensor = mindspore::lite::ConverterToNPUTensor(in_tensor);
           weight_const->set_attr_value(weight_tensor);
           node_input_op.push_back(weight_const);
+          op_buffer_.push_back(weight_const);
         }
       }
     }
@@ -140,6 +144,7 @@ int SubGraphNpuKernel::BuildNPUInputOp() {
       return RET_ERROR;
     }
   }
+
   return RET_OK;
 }
 

@@ -39,6 +39,8 @@ class SplitNPUKernel : public NPUKernel {
 
  private:
   hiai::op::SplitV *op_ = nullptr;
+  hiai::op::Const *size_splits_ = nullptr;
+  hiai::op::Const *split_dim_ = nullptr;
   const mindspore::lite::Split *split_;
 };
 }  // namespace mindspore::kernel

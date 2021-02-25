@@ -63,11 +63,7 @@ void NPUManager::Reset() {
     auto model = model_map.second;
     if (!model->is_freed_) {
       ir_build.ReleaseModelBuff(*model->model_buffer_data_);
-      model->model_buffer_data_ = nullptr;
       model->is_freed_ = true;
-      model->desc_.reset();
-      model->desc_ = nullptr;
-      model->client_.reset();
     }
   }
   models_.clear();
@@ -141,8 +137,9 @@ bool NPUManager::IsKirinChip() {
   return false;
 }
 
-int NPUManager::AddModel(domi::ModelBufferData *model_buffer_data, const std::string &model_name, int frequency) {
-  auto model = new SubGraphModel(index_, model_name, model_buffer_data);
+int NPUManager::AddModel(std::shared_ptr<domi::ModelBufferData> model_buffer_data, const std::string &model_name,
+                         int frequency) {
+  auto model = std::make_shared<SubGraphModel>(index_, model_name, model_buffer_data);
   auto desc = std::make_shared<hiai::AiModelDescription>(model_name, frequency, 0, 0, 0);
   model->desc_ = desc;
   models_.insert({model_name, model});
@@ -168,6 +165,7 @@ int NPUManager::LoadOMModel() {
   std::vector<std::shared_ptr<hiai::AiModelDescription>> models_desc;
   std::shared_ptr<hiai::AiModelMngerClient> client = nullptr;
   std::shared_ptr<hiai::AiModelBuilder> mc_builder = nullptr;
+  std::unordered_map<std::shared_ptr<hiai::AiModelBuilder>, hiai::MemBuffer *> builder_buffer_map;
   int total = 0;
   for (const auto &model_map : models_) {
     if (total % MAX_MODEL_NUM == 0) {
@@ -194,7 +192,8 @@ int NPUManager::LoadOMModel() {
       MS_LOG(ERROR) << "NPU input memory buffer create failed.";
       return RET_ERROR;
     }
-    model->desc_->SetModelBuffer(model->model_buffer_data_->data, model->model_buffer_data_->length);
+    builder_buffer_map.insert({mc_builder, buffer});
+    model->desc_->SetModelBuffer(buffer->GetMemBufferData(), buffer->GetMemBufferSize());
     if (models_desc.size() == MAX_MODEL_NUM) {
       auto ret = LoadModel(client, models_desc);
       if (ret != RET_ERROR) {
@@ -214,6 +213,9 @@ int NPUManager::LoadOMModel() {
     models_desc.clear();
   }
 
+  for (auto it : builder_buffer_map) {
+    it.first->MemBufferDestroy(it.second);
+  }
   return RET_OK;
 }
 

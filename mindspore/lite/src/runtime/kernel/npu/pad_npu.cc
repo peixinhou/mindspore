@@ -43,19 +43,19 @@ int PadNPUKernel::SetNPUInputs(const std::vector<lite::Tensor *> &inputs, const 
   ge::TensorDesc padding_tensor_desc(ge::Shape({size, 2}), ge::FORMAT_NCHW, ge::DT_INT32);
   ge::TensorPtr padding_tensor = std::make_shared<hiai::Tensor>(padding_tensor_desc);
   padding_tensor->SetData(reinterpret_cast<uint8_t *>(pad_->GetPaddings().data()), 2 * size * sizeof(int));
-  auto paddings = new hiai::op::Const(name_ + "paddings");
-  paddings->set_attr_value(padding_tensor);
+  paddings_ = new hiai::op::Const(name_ + "paddings");
+  paddings_->set_attr_value(padding_tensor);
 
   ge::TensorDesc constant_values_tensor_desc(ge::Shape({1}), ge::FORMAT_NCHW, ge::DT_FLOAT);
   ge::TensorPtr constant_values_tensor = std::make_shared<hiai::Tensor>(constant_values_tensor_desc);
   vector<float> constant_values_data_value = {pad_->GetConstantValue()};
   constant_values_tensor->SetData(reinterpret_cast<uint8_t *>(constant_values_data_value.data()), 1 * sizeof(float));
-  auto constant = new hiai::op::Const(name_ + "constant");
-  constant->set_attr_value(constant_values_tensor);
+  constant_ = new hiai::op::Const(name_ + "constant");
+  constant_->set_attr_value(constant_values_tensor);
 
   op_->set_input_x(*npu_inputs[0]);
-  op_->set_input_constant_values(*constant);
-  op_->set_input_paddings(*paddings);
+  op_->set_input_constant_values(*constant_);
+  op_->set_input_paddings(*paddings_);
 
   return RET_OK;
 }
@@ -66,6 +66,14 @@ PadNPUKernel::~PadNPUKernel() {
   if (op_ != nullptr) {
     delete op_;
     op_ = nullptr;
+  }
+  if (paddings_ != nullptr) {
+    delete paddings_;
+    paddings_ = nullptr;
+  }
+  if (constant_ != nullptr) {
+    delete constant_;
+    constant_ = nullptr;
   }
 }
 
