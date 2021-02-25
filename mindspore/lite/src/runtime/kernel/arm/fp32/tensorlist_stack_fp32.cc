@@ -60,11 +60,6 @@ int TensorListStackCPUKernel::Init() {
   MS_ASSERT(input0_ != nullptr);
   output0_ = out_tensors_[0];
   MS_ASSERT(output0_ != nullptr);
-#ifdef ENABLE_FP16
-  if (lite::IsSupportFloat16() && context_->IsCpuFloat16Enabled() && dtype_ == kNumberTypeFloat32) {
-    dtype_ = kNumberTypeFloat16;
-  }
-#endif
   return RET_OK;
 }
 
@@ -148,11 +143,6 @@ int TensorListStackCPUKernel::MergeSubShape(const std::vector<int> &shape) {
 int TensorListStackCPUKernel::Run() {
   if (dtype_ == kTypeUnknown) {
     dtype_ = input0_->tensors_data_type();
-#ifdef ENABLE_FP16
-    if (lite::IsSupportFloat16() && context_->IsCpuFloat16Enabled() && dtype_ == kNumberTypeFloat32) {
-      dtype_ = kNumberTypeFloat16;
-    }
-#endif
   }
   if (CheckParam() != RET_OK) {
     MS_LOG(ERROR) << "CheckParam failed!";

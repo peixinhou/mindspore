@@ -100,6 +100,7 @@ int TensorListFromTensorCPUKernel::Run() {
     auto out_data = out_ptr->MutableData();
     MS_ASSERT(out_data != nullptr);
     memcpy(out_data, in_data, data_offset);
+    out_ptr->set_data_type(dtype_);
     in_data += data_offset;
   }
   output0->set_tensors_data_type(dtype_);
