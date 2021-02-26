@@ -30,8 +30,11 @@ class ConvolutionDelegateFP16CPUKernel : public LiteKernel {
  public:
   ConvolutionDelegateFP16CPUKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
                                    const std::vector<lite::Tensor *> &outputs, const lite::InnerContext *ctx,
-                                   const mindspore::lite::PrimitiveC *primitive)
-      : LiteKernel(parameter, inputs, outputs, ctx, primitive) {}
+                                   const mindspore::lite::PrimitiveC *primitive, TypeId origin_weight_data_type,
+                                   TypeId origin_bias_data_type)
+      : LiteKernel(parameter, inputs, outputs, ctx, primitive),
+        origin_weight_data_type_(origin_weight_data_type),
+        origin_bias_data_type_(origin_bias_data_type) {}
   ~ConvolutionDelegateFP16CPUKernel() override {
     FreeCopiedData();
     if (fp16_conv_kernel_ != nullptr) {

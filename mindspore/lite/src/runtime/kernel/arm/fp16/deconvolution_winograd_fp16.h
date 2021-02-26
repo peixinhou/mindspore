@@ -29,8 +29,10 @@ class DeConvWinogradFp16CPUKernel : public ConvolutionBaseFP16CPUKernel {
  public:
   DeConvWinogradFp16CPUKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
                               const std::vector<lite::Tensor *> &outputs, const lite::InnerContext *ctx,
-                              const mindspore::lite::PrimitiveC *primitive)
-      : ConvolutionBaseFP16CPUKernel(parameter, inputs, outputs, ctx, primitive) {}
+                              const mindspore::lite::PrimitiveC *primitive, TypeId origin_weight_data_type,
+                              TypeId origin_bias_data_type)
+      : ConvolutionBaseFP16CPUKernel(parameter, inputs, outputs, ctx, primitive, origin_weight_data_type,
+                                     origin_bias_data_type) {}
   ~DeConvWinogradFp16CPUKernel() override;
   int Init() override;
   int Run() override;

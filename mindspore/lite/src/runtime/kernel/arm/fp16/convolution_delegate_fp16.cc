@@ -67,17 +67,13 @@ int ConvolutionDelegateFP16CPUKernel::Init() {
     if (in_tensors_.size() == 3) {
       origin_bias_ = CopyData(in_tensors_.at(kBiasIndex));
       need_free_ = need_free_ | BIAS_NEED_FREE;
-      origin_bias_data_type_ = in_tensors_.at(kBiasIndex)->data_type();
     }
-    origin_weight_data_type_ = in_tensors_.at(kWeightIndex)->data_type();
     return RET_OK;
   }
   origin_weight_ = in_tensors_.at(kWeightIndex)->data_c();
   if (in_tensors_.size() == 3) {
     origin_bias_ = in_tensors_.at(kBiasIndex)->data_c();
-    origin_bias_data_type_ = in_tensors_.at(kBiasIndex)->data_type();
   }
-  origin_weight_data_type_ = in_tensors_.at(kWeightIndex)->data_type();
   return ReSize();
 }
 
@@ -124,8 +120,9 @@ kernel::LiteKernel *CpuConvFp16KernelSelect(const std::vector<lite::Tensor *> &i
       kernel::Convolution1x1FP16CPUKernel(op_parameter, inputs, outputs, ctx, primitive, origin_weight, origin_bias,
                                           origin_weight_data_type, origin_bias_data_type);
   } else if (use_winograd) {
-    kernel = new (std::nothrow) kernel::ConvolutionWinogradFP16CPUKernel(
-      op_parameter, inputs, outputs, ctx, primitive, out_unit, origin_weight, origin_bias, origin_bias_data_type);
+    kernel = new (std::nothrow)
+      kernel::ConvolutionWinogradFP16CPUKernel(op_parameter, inputs, outputs, ctx, primitive, out_unit, origin_weight,
+                                               origin_bias, origin_weight_data_type, origin_bias_data_type);
   } else {
     kernel =
       new (std::nothrow) kernel::ConvolutionFP16CPUKernel(op_parameter, inputs, outputs, ctx, primitive, origin_weight,
@@ -213,7 +210,13 @@ static lite::Tensor *CreateOutputTensorFp16(const std::vector<int> &out_shape,
 kernel::LiteKernel *CreateDelegateConvFp16(const std::vector<lite::Tensor *> &inputs,
                                            const std::vector<lite::Tensor *> &outputs, OpParameter *op_parameter,
                                            const InnerContext *ctx, const mindspore::lite::PrimitiveC *primitive) {
-  return new (std::nothrow) kernel::ConvolutionDelegateFP16CPUKernel(op_parameter, inputs, outputs, ctx, primitive);
+  auto weight_data_type = inputs.at(1)->data_type();
+  TypeId bias_data_type = kTypeUnknown;
+  if (inputs.size() == 3) {
+    bias_data_type = inputs.at(2)->data_type();
+  }
+  return new (std::nothrow) kernel::ConvolutionDelegateFP16CPUKernel(op_parameter, inputs, outputs, ctx, primitive,
+                                                                     weight_data_type, bias_data_type);
 }
 
 kernel::LiteKernel *CpuGroupConvFp16KernelCreator(const std::vector<lite::Tensor *> &inputs,
