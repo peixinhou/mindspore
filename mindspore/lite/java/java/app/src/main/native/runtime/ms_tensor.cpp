@@ -34,8 +34,8 @@ extern "C" JNIEXPORT jintArray JNICALL Java_com_mindspore_lite_MSTensor_getShape
   for (size_t i = 0; i < shape_size; i++) {
     tmp[i] = local_shape.at(i);
   }
-  delete[](tmp);
   env->SetIntArrayRegion(shape, 0, shape_size, tmp);
+  delete[](tmp);
   return shape;
 }
 
@@ -181,7 +181,7 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_mindspore_lite_MSTensor_setData(J
 extern "C" JNIEXPORT jboolean JNICALL Java_com_mindspore_lite_MSTensor_setByteBufferData(JNIEnv *env, jobject thiz,
                                                                                          jlong tensor_ptr,
                                                                                          jobject buffer) {
-  jbyte *p_data = reinterpret_cast<jbyte *>(env->GetDirectBufferAddress(buffer));  // get buffer poiter
+  jbyte *p_data = reinterpret_cast<jbyte *>(env->GetDirectBufferAddress(buffer));  // get buffer pointer
   jlong data_len = env->GetDirectBufferCapacity(buffer);                           // get buffer capacity
   if (p_data == nullptr) {
     MS_LOGE("GetDirectBufferAddress return null");
