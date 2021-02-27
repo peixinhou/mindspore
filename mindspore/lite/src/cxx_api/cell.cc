@@ -82,13 +82,14 @@ Status GraphCell::Load() {
   return kLiteError;
 }
 
-InputAndOutput::InputAndOutput() { MS_LOG(ERROR) << "Unsupported feature."; }
+InputAndOutput::InputAndOutput() : index_(-1) { MS_LOG(ERROR) << "Unsupported feature."; }
 
-InputAndOutput::InputAndOutput(const MSTensor &tensor) { MS_LOG(ERROR) << "Unsupported feature."; }
-InputAndOutput::InputAndOutput(MSTensor &&tensor) { MS_LOG(ERROR) << "Unsupported feature."; }
+InputAndOutput::InputAndOutput(const MSTensor &tensor) : index_(-1) { MS_LOG(ERROR) << "Unsupported feature."; }
+InputAndOutput::InputAndOutput(MSTensor &&tensor) : index_(-1) { MS_LOG(ERROR) << "Unsupported feature."; }
 
 InputAndOutput::InputAndOutput(const std::shared_ptr<CellBase> &cell, const std::vector<InputAndOutput> &prev,
-                               int32_t index) {
+                               int32_t index)
+    : index_(-1) {
   MS_LOG(ERROR) << "Unsupported feature.";
 }
 
