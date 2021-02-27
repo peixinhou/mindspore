@@ -146,6 +146,7 @@ int Reshape::CalNewShape(const Tensor *in_tensor, std::vector<int> *out_shape) c
     return RET_INFER_ERR;
   }
   if (infer_index != -1) {
+    MS_ASSERT(out_shape_size != 0);
     out_shape->at(infer_index) = in_shape_size / out_shape_size;
   }
   return RET_OK;
