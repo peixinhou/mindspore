@@ -38,8 +38,8 @@ bool IsInOutCanFusion(schema::MetaGraphT *graph, const std::vector<size_t> &node
     MS_ASSERT(pre_node->primitive != nullptr);
     MS_ASSERT(pre_node->primitive->value != nullptr);
     if (*trans_type == kNONE) {
-      if (pre_node->primitive->value.type == schema::PrimitiveType_Transpose) {
-        MS_ASSERT(pre_node->primitive->value.AsTranspose() != nullptr);
+      if (pre_node->primitive->value.type == schema::PrimitiveType_Transpose &&
+          pre_node->primitive->value.AsTranspose() != nullptr) {
         if (pre_node->primitive->value.AsTranspose()->perm == nchw2nhwc_perm) {
           *trans_type = kNCHW2NHWC;
         } else if (pre_node->primitive->value.AsTranspose()->perm == nhwc2nchw_perm) {
