@@ -73,7 +73,7 @@ class MemoryAllocator {
     if (type != kWorkspace) {
       return MallocWeightTensor(type_id, size, type);
     }
-    if (size == 0 && size >= UINT_MAX) {
+    if (size == 0 || size >= UINT_MAX) {
       return nullptr;
     }
 

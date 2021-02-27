@@ -30,6 +30,10 @@ int PoolingInt8Coder::Prepare(CoderContext *const context) {
 
   if (pooling_parameter_->pool_mode_ == PoolMode_AvgPool) {
     buffer_size_ = input_tensor_->Channel() * sizeof(int32_t);
+    if (buffer_size_ == 0 || buffer_size_ >= UINT_MAX) {
+      MS_LOG(ERROR) << "invalid buffer size";
+      return RET_ERROR;
+    }
     buffer_ = static_cast<int32_t *>(allocator_->Malloc(kNumberTypeInt32, buffer_size_, kWorkspace));
     MS_CHECK_PTR(buffer_);
   }

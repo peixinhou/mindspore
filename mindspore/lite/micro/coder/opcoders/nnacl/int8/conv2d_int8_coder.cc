@@ -91,6 +91,10 @@ int Conv2DINT8Coder::InitWeightBias(CoderContext *const context) {
   conv_param_->output_channel_ = output_channel;
   auto output_channel_size = static_cast<size_t>(output_channel);
   auto output_channel_data_size = static_cast<size_t>(output_channel_size * sizeof(int32_t));
+  if (output_channel_data_size == 0 || output_channel_data_size >= UINT_MAX) {
+    MS_LOG(ERROR) << "invalid tensor size";
+    return RET_ERROR;
+  }
 
   int32_t input_zp = conv_param_->conv_quant_arg_.input_quant_args_[0].zp_;
   filter_peroc_ = conv_quant_arg_->per_channel_ & FILTER_PER_CHANNEL;
@@ -225,11 +229,16 @@ std::unique_ptr<OperatorCoder> CPUConv2DINT8CoderCreator(const std::vector<Tenso
                                                          const std::vector<Tensor *> &out_tensors,
                                                          const Model::Node *node, size_t node_index, Target target) {
   PrimitiveC *primitive_c = node->primitive_;
-  if (!primitive_c) {
+  if (primitive_c == nullptr) {
     return nullptr;
   }
-  OpParameter *parameter =
-    PopulateRegistry::GetInstance()->GetParameterCreator((schema::PrimitiveType(primitive_c->Type())))(primitive_c);
+  auto creator = PopulateRegistry::GetInstance()->GetParameterCreator((schema::PrimitiveType(primitive_c->Type())));
+  if (creator == nullptr) {
+    MS_LOG(ERROR) << "PopulateParameter return nullptr, type: "
+                  << schema::EnumNamePrimitiveType((schema::PrimitiveType)(primitive_c->Type()));
+    return nullptr;
+  }
+  OpParameter *parameter = creator(primitive_c);
   if (parameter == nullptr) {
     MS_LOG(ERROR) << "PopulateParameter return nullptr, type: "
                   << schema::EnumNamePrimitiveType((schema::PrimitiveType)(primitive_c->Type()));
