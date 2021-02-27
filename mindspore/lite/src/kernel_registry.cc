@@ -31,13 +31,15 @@ using mindspore::kernel::KernelKey;
 namespace mindspore::lite {
 KernelRegistry *KernelRegistry::GetInstance() {
   static KernelRegistry instance;
-
   std::unique_lock<std::mutex> malloc_creator_array(instance.lock_);
   if (instance.creator_arrays_ == nullptr) {
-    instance.creator_arrays_ = reinterpret_cast<KernelCreator *>(malloc(array_size_ * sizeof(KernelRegistry)));
-    if (instance.creator_arrays_ == nullptr) {
+    auto array_buf = malloc(array_size_ * sizeof(KernelRegistry));
+    if (array_buf == nullptr) {
+      MS_LOG(ERROR) << "malloc array buffer failed";
       return nullptr;
     }
+    memset(array_buf, 0, array_size_ * sizeof(KernelRegistry));
+    instance.creator_arrays_ = reinterpret_cast<KernelCreator *>(array_buf);
   }
   return &instance;
 }
