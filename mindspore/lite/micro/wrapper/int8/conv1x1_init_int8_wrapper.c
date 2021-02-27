@@ -15,28 +15,29 @@
  */
 
 #include "wrapper/int8/conv1x1_init_int8_wrapper.h"
-#include <memory.h>
 #include "nnacl/int8/matmul_int8.h"
 #include "nnacl/errorcode.h"
 
-int Conv1x1Init(int8_t *src_weight, int32_t *src_bias, int32_t *filter_zps, int32_t input_channel,
-                int32_t output_channel, int32_t input_zp, bool support_optimize, bool filter_peroc,
-                int8_t **packed_weight, int32_t **bias_data) {
-  if (packed_weight == NULL || bias_data == NULL) {
+#ifdef ENABLE_ARM32
+static int InitWeightBiasArm32(int8_t *src_weight, int32_t *src_bias, int32_t input_channel, int32_t output_channel,
+                               bool support_optimize, int8_t **packed_weight, int32_t **bias_data) {
+  // weight
+  size_t size = UP_ROUND(input_channel, C16NUM) * UP_ROUND(output_channel, C2NUM) * sizeof(int8_t);
+  if (size == 0 || size >= UINT_MAX) {
     return NNACL_ERR;
   }
-#ifdef ENABLE_ARM32
-  /* InitWeightBiasArm32 */
-  /* weight */
-  size_t size = UP_ROUND(input_channel, C16NUM) * UP_ROUND(output_channel, C2NUM) * sizeof(int8_t);
   int8_t *packed_weight_ = (int8_t *)(malloc(size));
   if (packed_weight_ == NULL) {
     return NNACL_ERR;
   }
   memset(packed_weight_, 0, size);
   RowMajor2Row2x16MajorInt8(src_weight, packed_weight_, output_channel, input_channel);
-  /* bias */
+  // bias
   size = UP_ROUND(output_channel, C2NUM);
+  if (size == 0 || size >= UINT_MAX) {
+    free(packed_weight_);
+    return NNACL_ERR;
+  }
   int32_t *bias_data_ = (int32_t *)malloc(size * sizeof(int32_t));
   if (bias_data_ == NULL) {
     free(packed_weight_);
@@ -46,11 +47,19 @@ int Conv1x1Init(int8_t *src_weight, int32_t *src_bias, int32_t *filter_zps, int3
   if (src_bias != NULL) {
     memcpy(bias_data_, src_bias, output_channel * sizeof(int32_t));
   }
+  *packed_weight = packed_weight_;
+  *bias_data = bias_data_;
+  return NNACL_OK;
+}
 #else
-  /* InitWeightBias */
-  /* weight */
+static int InitWeightBias(int8_t *src_weight, int32_t *src_bias, int32_t input_channel, int32_t output_channel,
+                          bool support_optimize, int8_t **packed_weight, int32_t **bias_data) {
+  // weight
   size_t size = support_optimize ? UP_ROUND(input_channel, C4NUM) * UP_ROUND(output_channel, C16NUM) * sizeof(int8_t)
                                  : UP_ROUND(input_channel, C16NUM) * UP_ROUND(output_channel, C4NUM) * sizeof(int8_t);
+  if (size == 0 || size >= UINT_MAX) {
+    return NNACL_ERR;
+  }
   int8_t *packed_weight_ = (int8_t *)(malloc(size));
   if (packed_weight_ == NULL) {
     return NNACL_ERR;
@@ -61,8 +70,12 @@ int Conv1x1Init(int8_t *src_weight, int32_t *src_bias, int32_t *filter_zps, int3
   } else {
     RowMajor2Row16x4MajorInt8(src_weight, packed_weight_, output_channel, input_channel);
   }
-  /* bias */
+  // bias
   size = support_optimize ? UP_ROUND(output_channel, C16NUM) : UP_ROUND(output_channel, C4NUM);
+  if (size == 0 || size >= UINT_MAX) {
+    free(packed_weight_);
+    return NNACL_ERR;
+  }
   int32_t *bias_data_ = (int32_t *)malloc(size * sizeof(int32_t));
   if (bias_data_ == NULL) {
     free(packed_weight_);
@@ -71,6 +84,31 @@ int Conv1x1Init(int8_t *src_weight, int32_t *src_bias, int32_t *filter_zps, int3
   memset(bias_data_, 0, size * sizeof(int32_t));
   if (src_bias != NULL) {
     memcpy(bias_data_, src_bias, output_channel * sizeof(int32_t));
+  }
+  *packed_weight = packed_weight_;
+  *bias_data = bias_data_;
+  return NNACL_OK;
+}
+
+#endif
+
+int Conv1x1Init(int8_t *src_weight, int32_t *src_bias, int32_t *filter_zps, int32_t input_channel,
+                int32_t output_channel, int32_t input_zp, bool support_optimize, bool filter_peroc,
+                int8_t **packed_weight, int32_t **bias_data) {
+  if (packed_weight == NULL || bias_data == NULL) {
+    return NNACL_ERR;
+  }
+#ifdef ENABLE_ARM32
+  int ret = InitWeightBiasArm32(src_weight, src_bias, input_channel, output_channel, support_optimize, packed_weight,
+                                bias_data);
+  if (ret != NNACL_OK) {
+    return NNACL_ERR;
+  }
+#else
+  int ret =
+    InitWeightBias(src_weight, src_bias, input_channel, output_channel, support_optimize, packed_weight, bias_data);
+  if (ret != NNACL_OK) {
+    return NNACL_ERR;
   }
 #endif
   /* InitBiasByzp */
@@ -81,10 +119,7 @@ int Conv1x1Init(int8_t *src_weight, int32_t *src_bias, int32_t *filter_zps, int3
     for (int ic = 0; ic < input_channel; ic++) {
       weight_sum_value += src_weight[oc * input_channel + ic];
     }
-    bias_data_[oc] += filter_zp * input_zp * input_channel - weight_sum_value * input_zp;
+    (*bias_data)[oc] += filter_zp * input_zp * input_channel - weight_sum_value * input_zp;
   }
-
-  *packed_weight = packed_weight_;
-  *bias_data = bias_data_;
   return NNACL_OK;
 }
