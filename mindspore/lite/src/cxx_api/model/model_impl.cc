@@ -126,6 +126,10 @@ Status ModelImpl::Predict(const std::vector<MSTensor> &inputs, std::vector<MSTen
       MS_LOG(WARNING) << "Tensor " << user_input.Name() << " has a different name from input" << input->tensor_name()
                       << ".";
     }
+    if (user_input.MutableData() == nullptr) {
+      MS_LOG(ERROR) << "Failed to get the data of input tensor.";
+      return kLiteInputTensorError;
+    }
     old_data.push_back(input->MutableData());
     if (user_input.MutableData() != input->MutableData()) {
       if (input->Size() != user_input.DataSize()) {
@@ -136,6 +140,13 @@ Status ModelImpl::Predict(const std::vector<MSTensor> &inputs, std::vector<MSTen
         return kLiteInputTensorError;
       }
       if (user_input.impl_->need_copy()) {
+        if (input->MutableData() == nullptr) {
+          for (size_t j = 0; j < old_data.size(); j++) {
+            input_tensors.at(j)->set_data(old_data.at(j));
+          }
+          MS_LOG(ERROR) << "Failed to allocate the data of input tensor.";
+          return kLiteInputTensorError;
+        }
         ::memcpy(input->MutableData(), user_input.MutableData(), input->Size());
       } else {
         input->set_data(user_input.MutableData());
@@ -264,7 +275,7 @@ Status ModelImpl::Resize(const std::vector<MSTensor> &inputs, const std::vector<
       MS_LOG(ERROR) << "Input tensor " << input.Name() << " is null.";
       return kLiteInputTensorError;
     }
-    inner_input[i] = input.impl_->lite_tensor();
+    inner_input[i] = const_cast<tensor::MSTensor *>(input.impl_->lite_tensor());
     std::vector<int32_t> shape = TruncateShape(dims[i], inner_input[i]->data_type(), inner_input[i]->Size(), false);
     if (shape.empty() && !(dims[i].empty())) {
       MS_LOG(ERROR) << "Input dims[" << i << "] is invalid.";

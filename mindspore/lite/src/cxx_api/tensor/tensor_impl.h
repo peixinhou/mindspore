@@ -30,8 +30,12 @@ namespace mindspore {
 class MSTensor::Impl {
  public:
   Impl() {}
-  virtual ~Impl() = default;
-  explicit Impl(tensor::MSTensor *tensor) : lite_tensor_(tensor) {
+  virtual ~Impl() {
+    if (!from_session_) {
+      delete lite_tensor_;
+    }
+  }
+  explicit Impl(tensor::MSTensor *tensor) : lite_tensor_(tensor), from_session_(true) {
     if (tensor != nullptr) {
       tensor_name_ = tensor->tensor_name();
     }
@@ -115,7 +119,7 @@ class MSTensor::Impl {
     return nullptr;
   }
 
-  tensor::MSTensor *lite_tensor() { return lite_tensor_; }
+  const tensor::MSTensor *lite_tensor() { return lite_tensor_; }
 
   Status set_lite_tensor(tensor::MSTensor *tensor) {
     if (tensor == nullptr) {
@@ -123,6 +127,7 @@ class MSTensor::Impl {
       return kLiteNullptr;
     }
     lite_tensor_ = tensor;
+    from_session_ = true;
     return kSuccess;
   }
 
@@ -131,10 +136,11 @@ class MSTensor::Impl {
   bool need_copy() { return need_copy_; }
 
  private:
-  tensor::MSTensor *lite_tensor_;
-  std::string tensor_name_;
+  tensor::MSTensor *lite_tensor_ = nullptr;
+  std::string tensor_name_ = "";
   std::vector<int64_t> shape_;
   bool need_copy_ = true;
+  bool from_session_ = false;
 };
 
 }  // namespace mindspore
