@@ -606,6 +606,9 @@ build_lite()
 }
 
 build_lite_java_arm64() {
+    if [[ "${DEVICE}" == "" ]]; then
+      LITE_ENABLE_GPU="opencl"
+    fi
     # build mindspore-lite arm64
     JTARBALL=mindspore-lite-${VERSION_STR}-inference-android-aarch64
     if [[ "X$SUPPORT_TRAIN" = "Xon" ]]; then
