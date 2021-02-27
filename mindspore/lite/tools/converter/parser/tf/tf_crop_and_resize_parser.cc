@@ -58,7 +58,7 @@ STATUS TFCropAndResizeParser::Parse(const tensorflow::NodeDef &tf_op,
   }
   if (attr_value.s() == "bilinear") {
     attr->method = schema::ResizeMethod_LINEAR;
-  } else if (attr_value.s() == "nearest_neighbor") {
+  } else if (attr_value.s() == "nearest_neighbor" || attr_value.s() == "nearest") {
     attr->method = schema::ResizeMethod_NEAREST;
   } else {
     MS_LOG(ERROR) << "Do not support method: " << attr_value.s();
