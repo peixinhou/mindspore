@@ -35,6 +35,10 @@ int ConvolutionDepthwiseFP32Coder::InitWeightBias() {
   int channel = filter_tensor_->Batch();
   size_t pack_weight_size = filter_tensor_->Batch() * filter_tensor_->Height() * filter_tensor_->Width();
   size_t packed_weight_data_size = pack_weight_size * sizeof(float);
+  if (packed_weight_data_size == 0 || packed_weight_data_size >= UINT_MAX) {
+    MS_LOG(ERROR) << "invalid tensor size";
+    return RET_ERROR;
+  }
   packed_weight_ =
     reinterpret_cast<float *>(allocator_->Malloc(kNumberTypeFloat32, packed_weight_data_size, kOfflinePackWeight));
   MS_CHECK_PTR(packed_weight_);

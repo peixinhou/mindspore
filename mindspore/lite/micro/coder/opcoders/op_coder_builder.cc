@@ -52,8 +52,13 @@ std::unique_ptr<OperatorCoder> OpCoderBuilder::build() {
                   << " code_target: " << target_ << " data_type: " << EnumNameDataType(data_type_);
     return op_coder;
   }
-  OpParameter *parameter =
-    PopulateRegistry::GetInstance()->GetParameterCreator((schema::PrimitiveType(primitive_type)))(node_->primitive_);
+  auto creator = PopulateRegistry::GetInstance()->GetParameterCreator((schema::PrimitiveType(primitive_type)));
+  if (creator == nullptr) {
+    MS_LOG(ERROR) << "PopulateParameter return nullptr, type: "
+                  << schema::EnumNamePrimitiveType((schema::PrimitiveType)(primitive_type));
+    return nullptr;
+  }
+  OpParameter *parameter = creator(node_->primitive_);
   if (parameter == nullptr) {
     MS_LOG(ERROR) << "PopulateParameter return nullptr, type: "
                   << schema::EnumNamePrimitiveType((schema::PrimitiveType)(primitive_type));

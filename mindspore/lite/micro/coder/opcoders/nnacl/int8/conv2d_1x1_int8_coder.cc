@@ -120,8 +120,15 @@ int Conv2D1x1Int8Coder::InitFilterPeroc() {
   MS_CHECK_TRUE(conv_quant_arg_->filter_arg_num_ == static_cast<size_t>(output_channel),
                 "weight per channel quant param length is not equal to filter num, filter is not PerChannel");
   size_t output_size = output_channel * sizeof(int32_t);
+  if (output_size == 0 || output_size >= UINT_MAX) {
+    MS_LOG(ERROR) << "invalid tensor size";
+    return RET_ERROR;
+  }
   size_t oc_size = round_oc * sizeof(int32_t);
-
+  if (oc_size == 0 || oc_size >= UINT_MAX) {
+    MS_LOG(ERROR) << "invalid tensor size";
+    return RET_ERROR;
+  }
   /* filter zp */
   filter_zp_ptr_ = static_cast<int32_t *>(allocator_->Malloc(kNumberTypeInt32, output_size, kOfflinePackWeight));
   MS_CHECK_PTR(filter_zp_ptr_);

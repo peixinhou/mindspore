@@ -26,9 +26,7 @@ class AddInt8Coder : public OperatorCoder {
  public:
   AddInt8Coder(const std::vector<Tensor *> &in_tensors, const std::vector<Tensor *> &out_tensors,
                const Model::Node *node, size_t node_index, Target target)
-      : OperatorCoder(in_tensors, out_tensors, node, node_index, target) {
-    arith_para_ = reinterpret_cast<ArithmeticParameter *>(parameter_);
-  }
+      : OperatorCoder(in_tensors, out_tensors, node, node_index, target) {}
 
   ~AddInt8Coder() override = default;
 

@@ -27,6 +27,8 @@ using mindspore::schema::PrimitiveType_Add;
 namespace mindspore::lite::micro {
 
 int AddInt8Coder::Prepare(CoderContext *const context) {
+  arith_para_ = reinterpret_cast<ArithmeticParameter *>(parameter_);
+
   input0 = input_tensors().at(0);
   input1 = input_tensors().at(1);
   MS_CHECK_PTR(input0);

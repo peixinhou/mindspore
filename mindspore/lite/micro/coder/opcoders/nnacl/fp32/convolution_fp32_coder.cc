@@ -136,11 +136,16 @@ std::unique_ptr<OperatorCoder> CPUConvolutionFP32CoderCreator(const std::vector<
   std::vector<Tensor *> inputs = in_tensors;
   std::vector<Tensor *> outputs = out_tensors;
   auto primitive = node->primitive_;
-  if (!primitive) {
+  if (primitive == nullptr) {
     return nullptr;
   }
-  OpParameter *parameter =
-    PopulateRegistry::GetInstance()->GetParameterCreator((schema::PrimitiveType(primitive->Type())))(primitive);
+  auto creator = PopulateRegistry::GetInstance()->GetParameterCreator((schema::PrimitiveType(primitive->Type())));
+  if (creator == nullptr) {
+    MS_LOG(ERROR) << "PopulateParameter return nullptr, type: "
+                  << schema::EnumNamePrimitiveType((schema::PrimitiveType)(primitive->Type()));
+    return nullptr;
+  }
+  OpParameter *parameter = creator(primitive);
   if (parameter == nullptr) {
     MS_LOG(ERROR) << "PopulateParameter return nullptr, type: "
                   << schema::EnumNamePrimitiveType((schema::PrimitiveType)(primitive->Type()));

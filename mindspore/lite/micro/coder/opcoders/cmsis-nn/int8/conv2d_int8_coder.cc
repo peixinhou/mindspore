@@ -154,6 +154,10 @@ int Conv2DInt8Coder::InitTmpBuffer() {
       MS_LOG(ERROR) << "opt enum value is not defined";
       return RET_ERROR;
   }
+  if (buffer_size_ == 0 || buffer_size_ >= UINT_MAX) {
+    MS_LOG(ERROR) << "invalid buffer size";
+    return RET_ERROR;
+  }
   buffer_ = static_cast<int16_t *>(allocator_->Malloc(kNumberTypeInt16, buffer_size_, kWorkspace));
   MS_CHECK_PTR(buffer_);
   return RET_OK;
