@@ -56,10 +56,12 @@ kernel::LiteKernel *NPUKernelCreator(const std::vector<lite::Tensor *> &inputs,
   if (!primitive->infer_flag()) {
     MS_LOG(ERROR) << "NPU does not support runtime inference shape. Type is:"
                   << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(primitive->Type()));
+    free(opParameter);
     return nullptr;
   }
   if (inputs[0]->shape().size() > 4) {
     MS_LOG(ERROR) << "Npu does not support input tensor dims greater than 4";
+    free(opParameter);
     return nullptr;
   }
 
@@ -72,6 +74,7 @@ kernel::LiteKernel *NPUKernelCreator(const std::vector<lite::Tensor *> &inputs,
 
   auto ret = kernel->IsSupport(inputs, outputs, opParameter);
   if (ret != RET_OK) {
+    delete kernel;
     return nullptr;
   }
   return kernel;
