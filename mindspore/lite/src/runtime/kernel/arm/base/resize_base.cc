@@ -39,9 +39,8 @@ int ResizeBaseCPUKernel::CheckParameters() {
     return RET_NULL_PTR;
   }
   method_ = parameter->method_;
-  if (method_ != static_cast<int>(schema::ResizeMethod_LINEAR) &&
-      method_ != static_cast<int>(schema::ResizeMethod_NEAREST)) {
-    MS_LOG(ERROR) << "Resize method should be bilinear or nearest_neighbor, but got " << method_;
+  if (method_ == schema::ResizeMethod::ResizeMethod_UNKNOWN) {
+    MS_LOG(ERROR) << "Resize method can not be unknown.";
     return RET_INVALID_OP_ATTR;
   }
   if (this->in_tensors_.size() == lite::kSingleNum) {
@@ -78,25 +77,23 @@ int ResizeBaseCPUKernel::CheckParameters() {
 }
 
 int ResizeBaseCPUKernel::CheckInputsOuputs() {
+  // inputs
   if (in_tensors_.size() <= lite::kQuadrupleNum) {
-    for (size_t i = 0; i < in_tensors_.size(); i++) {
-      auto input = in_tensors_.at(i);
-      if (input == nullptr) {
-        return RET_NULL_PTR;
-      }
+    for (auto input : in_tensors_) {
+      CHECK_IF_NULL(input, RET_NULL_PTR)
     }
   } else {
     MS_LOG(ERROR) << "Resize input num should be no more than" << kMaxInputNum << ", but got " << in_tensors_.size();
     return RET_ERROR;
   }
+
+  // outputs
   if (out_tensors_.size() != kOutputNum) {
     MS_LOG(ERROR) << "Resize output num should be " << kOutputNum << ", but got " << out_tensors_.size();
     return RET_ERROR;
   }
   auto output = out_tensors_.at(0);
-  if (output == nullptr) {
-    return RET_NULL_PTR;
-  }
+  CHECK_IF_NULL(output, RET_NULL_PTR)
   return RET_OK;
 }
 
@@ -116,7 +113,6 @@ int ResizeBaseCPUKernel::Init() {
     MS_LOG(ERROR) << "Resize op support input rank 4, got " << input_shape.size();
     return RET_ERROR;
   }
-
   return RET_OK;
 }
 }  // namespace mindspore::kernel

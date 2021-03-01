@@ -30,6 +30,22 @@
 #include "src/tensor.h"
 #include "include/errorcode.h"
 
+#define CHECK_MALLOC_RES(ptr, errcode)        \
+  do {                                        \
+    if (ptr == nullptr) {                     \
+      MS_LOG(ERROR) << "malloc data failed."; \
+      return errcode;                         \
+    }                                         \
+  } while (0);
+
+#define CHECK_IF_NULL(ptr, errcode)                  \
+  do {                                               \
+    if (ptr == nullptr) {                            \
+      MS_LOG(ERROR) << "source pointer is nullptr."; \
+      return errcode;                                \
+    }                                                \
+  } while (0);
+
 static constexpr int kPerTensor = 1;
 static constexpr size_t kPerBatch = 3;
 
@@ -197,7 +213,7 @@ class LiteKernel {
   std::vector<LiteKernel *> in_kernels_;
   std::vector<LiteKernel *> out_kernels_;
   bool train_mode_ = false;
-  bool trainable_ = false;  // paramaters of this Kernel are trained in Train Session
+  bool trainable_ = false;  // parameters of this Kernel are trained in Train Session
   bool is_model_output_ = false;
   SubGraphType subgraph_type_ = kNotSubGraph;
 #ifdef SUPPORT_TRAIN
