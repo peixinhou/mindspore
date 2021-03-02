@@ -33,7 +33,7 @@ class LeakyReluInt8CPUKernel : public LiteKernel {
                          const std::vector<lite::Tensor *> &outputs, const lite::InnerContext *ctx,
                          const mindspore::lite::PrimitiveC *primitive)
       : LiteKernel(parameter, inputs, outputs, ctx, primitive) {}
-  ~LeakyReluInt8CPUKernel() override;
+  ~LeakyReluInt8CPUKernel() override = default;
 
   int Init() override;
   int ReSize() override;
@@ -41,6 +41,8 @@ class LeakyReluInt8CPUKernel : public LiteKernel {
   int DoExecute(int task_id);
 
  private:
+  std::vector<int> in_shape_;
+  std::vector<int> out_shape_;
   LeakyReluQuantArg quant_prelu_parm_;
 };
 }  // namespace mindspore::kernel

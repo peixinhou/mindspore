@@ -98,8 +98,8 @@ STATUS WeightQuantizer::DoConvQuantize(CNodePtr cnode) {
   }
 
   if (param_value->tensor_type() != mindspore::kNumberTypeFloat32) {
-    MS_LOG(ERROR) << "model weight data type invalid which is " << param_value->tensor_type();
-    return RET_ERROR;
+    MS_LOG(WARNING) << "model weight data type invalid which is " << param_value->tensor_type();
+    return RET_OK;
   }
   auto status = RET_ERROR;
   if (type_id_ == kNumberTypeInt8) {
