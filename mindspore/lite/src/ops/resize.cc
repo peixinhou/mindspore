@@ -27,6 +27,7 @@ int Resize::GetFormat() const { return this->primitive_->value.AsResize()->forma
 int Resize::GetMethod() const { return this->primitive_->value.AsResize()->method; }
 int64_t Resize::GetNewHeight() const { return this->primitive_->value.AsResize()->newHeight; }
 int64_t Resize::GetNewWidth() const { return this->primitive_->value.AsResize()->newWidth; }
+float Resize::GetCubicCoeff() const { return this->primitive_->value.AsResize()->cubicCoeff; }
 bool Resize::GetPreserveAspectRatio() const { return this->primitive_->value.AsResize()->preserveAspectRatio; }
 int Resize::GetCoordinateTransformMode() const { return this->primitive_->value.AsResize()->coordinateTransformMode; }
 
@@ -94,6 +95,7 @@ int Resize::GetFormat() const { return this->primitive_->value_as_Resize()->form
 int Resize::GetMethod() const { return this->primitive_->value_as_Resize()->method(); }
 int64_t Resize::GetNewHeight() const { return this->primitive_->value_as_Resize()->newHeight(); }
 int64_t Resize::GetNewWidth() const { return this->primitive_->value_as_Resize()->newWidth(); }
+float Resize::GetCubicCoeff() const { return this->primitive_->value_as_Resize()->cubicCoeff(); }
 int Resize::GetCoordinateTransformMode() const {
   return this->primitive_->value_as_Resize()->coordinateTransformMode();
 }

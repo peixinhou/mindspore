@@ -35,6 +35,7 @@ OpParameter *PopulateResizeParameter(const mindspore::lite::PrimitiveC *primitiv
   resize_param->new_height_ = param->new_height();
   resize_param->new_width_ = param->new_width();
   resize_param->coordinate_transform_mode_ = param->GetCoordinateTransformMode();
+  resize_param->cubic_coeff_ = param->GetCubicCoeff();
   resize_param->preserve_aspect_ratio_ = param->GetPreserveAspectRatio();
   return reinterpret_cast<OpParameter *>(resize_param);
 }

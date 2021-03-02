@@ -31,7 +31,7 @@ class ResizeBaseCPUKernel : public LiteKernel {
                       const mindspore::lite::PrimitiveC *primitive)
       : LiteKernel(parameter, inputs, outputs, ctx, primitive) {}
 
-  virtual ~ResizeBaseCPUKernel() = default;
+  ~ResizeBaseCPUKernel() override = default;
 
   int Init() override;
   int ReSize() override { return 0; };

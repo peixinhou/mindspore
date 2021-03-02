@@ -47,6 +47,7 @@ class Resize : public PrimitiveC {
   int GetMethod() const;
   int64_t GetNewHeight() const;
   int64_t GetNewWidth() const;
+  float GetCubicCoeff() const;
   bool GetPreserveAspectRatio() const;
   int GetCoordinateTransformMode() const;
 

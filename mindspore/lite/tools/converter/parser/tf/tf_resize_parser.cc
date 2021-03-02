@@ -43,15 +43,21 @@ STATUS TFResizeParser::Parse(const tensorflow::NodeDef &tf_op,
   }
   tensorflow::AttrValue attr_value;
   attr->format = schema::Format_NHWC;
+  attr->cubicCoeff = -0.75f;
+  attr->coordinateTransformMode = schema::CoordinateTransformMode_ASYMMETRIC;
   if (!TensorFlowUtils::FindAttrValue(tf_op, "align_corners", &attr_value)) {
     MS_LOG(ERROR) << "The align_corners attr should be specified";
     return RET_ERROR;
   }
   if (attr_value.b()) {
     attr->coordinateTransformMode = schema::CoordinateTransformMode_ALIGN_CORNERS;
-  } else {
-    attr->coordinateTransformMode = schema::CoordinateTransformMode_ASYMMETRIC;
   }
+
+  if (TensorFlowUtils::FindAttrValue(tf_op, "half_pixel_centers", &attr_value) && attr_value.b()) {
+    attr->coordinateTransformMode = schema::CoordinateTransformMode_HALF_PIXEL;
+    attr->cubicCoeff = -0.5f;
+  }
+
   if (tf_op.op() == "ResizeBilinear") {
     attr->method = schema::ResizeMethod_LINEAR;
   } else if (tf_op.op() == "ResizeNearestNeighbor") {
