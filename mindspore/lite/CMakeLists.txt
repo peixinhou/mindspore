@@ -57,6 +57,7 @@ endif()
 
 if(SUPPORT_NPU)
     set(DDK_PATH "$ENV{HWHIAI_DDK}/ddk/ai_ddk_lib")
+
     if(PLATFORM_ARM64)
         set(DDK_LIB_PATH ${DDK_PATH}/lib64)
     elseif(PLATFORM_ARM32)

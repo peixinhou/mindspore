@@ -46,10 +46,7 @@ struct SubGraphModel {
 };
 class NPUManager {
  public:
-  static NPUManager *GetInstance() {
-    static NPUManager manager;
-    return &manager;
-  }
+  NPUManager() = default;
 
   ~NPUManager() { Reset(); }
 

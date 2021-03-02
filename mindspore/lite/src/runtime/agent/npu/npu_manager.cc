@@ -57,6 +57,12 @@ bool NPUManager::CheckEMUIVersion() {
 }
 
 void NPUManager::Reset() {
+  for (auto client : clients_) {
+    client->UnLoadModel();
+    client.reset();
+  }
+  clients_.clear();
+
   index_ = 0;
   domi::HiaiIrBuild ir_build;
   for (const auto &model_map : models_) {
@@ -65,13 +71,11 @@ void NPUManager::Reset() {
       ir_build.ReleaseModelBuff(*model->model_buffer_data_);
       model->is_freed_ = true;
     }
+    model->model_buffer_data_.reset();
+    model->desc_.reset();
+    model->client_.reset();
   }
   models_.clear();
-  for (auto client : clients_) {
-    client->UnLoadModel();
-    client.reset();
-  }
-  clients_.clear();
 }
 
 bool NPUManager::CheckDDKVersion() {
@@ -216,10 +220,14 @@ int NPUManager::LoadOMModel() {
   for (auto it : builder_buffer_map) {
     it.first->MemBufferDestroy(it.second);
   }
+  builder_buffer_map.clear();
   return RET_OK;
 }
 
 std::shared_ptr<hiai::AiModelMngerClient> NPUManager::GetClient(const std::string &model_name) {
+  if (models_.find(model_name) == models_.end() || models_[model_name] == nullptr) {
+    return nullptr;
+  }
   return models_[model_name]->client_;
 }
 

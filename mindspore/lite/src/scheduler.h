@@ -24,12 +24,24 @@
 #include "src/inner_context.h"
 #include "include/model.h"
 #include "src/ops/primitive_c.h"
+#if SUPPORT_NPU
+#include "src/runtime/agent/npu/optimizer/npu_pass_manager.h"
+#endif
 
 namespace mindspore::lite {
 class Scheduler {
  public:
   Scheduler(const InnerContext *ctx, Model *src_model, std::vector<Tensor *> *src_tensors)
       : context_(ctx), src_model_(src_model), src_tensors_(src_tensors) {}
+#if SUPPORT_NPU
+  Scheduler(const InnerContext *ctx, Model *src_model, std::vector<Tensor *> *src_tensors,
+            NPUManager *npu_manager = nullptr, NPUPassManager *npu_pass_manager = nullptr)
+      : context_(ctx),
+        src_model_(src_model),
+        src_tensors_(src_tensors),
+        npu_manager_(npu_manager),
+        npu_pass_manager_(npu_pass_manager) {}
+#endif
   ~Scheduler() = default;
 
   int Schedule(std::vector<kernel::LiteKernel *> *dst_kernels);
@@ -89,6 +101,10 @@ class Scheduler {
   const InnerContext *context_ = nullptr;
   Model *src_model_ = nullptr;
   std::vector<Tensor *> *src_tensors_;
+#if SUPPORT_NPU
+  NPUManager *npu_manager_ = nullptr;
+  NPUPassManager *npu_pass_manager_ = nullptr;
+#endif
   std::vector<size_t> graph_output_node_indexes_;
 };
 }  // namespace mindspore::lite
