@@ -28,10 +28,6 @@
 #include "src/kernel_registry.h"
 #include "src/lite_model.h"
 #include "src/dequant.h"
-#if SUPPORT_NPU
-#include "src/runtime/agent/npu/npu_manager.h"
-#include "src/runtime/agent/npu/optimizer/npu_pass_manager.h"
-#endif
 #if GPU_OPENCL
 #include "src/runtime/kernel/opencl/opencl_subgraph.h"
 #endif
@@ -391,7 +387,11 @@ int LiteSession::CompileGraph(Model *model) {
     return ret;
   }
   // scheduler kernels
+#if SUPPORT_NPU
+  Scheduler scheduler(context_, model, &tensors_, npu_manager_, npu_pass_manager_);
+#else
   Scheduler scheduler(context_, model, &tensors_);
+#endif
   ret = scheduler.Schedule(&kernels_);
   if (ret != RET_OK) {
     MS_LOG(ERROR) << "Schedule kernels failed: " << ret;
@@ -400,7 +400,8 @@ int LiteSession::CompileGraph(Model *model) {
   }
 #if SUPPORT_NPU
   if (this->context_->IsNpuEnabled()) {
-    if (mindspore::lite::NPUManager::GetInstance()->LoadOMModel() != RET_OK) {
+    MS_ASSERT(npu_manager_ != nullptr);
+    if (npu_manager_->LoadOMModel() != RET_OK) {
       MS_LOG(ERROR) << "NPU client load model failed.";
       return RET_ERROR;
     }
@@ -480,14 +481,30 @@ int LiteSession::Init(const Context *context) {
     MS_LOG(ERROR) << "Not support multi-threading";
     return RET_ERROR;
   }
-
+#if SUPPORT_NPU
+  npu_manager_ = new (std::nothrow) NPUManager();
+  if (npu_manager_ == nullptr) {
+    MS_LOG(ERROR) << "New npu_manager_ failed";
+    is_running_.store(false);
+    return RET_ERROR;
+  }
+  npu_pass_manager_ = new (std::nothrow) NPUPassManager();
+  if (npu_pass_manager_ == nullptr) {
+    MS_LOG(ERROR) << "New npu_pass_manager_ failed";
+    is_running_.store(false);
+    return RET_ERROR;
+  }
+#endif
   if (context == nullptr) {
     MS_LOG(ERROR) << "context is nullptr";
     is_running_.store(false);
     return RET_NULL_PTR;
   }
-
+#if SUPPORT_NPU
+  this->context_ = new (std::nothrow) InnerContext(context, npu_manager_);
+#else
   this->context_ = new (std::nothrow) InnerContext(context);
+#endif
   if (this->context_ == nullptr) {
     MS_LOG(ERROR) << "New Context failed";
     is_running_.store(false);
@@ -563,8 +580,12 @@ LiteSession::~LiteSession() {
   delete this->executor_;
   this->executor_ = nullptr;
 #if SUPPORT_NPU
-  mindspore::lite::NPUPassManager::GetInstance()->Clear();
-  mindspore::lite::NPUManager::GetInstance()->Reset();
+  MS_ASSERT(npu_manager_ != nullptr);
+  MS_ASSERT(npu_pass_manager_ != nullptr);
+  npu_pass_manager_->Clear();
+  delete npu_pass_manager_;
+  npu_manager_->Reset();
+  delete npu_manager_;
 #endif
 #if GPU_OPENCL && !SUPPORT_TRAIN
   delete opencl_runtime_wrapper_;
