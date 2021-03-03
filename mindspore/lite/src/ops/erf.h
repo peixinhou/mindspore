@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <vector>
 #include "src/ops/primitive_c.h"
 
 #ifndef LITE_MINDSPORE_LITE_C_OPS_ERF_H_
@@ -22,10 +23,15 @@ namespace mindspore {
 namespace lite {
 class Erf : public PrimitiveC {
  public:
+#ifdef PRIMITIVE_WRITEABLE
   MS_DECLARE_PARENT(Erf, PrimitiveC);
   Erf() = default;
   ~Erf() = default;
   explicit Erf(schema::PrimitiveT *primitive) : PrimitiveC(primitive) {}
+  int UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &inputs) override;
+#else
+  int UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::FlatBufferBuilder *fbb) override;
+#endif
 };
 }  // namespace lite
 }  // namespace mindspore
