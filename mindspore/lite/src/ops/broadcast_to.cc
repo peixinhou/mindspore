@@ -82,7 +82,19 @@ int BroadcastTo::InferShape(std::vector<Tensor *> inputs, std::vector<Tensor *> 
   if (!infer_flag()) {
     return RET_INFER_INVALID;
   }
-  std::vector<int32_t> dst_shape(GetDstShape());
+  std::vector<int32_t> dst_shape = {};
+  if (!GetDstShape().empty()) {
+    dst_shape = GetDstShape();
+  } else {
+    auto shape_tensor = inputs[1];
+    if (shape_tensor->data_c() == nullptr) {
+      return RET_INFER_INVALID;
+    }
+    auto shape_data = reinterpret_cast<int *>(shape_tensor->data_c());
+    for (int i = 0; i < shape_tensor->ElementsNum(); i++) {
+      dst_shape.push_back(shape_data[i]);
+    }
+  }
   for (size_t i = 0; i < dst_shape.size(); ++i) {
     if (dst_shape[i] == -1) {
       dst_shape[i] = inputs[0]->shape()[i];
@@ -104,12 +116,12 @@ int BroadcastTo::InferShape(std::vector<Tensor *> inputs, std::vector<Tensor *> 
     }
     if (input_shape_index >= 0) {
       auto dim = input_shape[input_shape_index];
-      if (dim != dst_shape[i] && dim != 1) {
-        MS_LOG(ERROR) << "Invalid broadcast shape!";
-        return RET_PARAM_INVALID;
+      if (dim != dst_shape[i] && dst_shape[i] != 1) {
+        shape[i] = dst_shape[i];
+      } else {
+        shape[i] = dim;
       }
     }
-    shape[i] = dst_shape[i];
     --input_shape_index;
   }
   outputs[0]->set_shape(shape);

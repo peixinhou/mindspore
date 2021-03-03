@@ -30,20 +30,14 @@ lite::PrimitiveC *OnnxExpandParser::ParseLitePrimitive(const onnx::GraphProto &o
   }
 
   std::vector<int> dst_shape;
-  const auto &onnx_expand_power = onnx_node.input(1);
-  auto node_iter =
-    std::find_if(onnx_graph.node().begin(), onnx_graph.node().end(),
-                 [onnx_expand_power](const onnx::NodeProto &proto) { return proto.output(0) == onnx_expand_power; });
-  if (node_iter == onnx_graph.node().end()) {
-    MS_LOG(ERROR) << "can not find node: " << onnx_expand_power;
-    return nullptr;
-  }
-  for (const auto &attrPower : node_iter->attribute()) {
-    if (attrPower.name() == "value") {
-      const auto &t = attrPower.t();
-      auto *dataPtr = reinterpret_cast<const int64_t *>(t.raw_data().data());
-      for (int i = 0; i < t.dims(0); ++i) {
-        dst_shape.emplace_back(dataPtr[i]);
+  dst_shape.clear();
+  if (onnx_node.input_size() != 2) {
+    for (const auto &onnx_node_attr : onnx_node.attribute()) {
+      const auto &attribute_name = onnx_node_attr.name();
+      if (attribute_name == "shape") {
+        for (int i = 0; i < onnx_node_attr.ints_size(); ++i) {
+          dst_shape.push_back(static_cast<int64_t>(onnx_node_attr.ints(i)));
+        }
       }
     }
   }

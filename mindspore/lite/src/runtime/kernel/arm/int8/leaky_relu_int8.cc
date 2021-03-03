@@ -61,49 +61,16 @@ int LeakyReluInt8CPUKernel::Init() {
   return ReSize();
 }
 
-LeakyReluInt8CPUKernel::~LeakyReluInt8CPUKernel() {
-  if (quant_prelu_parm_.in_shape_ != nullptr) {
-    free(quant_prelu_parm_.in_shape_);
-    quant_prelu_parm_.in_shape_ = nullptr;
-  }
-  if (quant_prelu_parm_.out_shape_ != nullptr) {
-    free(quant_prelu_parm_.out_shape_);
-    quant_prelu_parm_.out_shape_ = nullptr;
-  }
-}
-
 int LeakyReluInt8CPUKernel::ReSize() {
   auto *input_tensor = in_tensors_.at(kInputIndex);
   auto *out_tensor = out_tensors_.at(kOutputIndex);
   auto input_dim = input_tensor->shape().size();
   quant_prelu_parm_.input_dim_ = input_dim;
   quant_prelu_parm_.element_num = in_tensors_.at(0)->Size();
-  auto input_shape = input_tensor->shape();
-  if (quant_prelu_parm_.in_shape_ != nullptr) {
-    free(quant_prelu_parm_.in_shape_);
-    quant_prelu_parm_.in_shape_ = nullptr;
-  }
-  quant_prelu_parm_.in_shape_ = reinterpret_cast<int *>(malloc(input_shape.size() * sizeof(int)));
-  if (quant_prelu_parm_.in_shape_ == nullptr) {
-    MS_LOG(ERROR) << "malloc memory failed";
-    return RET_MEMORY_FAILED;
-  }
-  memcpy(reinterpret_cast<void *>(const_cast<int *>(quant_prelu_parm_.in_shape_)), input_shape.data(),
-         sizeof(int) * input_dim);
-
-  auto output_shape = out_tensor->shape();
-  size_t output_dim = output_shape.size();
-  if (quant_prelu_parm_.out_shape_ != nullptr) {
-    free(quant_prelu_parm_.out_shape_);
-    quant_prelu_parm_.out_shape_ = nullptr;
-  }
-  quant_prelu_parm_.out_shape_ = reinterpret_cast<int *>(malloc(output_dim * sizeof(int)));
-  if (quant_prelu_parm_.out_shape_ == nullptr) {
-    MS_LOG(ERROR) << "malloc memory failed";
-    return RET_MEMORY_FAILED;
-  }
-  memcpy(reinterpret_cast<void *>(const_cast<int *>(quant_prelu_parm_.out_shape_)), output_shape.data(),
-         sizeof(int) * output_dim);
+  in_shape_ = input_tensor->shape();
+  quant_prelu_parm_.in_shape_ = in_shape_.data();
+  out_shape_ = out_tensor->shape();
+  quant_prelu_parm_.out_shape_ = out_shape_.data();
   return RET_OK;
 }
 

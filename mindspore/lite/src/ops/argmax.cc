@@ -96,7 +96,7 @@ int ArgMax::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> outp
   auto output = outputs_.front();
   MS_ASSERT(output != nullptr);
   if (inputs_.size() != kSingleNum || outputs_.size() > kDoubleNum) {
-    MS_LOG(ERROR) << "tensor number is error.";
+    MS_LOG(WARNING) << "tensor number is error.";
     return RET_ERROR;
   }
 

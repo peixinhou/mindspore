@@ -195,11 +195,11 @@ Registry DepthWiseConv2DRegistry(schema::PrimitiveType_DepthwiseConv2D, DepthWis
 int DepthwiseConv2D::InferShape(std::vector<lite::Tensor *> inputs_, std::vector<lite::Tensor *> outputs_) {
   if (inputs_.size() != kDoubleNum && inputs_.size() != kTripleNum) {
     MS_LOG(ERROR) << "inputs number is invalid";
-    return 1;
+    return RET_ERROR;
   }
   if (outputs_.size() != kSingleNum) {
     MS_LOG(ERROR) << "output number is invalid";
-    return 1;
+    return RET_ERROR;
   }
   MS_ASSERT(this->primitive_ != nullptr);
   auto input = inputs_.front();
@@ -250,13 +250,13 @@ int DepthwiseConv2D::InferShape(std::vector<lite::Tensor *> inputs_, std::vector
   out_shape.at(1) = output_h;
   out_shape.at(2) = output_w;
   if (GetChannelMultiplier() * input_channel != weight->shape().at(0)) {
-    MS_LOG(ERROR) << "Conv depthwise only support group equals output channel.";
-    return 1;
+    MS_LOG(WARNING) << "Conv depthwise only support group equals output channel.";
+    return RET_ERROR;
   }
   out_shape.at(3) = weight->shape().at(0) * weight->shape().at(3);  // in_channel * out_channel
 
   output->set_shape(out_shape);
-  return 0;
+  return RET_OK;
 }
 }  // namespace lite
 }  // namespace mindspore
