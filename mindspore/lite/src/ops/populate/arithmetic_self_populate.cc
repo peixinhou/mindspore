@@ -49,6 +49,6 @@ Registry FloorParameterRegistry(schema::PrimitiveType_Floor, PopulateArithmeticS
 Registry CeilParameterRegistry(schema::PrimitiveType_Ceil, PopulateArithmeticSelf);
 Registry RoundParameterRegistry(schema::PrimitiveType_Round, PopulateArithmeticSelf);
 Registry ReciprocalParameterRegistry(schema::PrimitiveType_Reciprocal, PopulateArithmeticSelf);
-
+Registry ErfParameterRegistry(schema::PrimitiveType_Erf, PopulateArithmeticSelf);
 }  // namespace lite
 }  // namespace mindspore
