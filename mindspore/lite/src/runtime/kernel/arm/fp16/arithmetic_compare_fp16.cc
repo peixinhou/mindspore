@@ -21,6 +21,7 @@
 #include "schema/model_generated.h"
 #include "src/kernel_registry.h"
 #include "src/runtime/runtime_api.h"
+#include "src/ops/arithmetic.h"
 #include "include/errorcode.h"
 
 using mindspore::kernel::KERNEL_ARCH::kCPU;
@@ -74,6 +75,8 @@ int ArithmeticCompareFP16CPUKernel::Init() {
 }
 
 int ArithmeticCompareFP16CPUKernel::ReSize() {
+  auto arithmetic_lite_primitive = (lite::Arithmetic *)primitive_;
+  param_->broadcasting_ = arithmetic_lite_primitive->Broadcasting();
   param_->in_elements_num0_ = in_tensors_.at(0)->ElementsNum();
   param_->in_elements_num1_ = in_tensors_.at(1)->ElementsNum();
   param_->out_elements_num_ = out_tensors_.at(0)->ElementsNum();
