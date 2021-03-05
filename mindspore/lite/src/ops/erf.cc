@@ -20,8 +20,7 @@
 #include "src/ops/ops_register.h"
 #endif
 
-namespace mindspore {
-namespace lite {
+namespace mindspore::lite {
 #ifdef PRIMITIVE_WRITEABLE
 int Erf::UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &inputs) {
   if (this->primitive_ == nullptr) {
@@ -63,6 +62,4 @@ int Erf::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::Fl
 PrimitiveC *ErfCreator(const schema::Primitive *primitive) { return PrimitiveC::NewPrimitiveC<Erf>(primitive); }
 Registry ErfRegistry(schema::PrimitiveType_Erf, ErfCreator);
 #endif
-
-}  // namespace lite
-}  // namespace mindspore
+}  // namespace mindspore::lite

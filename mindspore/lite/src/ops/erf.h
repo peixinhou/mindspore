@@ -26,7 +26,7 @@ class Erf : public PrimitiveC {
 #ifdef PRIMITIVE_WRITEABLE
   MS_DECLARE_PARENT(Erf, PrimitiveC);
   Erf() = default;
-  ~Erf() = default;
+  ~Erf() override = default;
   explicit Erf(schema::PrimitiveT *primitive) : PrimitiveC(primitive) {}
   int UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &inputs) override;
 #else
