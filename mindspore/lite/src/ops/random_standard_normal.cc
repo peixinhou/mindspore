@@ -95,6 +95,7 @@ int RandomStandardNormal::InferShape(std::vector<Tensor *> inputs_, std::vector<
   }
   outputs_[0]->set_shape(output_shape);
   outputs_[0]->set_data_type(kNumberTypeFloat32);
+  outputs_[0]->set_format(inputs_[0]->format());
   return RET_OK;
 }
 }  // namespace lite

@@ -97,8 +97,8 @@ int Arithmetic::InferShape(std::vector<lite::Tensor *> inputs_, std::vector<lite
       } else if (in_shape1_[i] == 1) {
         out_shape_[i] = in_shape0_[i];
       } else {
-        MS_LOG(ERROR) << "shapes of input tensors can not be broadCasted";
-        return -1;
+        MS_LOG(DEBUG) << "shapes of input tensors can not be broadCasted";
+        return RET_ERROR;
       }
       broadcasting_ = true;
     } else {

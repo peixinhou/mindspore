@@ -416,40 +416,185 @@ NodeIter InsertNode(schema::MetaGraphT *graphT, NodeIter existNodeIter, InsertPl
   }
 }
 
+NodeIter AddNodeForInsertNodeBefore(schema::MetaGraphT *graphT, NodeIter existNodeIter, size_t inputIndexIdx,
+                                    std::unique_ptr<CNodeT> toAddNodeIn, STATUS *errorCode,
+                                    const OpDefCopyer &opDefCopyer, int i) {
+  MS_ASSERT(graphT != nullptr);
+  MS_ASSERT(errorCode != nullptr);
+  MS_ASSERT(existNode != nullptr);
+  MS_ASSERT(existNode->inputIndex.size() > inputIndexIdx);
+  MS_ASSERT(toAddNodeIn != nullptr);
+  MS_ASSERT(graphT->allTensors.size() > preTensorIdx);
+  auto &existNode = *existNodeIter;
+  auto preTensorIdx = existNode->inputIndex.at(inputIndexIdx);
+  auto &preTensor = graphT->allTensors.at(preTensorIdx);
+  MS_ASSERT(preTensor != nullptr);
+  auto toAddTensor = CopyTensorDefT(preTensor);
+  if (toAddTensor == nullptr) {
+    MS_LOG(ERROR) << "Copy TensorT failed";
+    *errorCode = RET_NULL_PTR;
+    return graphT->nodes.end();
+  }
+  toAddTensor->nodeType = schema::NodeType_CNode;
+  MS_ASSERT(toAddNodeIn->primitive != nullptr);
+  if (toAddNodeIn->primitive->value.type == schema::PrimitiveType_QuantDTypeCast) {
+    auto prim = toAddNodeIn->primitive->value.AsQuantDTypeCast();
+    MS_ASSERT(prim != nullptr);
+    preTensor->dataType = prim->srcT;
+    toAddTensor->dataType = prim->dstT;
+    if (prim->srcT == TypeId::kNumberTypeUInt8 && prim->dstT == TypeId::kNumberTypeInt8) {
+      preTensor->quantParams.front()->zeroPoint += 128;
+    } else if (prim->srcT == TypeId::kNumberTypeInt8 && prim->dstT == TypeId::kNumberTypeUInt8) {
+      toAddTensor->quantParams.front()->zeroPoint += 128;
+    }
+  }
+  graphT->allTensors.emplace_back(std::move(toAddTensor));
+  size_t toAddTensorIdx = graphT->allTensors.size() - 1;
+  auto toAddNode = opDefCopyer(toAddNodeIn.get());
+  if (toAddNode == nullptr) {
+    MS_LOG(ERROR) << "copy toAddNodeIn failed";
+    *errorCode = RET_NULL_PTR;
+    return graphT->nodes.end();
+  }
+  toAddNode->inputIndex.clear();
+  toAddNode->inputIndex.push_back(preTensorIdx);
+  toAddNode->outputIndex.clear();
+  toAddNode->outputIndex.push_back(toAddTensorIdx);
+  for (auto iter = existNode->inputIndex.begin(); iter != existNode->inputIndex.end(); iter++) {
+    if (*iter == preTensorIdx) {
+      *iter = toAddTensorIdx;
+      break;
+    }
+  }
+  toAddNode->name = toAddNodeIn->name + "_" + std::to_string(i);
+  existNodeIter = graphT->nodes.insert(existNodeIter, std::move(toAddNode));
+  existNodeIter++;
+  return existNodeIter;
+}
+
 NodeIter InsertNodeBefore(schema::MetaGraphT *graphT, NodeIter existNodeIter, size_t inputIndexIdx,
                           std::unique_ptr<CNodeT> toAddNodeIn, STATUS *errorCode, const OpDefCopyer &opDefCopyer) {
   MS_ASSERT(graphT != nullptr);
   MS_ASSERT(errorCode != nullptr);
-  auto &existNode = *existNodeIter;
   MS_ASSERT(existNode != nullptr);
   MS_ASSERT(existNode->inputIndex.size() > inputIndexIdx);
   MS_ASSERT(toAddNodeIn != nullptr);
-  auto preTensorIdx = existNode->inputIndex.at(inputIndexIdx);
   MS_ASSERT(graphT->allTensors.size() > preTensorIdx);
-
+  auto &existNode = *existNodeIter;
   auto preNodeIdxes = GetInputNodeIdx(*graphT, *(existNode), inputIndexIdx);
   if (preNodeIdxes.empty()) {
-    auto &preTensor = graphT->allTensors.at(preTensorIdx);
-    MS_ASSERT(preTensor != nullptr);
-    auto toAddTensor = CopyTensorDefT(preTensor);
+    existNodeIter = AddNodeForInsertNodeBefore(graphT, existNodeIter, inputIndexIdx, std::move(toAddNodeIn), errorCode,
+                                               opDefCopyer, 0);
+  } else {
+    for (size_t i = 0; i < preNodeIdxes.size(); i++) {
+      existNodeIter = AddNodeForInsertNodeBefore(graphT, existNodeIter, inputIndexIdx, std::move(toAddNodeIn),
+                                                 errorCode, opDefCopyer, i);
+    }
+  }
+  *errorCode = RET_OK;
+  return existNodeIter;
+}
+
+NodeIter InsertNodeAfterForPostEmpty(schema::MetaGraphT *graphT, NodeIter existNodeIter, size_t outputIndexIdx,
+                                     std::unique_ptr<schema::CNodeT> toAddNodeIn, STATUS *errorCode,
+                                     const OpDefCopyer &opDefCopyer, size_t postTensorIdx) {
+  auto &postTensor = graphT->allTensors.at(postTensorIdx);
+  MS_ASSERT(postTensor != nullptr);
+  auto toAddTensor = CopyTensorDefT(postTensor);
+  if (toAddTensor == nullptr) {
+    MS_LOG(ERROR) << "Copy TensorT failed";
+    *errorCode = RET_NULL_PTR;
+    return graphT->nodes.end();
+  }
+  toAddTensor->nodeType = schema::NodeType_CNode;
+  MS_ASSERT(toAddNodeIn->primitive != nullptr);
+  if (toAddNodeIn->primitive->value.type == schema::PrimitiveType_QuantDTypeCast) {
+    auto prim = toAddNodeIn->primitive->value.AsQuantDTypeCast();
+    MS_ASSERT(prim != nullptr);
+    postTensor->dataType = prim->srcT;
+    toAddTensor->dataType = prim->dstT;
+    if (prim->srcT == TypeId::kNumberTypeInt8 && prim->dstT == TypeId::kNumberTypeUInt8) {
+      toAddTensor->quantParams.front()->zeroPoint += 128;
+    } else if (prim->srcT == TypeId::kNumberTypeUInt8 && prim->dstT == TypeId::kNumberTypeInt8) {
+      postTensor->quantParams.front()->zeroPoint += 128;
+    }
+  }
+  graphT->allTensors.emplace_back(std::move(toAddTensor));
+  size_t toAddTensorIdx = graphT->allTensors.size() - 1;
+  auto toAddNode = opDefCopyer(toAddNodeIn.get());
+  if (toAddNode == nullptr) {
+    MS_LOG(ERROR) << "copy toAddNodeIn failed";
+    *errorCode = RET_NULL_PTR;
+    return graphT->nodes.end();
+  }
+  toAddNode->inputIndex.clear();
+  toAddNode->inputIndex.push_back(postTensorIdx);
+  toAddNode->outputIndex.clear();
+  toAddNode->outputIndex.push_back(toAddTensorIdx);
+  for (auto iter = graphT->outputIndex.begin(); iter != graphT->outputIndex.end(); iter++) {
+    if (*iter == postTensorIdx) {
+      *iter = toAddTensorIdx;
+      break;
+    }
+  }
+  existNodeIter = graphT->nodes.insert(existNodeIter, std::move(toAddNode));
+  existNodeIter++;
+  return existNodeIter;
+}
+
+NodeIter InsertNodeAfterForPostNotEmpty(schema::MetaGraphT *graphT, NodeIter existNodeIter, size_t outputIndexIdx,
+                                        std::unique_ptr<schema::CNodeT> toAddNodeIn, STATUS *errorCode,
+                                        const OpDefCopyer &opDefCopyer, uint32_t postTensorIdx,
+                                        std::vector<size_t> postNodeIdxes) {
+  std::vector<std::unique_ptr<schema::CNodeT>> toAddNodes;
+  int i = 0;
+  for (size_t postNodeIdx : postNodeIdxes) {
+    MS_ASSERT(graphT->nodes.size() > postNodeIdx);
+    auto &postNode = graphT->nodes.at(postNodeIdx);
+    MS_ASSERT(postNode != nullptr);
+    auto &postTensor = graphT->allTensors.at(postTensorIdx);
+    MS_ASSERT(postTensor != nullptr);
+    // for multioutput,when one outpout as other node input,need add one more node
+    if (IsContain(graphT->outputIndex, postTensorIdx)) {
+      auto toAddTensor = CopyTensorDefT(postTensor);
+      if (toAddTensor == nullptr) {
+        MS_LOG(ERROR) << "Copy TensorT failed";
+        *errorCode = RET_NULL_PTR;
+        return graphT->nodes.end();
+      }
+      toAddTensor->nodeType = schema::NodeType_CNode;
+      graphT->allTensors.emplace_back(std::move(toAddTensor));
+      size_t toAddTensorIdx = graphT->allTensors.size() - 1;
+      auto toAddNode = opDefCopyer(toAddNodeIn.get());
+      toAddNode->name = toAddNodeIn->name + "_" + std::to_string(i++);
+      toAddNode->inputIndex.clear();
+      toAddNode->inputIndex.push_back(postTensorIdx);
+      toAddNode->outputIndex.clear();
+      toAddNode->outputIndex.push_back(toAddTensorIdx);
+      for (auto iter = graphT->outputIndex.begin(); iter != graphT->outputIndex.end(); iter++) {
+        if (*iter == postTensorIdx) {
+          *iter = toAddTensorIdx;
+          break;
+        }
+      }
+      toAddNodes.emplace_back(std::move(toAddNode));
+    }
+    auto toAddTensor = CopyTensorDefT(postTensor);
     if (toAddTensor == nullptr) {
       MS_LOG(ERROR) << "Copy TensorT failed";
       *errorCode = RET_NULL_PTR;
       return graphT->nodes.end();
     }
-    toAddTensor->nodeType = schema::NodeType_CNode;
-    preTensor->refCount = 0;
-    preTensor->data.clear();
     MS_ASSERT(toAddNodeIn->primitive != nullptr);
     if (toAddNodeIn->primitive->value.type == schema::PrimitiveType_QuantDTypeCast) {
       auto prim = toAddNodeIn->primitive->value.AsQuantDTypeCast();
       MS_ASSERT(prim != nullptr);
-      preTensor->dataType = prim->srcT;
+      postTensor->dataType = prim->srcT;
       toAddTensor->dataType = prim->dstT;
-      if (prim->srcT == TypeId::kNumberTypeUInt8 && prim->dstT == TypeId::kNumberTypeInt8) {
-        preTensor->quantParams.front()->zeroPoint += 128;
-      } else if (prim->srcT == TypeId::kNumberTypeInt8 && prim->dstT == TypeId::kNumberTypeUInt8) {
+      if (prim->dstT == TypeId::kNumberTypeUInt8 && prim->srcT == TypeId::kNumberTypeInt8) {
         toAddTensor->quantParams.front()->zeroPoint += 128;
+      } else if (prim->srcT == TypeId::kNumberTypeUInt8 && prim->dstT == TypeId::kNumberTypeInt8) {
+        postTensor->quantParams.front()->zeroPoint += 128;
       }
     }
     graphT->allTensors.emplace_back(std::move(toAddTensor));
@@ -460,70 +605,24 @@ NodeIter InsertNodeBefore(schema::MetaGraphT *graphT, NodeIter existNodeIter, si
       *errorCode = RET_NULL_PTR;
       return graphT->nodes.end();
     }
+    toAddNode->name = toAddNodeIn->name + "_" + std::to_string(i++);
     toAddNode->inputIndex.clear();
-    toAddNode->inputIndex.push_back(preTensorIdx);
+    toAddNode->inputIndex.push_back(postTensorIdx);
     toAddNode->outputIndex.clear();
     toAddNode->outputIndex.push_back(toAddTensorIdx);
-    for (auto iter = existNode->inputIndex.begin(); iter != existNode->inputIndex.end(); iter++) {
-      if (*iter == preTensorIdx) {
+    MS_ASSERT(IsContain(postNode->inputIndex, postTensorIdx));
+    for (auto iter = postNode->inputIndex.begin(); iter != postNode->inputIndex.end(); iter++) {
+      if (*iter == postTensorIdx) {
         *iter = toAddTensorIdx;
         break;
       }
     }
+    toAddNodes.emplace_back(std::move(toAddNode));
+  }
+  for (auto &toAddNode : toAddNodes) {
     existNodeIter = graphT->nodes.insert(existNodeIter, std::move(toAddNode));
     existNodeIter++;
-  } else {
-    std::vector<std::unique_ptr<CNodeT>> toAddNodes;
-    for (size_t i = 0; i < preNodeIdxes.size(); i++) {
-      MS_ASSERT(graphT->nodes.size() > preNodeIdxes.at(i));
-      auto &preTensor = graphT->allTensors.at(preTensorIdx);
-      MS_ASSERT(preTensor != nullptr);
-      auto toAddTensor = CopyTensorDefT(preTensor);
-      if (toAddTensor == nullptr) {
-        *errorCode = RET_NULL_PTR;
-        MS_LOG(ERROR) << "Copy TensorT failed";
-        return graphT->nodes.end();
-      }
-      toAddTensor->nodeType = schema::NodeType_CNode;
-      MS_ASSERT(toAddNodeIn->primitive != nullptr);
-      if (toAddNodeIn->primitive->value.type == schema::PrimitiveType_QuantDTypeCast) {
-        auto prim = toAddNodeIn->primitive->value.AsQuantDTypeCast();
-        MS_ASSERT(prim != nullptr);
-        preTensor->dataType = prim->srcT;
-        toAddTensor->dataType = prim->dstT;
-        if (prim->srcT == TypeId::kNumberTypeUInt8 && prim->dstT == TypeId::kNumberTypeInt8) {
-          preTensor->quantParams.front()->zeroPoint += 128;
-        } else if (prim->srcT == TypeId::kNumberTypeInt8 && prim->dstT == TypeId::kNumberTypeUInt8) {
-          toAddTensor->quantParams.front()->zeroPoint += 128;
-        }
-      }
-      graphT->allTensors.emplace_back(std::move(toAddTensor));
-      size_t toAddTensorIdx = graphT->allTensors.size() - 1;
-      auto toAddNode = opDefCopyer(toAddNodeIn.get());
-      if (toAddNode == nullptr) {
-        MS_LOG(ERROR) << "copy toAddNodeIn failed";
-        *errorCode = RET_NULL_PTR;
-        return graphT->nodes.end();
-      }
-      toAddNode->name = toAddNodeIn->name + "_" + std::to_string(i++);
-      toAddNode->inputIndex.clear();
-      toAddNode->inputIndex.push_back(preTensorIdx);
-      toAddNode->outputIndex.clear();
-      toAddNode->outputIndex.push_back(toAddTensorIdx);
-      for (auto iter = existNode->inputIndex.begin(); iter != existNode->inputIndex.end(); iter++) {
-        if (*iter == preTensorIdx) {
-          *iter = toAddTensorIdx;
-          break;
-        }
-      }
-      toAddNodes.emplace_back(std::move(toAddNode));
-    }
-    for (auto &toAddNode : toAddNodes) {
-      existNodeIter = graphT->nodes.insert(existNodeIter, std::move(toAddNode));
-      existNodeIter++;
-    }
   }
-  *errorCode = RET_OK;
   return existNodeIter;
 }
 
@@ -541,125 +640,11 @@ NodeIter InsertNodeAfter(schema::MetaGraphT *graphT, NodeIter existNodeIter, siz
 
   auto postNodeIdxes = GetOutputNodeIdx(*graphT, *(existNode), outputIndexIdx);
   if (postNodeIdxes.empty()) {
-    auto &postTensor = graphT->allTensors.at(postTensorIdx);
-    MS_ASSERT(postTensor != nullptr);
-    auto toAddTensor = CopyTensorDefT(postTensor);
-    if (toAddTensor == nullptr) {
-      MS_LOG(ERROR) << "Copy TensorT failed";
-      *errorCode = RET_NULL_PTR;
-      return graphT->nodes.end();
-    }
-    toAddTensor->nodeType = schema::NodeType_CNode;
-    MS_ASSERT(toAddNodeIn->primitive != nullptr);
-    if (toAddNodeIn->primitive->value.type == schema::PrimitiveType_QuantDTypeCast) {
-      auto prim = toAddNodeIn->primitive->value.AsQuantDTypeCast();
-      MS_ASSERT(prim != nullptr);
-      postTensor->dataType = prim->srcT;
-      toAddTensor->dataType = prim->dstT;
-      if (prim->srcT == TypeId::kNumberTypeInt8 && prim->dstT == TypeId::kNumberTypeUInt8) {
-        toAddTensor->quantParams.front()->zeroPoint += 128;
-      } else if (prim->srcT == TypeId::kNumberTypeUInt8 && prim->dstT == TypeId::kNumberTypeInt8) {
-        postTensor->quantParams.front()->zeroPoint += 128;
-      }
-    }
-    graphT->allTensors.emplace_back(std::move(toAddTensor));
-    size_t toAddTensorIdx = graphT->allTensors.size() - 1;
-    auto toAddNode = opDefCopyer(toAddNodeIn.get());
-    if (toAddNode == nullptr) {
-      MS_LOG(ERROR) << "copy toAddNodeIn failed";
-      *errorCode = RET_NULL_PTR;
-      return graphT->nodes.end();
-    }
-    toAddNode->inputIndex.clear();
-    toAddNode->inputIndex.push_back(postTensorIdx);
-    toAddNode->outputIndex.clear();
-    toAddNode->outputIndex.push_back(toAddTensorIdx);
-    for (auto iter = graphT->outputIndex.begin(); iter != graphT->outputIndex.end(); iter++) {
-      if (*iter == postTensorIdx) {
-        *iter = toAddTensorIdx;
-        break;
-      }
-    }
-    existNodeIter = graphT->nodes.insert(existNodeIter, std::move(toAddNode));
-    existNodeIter++;
+    existNodeIter = InsertNodeAfterForPostEmpty(graphT, existNodeIter, outputIndexIdx, std::move(toAddNodeIn),
+                                                errorCode, opDefCopyer, postTensorIdx);
   } else {
-    std::vector<std::unique_ptr<schema::CNodeT>> toAddNodes;
-    int i = 0;
-    for (size_t postNodeIdx : postNodeIdxes) {
-      MS_ASSERT(graphT->nodes.size() > postNodeIdx);
-      auto &postNode = graphT->nodes.at(postNodeIdx);
-      MS_ASSERT(postNode != nullptr);
-      auto &postTensor = graphT->allTensors.at(postTensorIdx);
-      MS_ASSERT(postTensor != nullptr);
-      // for multioutput,when one outpout as other node input,need add one more node
-      if (IsContain(graphT->outputIndex, postTensorIdx)) {
-        auto toAddTensor = CopyTensorDefT(postTensor);
-        if (toAddTensor == nullptr) {
-          MS_LOG(ERROR) << "Copy TensorT failed";
-          *errorCode = RET_NULL_PTR;
-          return graphT->nodes.end();
-        }
-        toAddTensor->nodeType = schema::NodeType_CNode;
-        graphT->allTensors.emplace_back(std::move(toAddTensor));
-        size_t toAddTensorIdx = graphT->allTensors.size() - 1;
-        auto toAddNode = opDefCopyer(toAddNodeIn.get());
-        toAddNode->name = toAddNodeIn->name + "_" + std::to_string(i++);
-        toAddNode->inputIndex.clear();
-        toAddNode->inputIndex.push_back(postTensorIdx);
-        toAddNode->outputIndex.clear();
-        toAddNode->outputIndex.push_back(toAddTensorIdx);
-        for (auto iter = graphT->outputIndex.begin(); iter != graphT->outputIndex.end(); iter++) {
-          if (*iter == postTensorIdx) {
-            *iter = toAddTensorIdx;
-            break;
-          }
-        }
-        toAddNodes.emplace_back(std::move(toAddNode));
-      }
-      auto toAddTensor = CopyTensorDefT(postTensor);
-      if (toAddTensor == nullptr) {
-        MS_LOG(ERROR) << "Copy TensorT failed";
-        *errorCode = RET_NULL_PTR;
-        return graphT->nodes.end();
-      }
-      MS_ASSERT(toAddNodeIn->primitive != nullptr);
-      if (toAddNodeIn->primitive->value.type == schema::PrimitiveType_QuantDTypeCast) {
-        auto prim = toAddNodeIn->primitive->value.AsQuantDTypeCast();
-        MS_ASSERT(prim != nullptr);
-        postTensor->dataType = prim->srcT;
-        toAddTensor->dataType = prim->dstT;
-        if (prim->dstT == TypeId::kNumberTypeUInt8 && prim->srcT == TypeId::kNumberTypeInt8) {
-          toAddTensor->quantParams.front()->zeroPoint += 128;
-        } else if (prim->srcT == TypeId::kNumberTypeUInt8 && prim->dstT == TypeId::kNumberTypeInt8) {
-          postTensor->quantParams.front()->zeroPoint += 128;
-        }
-      }
-      graphT->allTensors.emplace_back(std::move(toAddTensor));
-      size_t toAddTensorIdx = graphT->allTensors.size() - 1;
-      auto toAddNode = opDefCopyer(toAddNodeIn.get());
-      if (toAddNode == nullptr) {
-        MS_LOG(ERROR) << "copy toAddNodeIn failed";
-        *errorCode = RET_NULL_PTR;
-        return graphT->nodes.end();
-      }
-      toAddNode->name = toAddNodeIn->name + "_" + std::to_string(i++);
-      toAddNode->inputIndex.clear();
-      toAddNode->inputIndex.push_back(postTensorIdx);
-      toAddNode->outputIndex.clear();
-      toAddNode->outputIndex.push_back(toAddTensorIdx);
-      MS_ASSERT(IsContain(postNode->inputIndex, postTensorIdx));
-      for (auto iter = postNode->inputIndex.begin(); iter != postNode->inputIndex.end(); iter++) {
-        if (*iter == postTensorIdx) {
-          *iter = toAddTensorIdx;
-          break;
-        }
-      }
-      toAddNodes.emplace_back(std::move(toAddNode));
-    }
-    for (auto &toAddNode : toAddNodes) {
-      existNodeIter = graphT->nodes.insert(existNodeIter, std::move(toAddNode));
-      existNodeIter++;
-    }
+    existNodeIter = InsertNodeAfterForPostNotEmpty(graphT, existNodeIter, outputIndexIdx, std::move(toAddNodeIn),
+                                                   errorCode, opDefCopyer, postTensorIdx, postNodeIdxes);
   }
   *errorCode = RET_OK;
   return existNodeIter;
@@ -749,7 +734,7 @@ STATUS ChangeOpAxis(schema::MetaGraphT *graph, const std::unique_ptr<schema::CNo
         return RET_NOT_SUPPORT;
       }
     } else {
-      MS_LOG(ERROR) << "change op axis only support 4 dims";
+      MS_LOG(DEBUG) << "change op axis only support 4 dims";
       return RET_NOT_SUPPORT;
     }
   }
