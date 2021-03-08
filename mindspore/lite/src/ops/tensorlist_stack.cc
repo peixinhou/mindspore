@@ -140,7 +140,7 @@ int TensorListStack::InferShape(std::vector<lite::Tensor *> inputs_, std::vector
 
   auto status = MergeShape(input0->element_shape());
   if (status == RET_ERROR) {
-    MS_LOG(ERROR) << "Merge element_shape is error!";
+    MS_LOG(DEBUG) << "Merge element_shape is error!";
     return RET_ERROR;
   }
   if (!IsFullyDefined(output_shape_)) {
@@ -177,7 +177,7 @@ int TensorListStack::MergeShape(const std::vector<int> &shape) {
     return RET_OK;
   }
   if (dim1 != dim0) {
-    MS_LOG(ERROR) << "shape.size():" << dim1 << " must be equal output_shape_.size():" << dim0;
+    MS_LOG(DEBUG) << "shape.size():" << dim1 << " must be equal output_shape_.size():" << dim0;
     return RET_ERROR;
   }
   for (size_t i = 0; i < dim0; ++i) {

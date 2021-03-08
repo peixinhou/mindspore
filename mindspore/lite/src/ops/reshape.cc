@@ -142,7 +142,7 @@ int Reshape::CalNewShape(const Tensor *in_tensor, std::vector<int> *out_shape) c
     }
   }
   if (infer_index == -1 && out_shape_size != in_shape_size) {
-    MS_LOG(ERROR) << "output shapeSize: " << out_shape_size << " should be equal to input shapeSize: " << in_shape_size;
+    MS_LOG(DEBUG) << "output shapeSize: " << out_shape_size << " should be equal to input shapeSize: " << in_shape_size;
     return RET_INFER_ERR;
   }
   if (infer_index != -1) {
@@ -233,7 +233,7 @@ int Reshape::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> out
   }
   auto ret = CalNewShape(inputs_.front(), &out_shape_);
   if (ret != RET_OK) {
-    MS_LOG(ERROR) << "CalNewShape error";
+    MS_LOG(DEBUG) << "CalNewShape error";
     return ret;
   }
   output->set_shape(out_shape_);

@@ -908,7 +908,7 @@ onnx::ModelProto *AnfImporterFromMindir::ReadOnnxFromBinary(const std::string &m
     return nullptr;
   }
   if (ReadProtoFromBinaryFile((const char *)model_path.c_str(), onnx_model) != RET_OK) {
-    MS_LOG(ERROR) << "Read onnx model file failed, which is not a matched onnx model";
+    MS_LOG(DEBUG) << "Read onnx model file failed, which is not a matched onnx model";
     delete (onnx_model);
     return nullptr;
   }

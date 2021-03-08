@@ -78,8 +78,21 @@ NodeIter InsertNode(schema::MetaGraphT *graphT, NodeIter existNodeIter, InsertPl
                     std::unique_ptr<schema::CNodeT> toAddNode, STATUS *errorCode,
                     const OpDefCopyer &opDefCopyer = GetSimpleOpCopyer());
 
+NodeIter AddNodeForInsertNodeBefore(schema::MetaGraphT *graphT, NodeIter existNodeIter, size_t inputIndexIdx,
+                                    std::unique_ptr<schema::CNodeT> toAddNodeIn, STATUS *errorCode,
+                                    const OpDefCopyer &opDefCopyer, int i);
+
 NodeIter InsertNodeBefore(schema::MetaGraphT *graphT, NodeIter existNodeIter, size_t inputIndexIdx,
                           std::unique_ptr<schema::CNodeT> toAddNode, STATUS *errorCode, const OpDefCopyer &opDefCopyer);
+
+NodeIter InsertNodeAfterForPostEmpty(schema::MetaGraphT *graphT, NodeIter existNodeIter, size_t outputIndexIdx,
+                                     std::unique_ptr<schema::CNodeT> toAddNodeIn, STATUS *errorCode,
+                                     const OpDefCopyer &opDefCopyer, size_t postTensorIdx);
+
+NodeIter InsertNodeAfterForPostNotEmpty(schema::MetaGraphT *graphT, NodeIter existNodeIter, size_t outputIndexIdx,
+                                        std::unique_ptr<schema::CNodeT> toAddNodeIn, STATUS *errorCode,
+                                        const OpDefCopyer &opDefCopyer, uint32_t postTensorIdx,
+                                        std::vector<size_t> postNodeIdxes);
 
 NodeIter InsertNodeAfter(schema::MetaGraphT *graphT, NodeIter existNodeIter, size_t outputIndexIdx,
                          std::unique_ptr<schema::CNodeT> toAddNode, STATUS *errorCode, const OpDefCopyer &opDefCopyer);
