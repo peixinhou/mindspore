@@ -19,7 +19,7 @@
 
 #include <vector>
 #include "src/lite_kernel.h"
-#include "nnacl/random_standard_normal_parameter.h"
+#include "nnacl/random_parameter.h"
 
 using mindspore::lite::InnerContext;
 
@@ -30,7 +30,7 @@ class RandomStandardNormalCPUKernel : public LiteKernel {
                                 const std::vector<lite::Tensor *> &outputs, const InnerContext *ctx,
                                 const mindspore::lite::PrimitiveC *primitive)
       : LiteKernel(parameter, inputs, outputs, ctx, primitive) {
-    param_ = reinterpret_cast<RandomStandardNormalParam *>(parameter);
+    param_ = reinterpret_cast<RandomParam *>(parameter);
   }
   ~RandomStandardNormalCPUKernel() override = default;
 
@@ -39,7 +39,7 @@ class RandomStandardNormalCPUKernel : public LiteKernel {
   int Run() override;
 
  protected:
-  RandomStandardNormalParam *param_ = nullptr;
+  RandomParam *param_ = nullptr;
 };
 }  // namespace mindspore::kernel
 

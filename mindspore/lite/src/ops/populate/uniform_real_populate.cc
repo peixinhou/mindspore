@@ -14,28 +14,26 @@
  * limitations under the License.
  */
 
-#include "src/ops/random_standard_normal.h"
+#include "src/ops/uniform_real.h"
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
 #include "nnacl/random_parameter.h"
 
 namespace mindspore {
 namespace lite {
-OpParameter *PopulateRandomStandardNormalParameter(const mindspore::lite::PrimitiveC *primitive) {
-  RandomParam *random_parameter = reinterpret_cast<RandomParam *>(malloc(sizeof(RandomParam)));
+OpParameter *PopulateUniformRealParameter(const mindspore::lite::PrimitiveC *primitive) {
+  auto *random_parameter = reinterpret_cast<RandomParam *>(malloc(sizeof(RandomParam)));
   if (random_parameter == nullptr) {
-    MS_LOG(ERROR) << "malloc RandomStandardNormal parameter failed.";
+    MS_LOG(ERROR) << "malloc UniformReal parameter failed.";
     return nullptr;
   }
   memset(random_parameter, 0, sizeof(RandomParam));
   random_parameter->op_parameter_.type_ = primitive->Type();
-  auto param =
-    reinterpret_cast<mindspore::lite::RandomStandardNormal *>(const_cast<mindspore::lite::PrimitiveC *>(primitive));
+  auto param = reinterpret_cast<mindspore::lite::UniformReal *>(const_cast<mindspore::lite::PrimitiveC *>(primitive));
   random_parameter->seed_ = param->GetSeed();
   random_parameter->seed2_ = param->GetSeed2();
   return reinterpret_cast<OpParameter *>(random_parameter);
 }
-Registry RandomStandardNormalParameterRegistry(schema::PrimitiveType_RandomStandardNormal,
-                                               PopulateRandomStandardNormalParameter);
+Registry UniformRealParameterRegistry(schema::PrimitiveType_UniformReal, PopulateUniformRealParameter);
 }  // namespace lite
 }  // namespace mindspore
