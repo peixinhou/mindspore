@@ -54,6 +54,8 @@ STATUS TFActivationParser::Parse(const tensorflow::NodeDef &tf_op,
     attr->type = schema::ActivationType_LEAKY_RELU;
   } else if (tf_op.op() == "Selu") {
     attr->type = schema::ActivationType_SELU;
+  } else if (tf_op.op() == "Softplus") {
+    attr->type = schema::ActivationType_SOFTPLUS;
   } else {
     MS_LOG(ERROR) << "unsupported activation type:" << tf_op.op();
     return RET_ERROR;
@@ -88,5 +90,6 @@ TFNodeRegistrar g_tfSigmoidParser("Sigmoid", new TFActivationParser());
 TFNodeRegistrar g_tfTanhParser("Tanh", new TFActivationParser());
 TFNodeRegistrar g_tfLeakyReluParser("LeakyRelu", new TFActivationParser());
 TFNodeRegistrar g_tfSeLUParser("Selu", new TFActivationParser());
+TFNodeRegistrar g_tfSoftplusParser("Softplus", new TFActivationParser());
 }  // namespace lite
 }  // namespace mindspore

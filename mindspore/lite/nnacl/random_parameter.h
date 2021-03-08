@@ -13,8 +13,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#ifndef MINDSPORE_LITE_NNACL_RNADOM_STANDARD_NORMAL_PARAMETER_H_
-#define MINDSPORE_LITE_NNACL_RNADOM_STANDARD_NORMAL_PARAMETER_H_
+#ifndef MINDSPORE_LITE_NNACL_RNADOM_PARAMETER_H_
+#define MINDSPORE_LITE_NNACL_RNADOM_PARAMETER_H_
 
 #include "nnacl/op_base.h"
 
@@ -22,6 +22,6 @@ typedef struct RandomStandardNormalParam {
   OpParameter op_parameter_;
   int seed_;
   int seed2_;
-} RandomStandardNormalParam;
+} RandomParam;
 
-#endif  // MINDSPORE_LITE_NNACL_RNADOM_STANDARD_NORMAL_PARAMETER_H_
+#endif  // MINDSPORE_LITE_NNACL_RNADOM_PARAMETER_H_
