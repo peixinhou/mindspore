@@ -37,7 +37,7 @@ STATUS TFNegParser::Parse(const tensorflow::NodeDef &tf_op,
     return RET_NULL_PTR;
   }
 
-  primitive->value.type = schema::PrimitiveType_Pooling;
+  primitive->value.type = schema::PrimitiveType_Neg;
   primitive->value.value = attr.release();
   *primitiveC = PrimitiveC::Create(primitive.release());
   if (*primitiveC == nullptr) {
