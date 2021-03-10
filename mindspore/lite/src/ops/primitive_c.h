@@ -60,7 +60,8 @@ static std::map<std::string, schema::ActivationType> kActivationTypeMap{
   {"Swish", schema::ActivationType_SWISH},
   {"LeakyRelu", schema::ActivationType_LEAKY_RELU},
   {"Tanh", schema::ActivationType_TANH},
-  {"Logistic", schema::ActivationType_SIGMOID}};
+  {"Logistic", schema::ActivationType_SIGMOID},
+  {"Softplus", schema::ActivationType_SOFTPLUS}};
 std::vector<int> CastToInt(const ValuePtr &value);
 class PrimitiveC : public mindspore::Primitive {
  public:

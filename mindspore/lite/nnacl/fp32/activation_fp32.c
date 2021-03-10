@@ -248,3 +248,12 @@ int HardTanh(const float *src, int length, float *dst, float min_val, float max_
   }
   return NNACL_OK;
 }
+
+int Softplus(const float *src, int length, float *dst) {
+  int i = 0;
+  for (; i < length; ++i) {
+    single_exp(src[i], dst + i);
+    dst[i] = log1p(dst[i]);
+  }
+  return NNACL_OK;
+}

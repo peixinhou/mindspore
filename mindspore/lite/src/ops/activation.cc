@@ -61,6 +61,11 @@ int Activation::UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> 
     attr->type = schema::ActivationType_HSIGMOID;
   } else if (prim.name() == "Tanh") {
     attr->type = schema::ActivationType_TANH;
+  } else if (prim.name() == "Softplus") {
+    attr->type = schema::ActivationType_SOFTPLUS;
+  } else {
+    MS_LOG(ERROR) << "activation type:" << prim.name() << " is not supported!";
+    return RET_ERROR;
   }
   this->primitive_->value.value = attr.release();
   if (this->primitive_->value.value == nullptr) {
