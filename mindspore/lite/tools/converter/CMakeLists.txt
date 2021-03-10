@@ -51,6 +51,7 @@ file(GLOB_RECURSE CONVERTER_SRC RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
         ../optimizer/fusion/bidirection_tf_gru_cell_fusion.cc
         ../optimizer/graph/weight_format_transform_pass.cc
         ../optimizer/graph/weight_format_hardcode_pass.cc
+        ../optimizer/graph/conv1d_weight_expanding_pass.cc
         ../optimizer/graph/clip_convert_activation_pass.cc
         ../optimizer/graph/group_depthwise_op_convert_pass.cc
         ../optimizer/graph/tflite_inputs_order_exchange_pass.cc

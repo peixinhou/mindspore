@@ -399,16 +399,26 @@ int Conv2D::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> outp
   if (in_shape.size() == 0) {
     return RET_INFER_INVALID;
   }
+  if (in_shape.size() == kTripleNum) {
+    // conv1d operator
+    input_tensor->set_format(schema::Format_NWC);
+    in_shape.insert(in_shape.begin() + 1, 1);
+  }
   int input_h = in_shape.at(1);
   int input_w = in_shape.at(2);
   int output_w = 0, output_h = 0;
 
   this->ConvInferShape(input_h, input_w, &output_h, &output_w);
 
-  std::vector<int> out_shape{input_tensor->shape()};
+  std::vector<int> out_shape{in_shape};
   out_shape.at(1) = output_h >= 0 ? output_h : 1;
   out_shape.at(2) = output_w >= 0 ? output_w : 1;
   out_shape.at(3) = weight_tensor->shape()[0];
+  if (input_tensor->shape().size() == kTripleNum) {
+    // conv1d operator
+    out_tensor->set_format(schema::Format_NWC);
+    out_shape.erase(out_shape.begin() + 1);
+  }
   out_tensor->set_shape(out_shape);
 
   return RET_OK;

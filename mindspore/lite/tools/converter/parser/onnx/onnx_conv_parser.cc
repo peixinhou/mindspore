@@ -20,6 +20,85 @@
 #include <vector>
 
 namespace mindspore::lite {
+bool OnnxConvParser::ParseConvAttrByName(const onnx::AttributeProto &onnx_node_attr, schema::Conv2DT *attr) {
+  if (attr == nullptr) {
+    MS_LOG(ERROR) << "input parameter is nullptr";
+    return RET_ERROR;
+  }
+  if (onnx_node_attr.name() == "group") {
+    attr->group = static_cast<int32_t>(onnx_node_attr.i());
+  } else if (onnx_node_attr.name() == "dilations") {
+    switch (onnx_node_attr.ints().size()) {
+      case 1:
+        attr->dilateW = static_cast<int32_t>(onnx_node_attr.ints(0));
+        attr->format = schema::Format_NCW;
+        break;
+      case 2:
+        attr->dilateH = static_cast<int32_t>(onnx_node_attr.ints(0));
+        attr->dilateW = static_cast<int32_t>(onnx_node_attr.ints(1));
+        break;
+      default:
+        MS_LOG(ERROR) << "dilations size " << onnx_node_attr.ints().size() << " is not 1 or 2";
+        return RET_ERROR;
+    }
+  } else if (onnx_node_attr.name() == "kernels" || onnx_node_attr.name() == "kernel_shape") {
+    switch (onnx_node_attr.ints().size()) {
+      case 1:
+        attr->kernelH = 1;
+        attr->kernelW = static_cast<int32_t>(onnx_node_attr.ints(0));
+        attr->format = schema::Format_NCW;
+        break;
+      case 2:
+        attr->kernelH = static_cast<int32_t>(onnx_node_attr.ints(0));
+        attr->kernelW = static_cast<int32_t>(onnx_node_attr.ints(1));
+        break;
+      default:
+        MS_LOG(ERROR) << "kernel_shape size " << onnx_node_attr.ints().size() << " is not 1 or 2";
+        return RET_ERROR;
+    }
+  } else if (onnx_node_attr.name() == "auto_pad") {
+    attr->padMode = GetOnnxPadMode(onnx_node_attr);
+  } else if (onnx_node_attr.name() == "pads") {
+    switch (onnx_node_attr.ints().size()) {
+      case 2:
+        attr->padLeft = static_cast<int32_t>(onnx_node_attr.ints(0));
+        attr->padRight = static_cast<int32_t>(onnx_node_attr.ints(1));
+        attr->format = schema::Format_NCW;
+        break;
+      case 4:
+        attr->padUp = static_cast<int32_t>(onnx_node_attr.ints(0));
+        attr->padLeft = static_cast<int32_t>(onnx_node_attr.ints(1));
+        attr->padDown = static_cast<int32_t>(onnx_node_attr.ints(2));
+        attr->padRight = static_cast<int32_t>(onnx_node_attr.ints(3));
+        break;
+      default:
+        MS_LOG(ERROR) << "pads size " << onnx_node_attr.ints().size() << " is not 2 or 4";
+        return RET_ERROR;
+    }
+  } else if (onnx_node_attr.name() == "strides") {
+    switch (onnx_node_attr.ints().size()) {
+      case 1:
+        attr->strideW = static_cast<int32_t>(onnx_node_attr.ints(0));
+        attr->format = schema::Format_NCW;
+        break;
+      case 2:
+        attr->strideH = static_cast<int32_t>(onnx_node_attr.ints(0));
+        attr->strideW = static_cast<int32_t>(onnx_node_attr.ints(1));
+        break;
+      default:
+        MS_LOG(ERROR) << "strides size " << onnx_node_attr.ints().size() << " is not 1 or 2";
+        return RET_ERROR;
+    }
+  } else if (onnx_node_attr.name() == "order") {
+    if (onnx_node_attr.s() == "NHWC") {
+      attr->format = schema::Format::Format_NHWC;
+    } else {
+      MS_LOG(ERROR) << "Unsupported format: " << onnx_node_attr.s();
+      return RET_ERROR;
+    }
+  }
+  return RET_OK;
+}
 bool OnnxConvParser::ParseGroupConvolution(const std::unique_ptr<schema::Conv2DT> &attr,
                                            schema::PrimitiveT *primitive) {
   MS_LOG(DEBUG) << "onnx DepthwiseConvParser";
@@ -72,54 +151,10 @@ lite::PrimitiveC *OnnxConvParser::ParseLitePrimitive(const onnx::GraphProto &onn
 
   // set opdef each attr params
   for (const auto &onnx_node_attr : onnx_node.attribute()) {
-    if (onnx_node_attr.name() == "group") {
-      attr->group = static_cast<int32_t>(onnx_node_attr.i());
-    } else if (onnx_node_attr.name() == "dilations") {
-      if (onnx_node_attr.ints().size() != 2) {
-        MS_LOG(ERROR) << "dilations size " << onnx_node_attr.ints().size() << " is not 2";
-        return nullptr;
-      }
-      attr->dilateH = static_cast<int32_t>(onnx_node_attr.ints(0));
-      attr->dilateW = static_cast<int32_t>(onnx_node_attr.ints(1));
-    } else if (onnx_node_attr.name() == "kernels") {
-      if (onnx_node_attr.ints().size() != 2) {
-        MS_LOG(ERROR) << "kernel_shape size " << onnx_node_attr.ints().size() << " is not 2";
-        return nullptr;
-      }
-      attr->kernelH = static_cast<int32_t>(onnx_node_attr.ints(0));
-      attr->kernelW = static_cast<int32_t>(onnx_node_attr.ints(1));
-    } else if (onnx_node_attr.name() == "kernel_shape") {
-      if (onnx_node_attr.ints().size() != 2) {
-        MS_LOG(ERROR) << "kernel_shape size " << onnx_node_attr.ints().size() << " is not 2";
-        return nullptr;
-      }
-      attr->kernelH = static_cast<int32_t>(onnx_node_attr.ints(0));
-      attr->kernelW = static_cast<int32_t>(onnx_node_attr.ints(1));
-    } else if (onnx_node_attr.name() == "auto_pad") {
-      attr->padMode = GetOnnxPadMode(onnx_node_attr);
-    } else if (onnx_node_attr.name() == "pads") {
-      if (onnx_node_attr.ints().size() != 4) {
-        MS_LOG(ERROR) << "pads size " << onnx_node_attr.ints().size() << " is not 4";
-        return nullptr;
-      }
-      attr->padUp = static_cast<int32_t>(onnx_node_attr.ints(0));
-      attr->padLeft = static_cast<int32_t>(onnx_node_attr.ints(1));
-      attr->padDown = static_cast<int32_t>(onnx_node_attr.ints(2));
-      attr->padRight = static_cast<int32_t>(onnx_node_attr.ints(3));
-    } else if (onnx_node_attr.name() == "strides") {
-      if (onnx_node_attr.ints().size() != 2) {
-        MS_LOG(ERROR) << "strides size " << onnx_node_attr.ints().size() << " is not 2";
-        return nullptr;
-      }
-      attr->strideH = static_cast<int32_t>(onnx_node_attr.ints(0));
-      attr->strideW = static_cast<int32_t>(onnx_node_attr.ints(1));
-    } else if (onnx_node_attr.name() == "order") {
-      if (onnx_node_attr.s() == "NHWC") {
-        attr->format = schema::Format::Format_NHWC;
-      } else {
-        MS_LOG(ERROR) << "Unsupported format: " << onnx_node_attr.s();
-        return nullptr;
-      }
+    auto ret = ParseConvAttrByName(onnx_node_attr, attr.get());
+    if (ret != RET_OK) {
+      MS_LOG(ERROR) << "parse convolution attributes failed.";
+      return nullptr;
     }
   }
 
