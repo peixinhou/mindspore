@@ -37,6 +37,7 @@
 #include "tools/optimizer/graph/redundant_op_remove_pass.h"
 #include "tools/optimizer/graph/weight_format_hardcode_pass.h"
 #include "tools/optimizer/graph/weight_format_transform_pass.h"
+#include "tools/optimizer/graph/conv1d_weight_expanding_pass.h"
 #include "tools/optimizer/graph/clip_convert_activation_pass.h"
 #include "tools/optimizer/graph/group_depthwise_op_convert_pass.h"
 #include "tools/optimizer/graph/tflite_inputs_order_exchange_pass.h"
@@ -118,6 +119,8 @@ int AnfTransform::AddGraphPass(const std::shared_ptr<opt::GraphOptimizer> &optim
   weight_format_hardcode_pass->SetFmkType(config->fmk);
   weight_format_hardcode_pass->SetQuantType(config->quantType);
   graph_pm->AddPass(weight_format_hardcode_pass);
+  auto conv1d_weight_expanding_pass = std::make_shared<opt::Conv1DWeightExpandingPass>();
+  graph_pm->AddPass(conv1d_weight_expanding_pass);
   auto weight_format_transform_pass = std::make_shared<opt::WeightFormatTransformPass>();
   weight_format_transform_pass->SetFmkType(config->fmk);
   weight_format_transform_pass->SetQuantType(config->quantType);

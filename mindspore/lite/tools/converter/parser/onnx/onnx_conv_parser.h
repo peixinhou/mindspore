@@ -31,6 +31,7 @@ class OnnxConvParser : public OnnxNodeParser {
   lite::PrimitiveC *ParseLitePrimitive(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node) override;
 
  private:
+  static bool ParseConvAttrByName(const onnx::AttributeProto &onnx_node_attr, schema::Conv2DT *attr);
   static bool ParseGroupConvolution(const std::unique_ptr<schema::Conv2DT> &attr, schema::PrimitiveT *primitive);
 };
 }  // namespace lite

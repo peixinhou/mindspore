@@ -214,6 +214,15 @@ NodeIter FormatTransPass::InsertFormatTransNode(schema::MetaGraphT *graph, NodeI
     transNode->name = "nhwc2nchw_" + tileName + std::to_string(id++);
     attr->perm = {0, 3, 1, 2};
   }
+  // deal with the conv1d operator
+  auto primitive_type = (*existNodeIter)->primitive->value.type;
+  if (primitive_type == PrimitiveType_Conv2D) {
+    auto conv_attr = reinterpret_cast<schema::Conv2DT *>((*existNodeIter)->primitive->value.value);
+    if (conv_attr->format == schema::Format_NCW) {
+      attr->perm = {0, 2, 1};
+    }
+  }
+
   transNode->primitive->value.value = attr;
 
   OpDefCopyer TransposeOpCopyer = [](CNodeT *inOpDef) -> std::unique_ptr<CNodeT> {
