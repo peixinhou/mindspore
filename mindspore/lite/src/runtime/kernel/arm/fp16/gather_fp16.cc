@@ -158,6 +158,10 @@ int GatherFp16CPUKernel::Run() {
     context_->allocator->Free(indices_data_);
     indices_data_ = nullptr;
   }
+  if (!const_input_ && input_data_) {
+    context_->allocator->Free(input_data_);
+    input_data_ = nullptr;
+  }
   return ret;
 }
 
