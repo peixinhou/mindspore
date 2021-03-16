@@ -19,8 +19,8 @@
 
 MatVecMulFp32:
   // r4-r8 and q4-q7 must be saved according to https://static.docs.arm.com/ihi0042/i/aapcs32.pdf
-  push {r0-r8, r10, r11, lr}
-  add sp, sp, #48
+  push {r0-r8, r9, r10, r11, lr}
+  add sp, sp, #52
 
   ldr r4, [sp]
   ldr r5, [sp, #4]
@@ -179,7 +179,7 @@ Col1Loop:
     b Col1Loop
 
 End:
-  sub sp, sp, #48
-  pop {r0-r8, r10, r11, pc}
+  sub sp, sp, #52
+  pop {r0-r8, r9, r10, r11, pc}
 #endif
 #endif
