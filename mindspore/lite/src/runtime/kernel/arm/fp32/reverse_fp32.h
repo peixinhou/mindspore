@@ -43,6 +43,7 @@ class ReverseCPUKernel : public LiteKernel {
   int DoReverse(int task_id);
 
  private:
+  void UpdateAxisInfo();
   int thread_sz_count_ = 0;
   int thread_sz_stride_ = 0;
   int data_size_ = 0;
