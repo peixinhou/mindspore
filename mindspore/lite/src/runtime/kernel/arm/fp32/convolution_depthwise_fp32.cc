@@ -18,6 +18,7 @@
 #include <limits>
 #include "src/runtime/kernel/arm/fp32/convolution_depthwise_slidewindow_fp32.h"
 #include "src/runtime/kernel/arm/fp32/convolution_depthwise_indirect_fp32.h"
+#include "src/runtime/kernel/arm/fp32/convolution_depthwise_3x3_fp32.h"
 #include "schema/model_generated.h"
 #include "src/kernel_registry.h"
 #include "include/errorcode.h"
@@ -153,8 +154,14 @@ kernel::LiteKernel *CpuConvDwFp32KernelCreator(const std::vector<lite::Tensor *>
     conv_param->input_channel_ = inputs[kInputIndex]->Channel();
     conv_param->output_h_ = outputs[kOutputIndex]->Height();
     conv_param->output_w_ = outputs[kOutputIndex]->Width();
+#if defined(ENABLE_ARM) || (defined(ENABLE_SSE) && !defined(ENABLE_AVX))
+    if (CheckConvDw1DWinograd(conv_param, ctx->thread_num_)) {
+      kernel =
+        new (std::nothrow) kernel::ConvolutionDepthwise3x3CPUKernel(opParameter, inputs, outputs, ctx, primitive);
+    }
+#endif
 #if defined(ENABLE_ARM64) || defined(ENABLE_AVX)
-    if (CheckConvDwUseIndirectBuffer(conv_param)) {
+    if (kernel == nullptr && CheckConvDwUseIndirectBuffer(conv_param)) {
       kernel =
         new (std::nothrow) kernel::ConvolutionDepthwiseIndirectCPUKernel(opParameter, inputs, outputs, ctx, primitive);
     }

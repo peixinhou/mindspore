@@ -43,6 +43,25 @@ void PackDepthwiseIndirectWeightC8Fp32(const void *src, void *dst, int height, i
 void Im2ColPackUnitFp32(const float *input_data, const ConvParameter *conv_param, float *packed_input, int real_cal_num,
                         int block_index);
 
+#if defined(ENABLE_ARM) || (defined(ENABLE_SSE) && !defined(ENABLE_AVX))
+void PackWeightConvDw3x3Fp32(const void *src, void *dst, int channel);
+#endif
+
+// Transpose 8X8 Fp32 block data
+typedef void (*Transpose8X8Fp32Func)(const float *src_ptr, float *dst_ptr, int src_stride, int dst_stride);
+#ifdef ENABLE_ARM64
+void Transpose8X8Fp32Arm64(const float *src_ptr, float *dst_ptr, int src_stride, int dst_stride);
+#endif
+#ifdef ENABLE_ARM32
+void Transpose8X8Fp32Arm32(const float *src_ptr, float *dst_ptr, int src_stride, int dst_stride);
+#endif
+#ifdef ENABLE_AVX
+void Transpose8X8Fp32Avx(const float *src_ptr, float *dst_ptr, int src_stride, int dst_stride);
+#endif
+#if defined(ENABLE_SSE) && !defined(ENABLE_AVX)
+void Transpose8X8Fp32Sse(const float *src_ptr, float *dst_ptr, int src_stride, int dst_stride);
+#endif
+
 #ifdef __cplusplus
 }
 #endif
