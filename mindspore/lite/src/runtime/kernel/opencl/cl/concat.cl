@@ -191,7 +191,7 @@ __constant sampler_t smp_none = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_NONE |
                                                  __read_only image2d_t input2, __read_only image2d_t input3,          \
                                                  __write_only image2d_t output, int4 input_shape0, int4 input_shape1, \
                                                  int4 input_shape2, int4 input_shape3, int4 output_shape) {           \
-    CHECK_IDX                                                                                                         \
+    CHECK_IDX;                                                                                                        \
     DOConcat##Inputnum##Axis##ToFormat;                                                                               \
     WRITE_IMAGE(output, (int2)((Y)*output_shape.w + Z, (X)), result);                                                 \
   }
@@ -200,7 +200,7 @@ __constant sampler_t smp_none = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_NONE |
   __kernel void Concat##Inputnum##Axis##ToFormat(                                                                \
     __read_only image2d_t input0, __read_only image2d_t input1, __read_only image2d_t input2,                    \
     __write_only image2d_t output, int4 input_shape0, int4 input_shape1, int4 input_shape2, int4 output_shape) { \
-    CHECK_IDX                                                                                                    \
+    CHECK_IDX;                                                                                                   \
     DOConcat##Inputnum##Axis##ToFormat;                                                                          \
     WRITE_IMAGE(output, (int2)((Y)*output_shape.w + Z, (X)), result);                                            \
   }
@@ -209,7 +209,7 @@ __constant sampler_t smp_none = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_NONE |
   __kernel void Concat##Inputnum##Axis##ToFormat(__read_only image2d_t input0, __read_only image2d_t input1,          \
                                                  __write_only image2d_t output, int4 input_shape0, int4 input_shape1, \
                                                  int4 output_shape) {                                                 \
-    CHECK_IDX                                                                                                         \
+    CHECK_IDX;                                                                                                        \
     DOConcat##Inputnum##Axis##ToFormat;                                                                               \
     WRITE_IMAGE(output, (int2)((Y)*output_shape.w + Z, (X)), result);                                                 \
   }

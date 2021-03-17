@@ -160,7 +160,7 @@ TEST_F(TestOpenCL_Arithmetic, FloorModFile) {
   std::vector<int> input0_shape = {1, 3, 4, 5};
   std::vector<int> input1_shape = {1, 3, 4, 5};
   std::vector<int> output_shape = {1, 3, 4, 5};
-  size_t input1_size, input2_size, output_size;
+  size_t input1_size = 0, input2_size = 0, output_size = 0;
   std::string input1Ppath = "./test_data/FloodModfp32_input1.bin";
   std::string input2Ppath = "./test_data/FloodModfp32_input2.bin";
   std::string correctOutputPath = "./test_data/FloodModfp32_output.bin";
@@ -179,7 +179,7 @@ TEST_F(TestOpenCL_Arithmetic, SquaredDifference) {
   std::vector<int> input0_shape = {1, 512, 1, 5};
   std::vector<int> input1_shape = {1, 1, 1, 5};
   std::vector<int> output_shape = {1, 512, 1, 5};
-  size_t input1_size, input2_size, output_size;
+  size_t input1_size = 0, input2_size = 0, output_size = 0;
   std::string input1Ppath = "./test_data/SquaredDifferencefp32_input1.bin";
   std::string input2Ppath = "./test_data/SquaredDifferencefp32_input2.bin";
   std::string correctOutputPath = "./test_data/SquaredDifferencefp32_output.bin";

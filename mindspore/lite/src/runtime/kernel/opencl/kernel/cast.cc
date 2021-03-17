@@ -34,7 +34,7 @@ namespace mindspore::kernel {
 
 int CastOpenCLKernel::CheckSpecs() {
   // the 2nd tensor is DstType
-  if (in_tensors_.size() != 2 || out_tensors_.size() != 1) {
+  if (in_tensors_.size() != 1 || out_tensors_.size() != 1) {
     MS_LOG(ERROR) << "in size: " << in_tensors_.size() << ", out size: " << out_tensors_.size();
     return RET_ERROR;
   }
@@ -43,13 +43,13 @@ int CastOpenCLKernel::CheckSpecs() {
     return RET_ERROR;
   }
   auto input_dtype = in_tensors_.front()->data_type();
-  if (input_dtype != kNumberTypeFloat32 && input_dtype != kNumberTypeFloat16) {
-    MS_LOG(ERROR) << "input dtype must be float32/float16";
-    return RET_ERROR;
-  }
   auto output_dtype = out_tensors_.front()->data_type();
-  if (output_dtype != kNumberTypeFloat32 && output_dtype != kNumberTypeFloat16) {
-    MS_LOG(ERROR) << "output dtype must be float32/float16";
+  if (!((input_dtype == kNumberTypeFloat32 && output_dtype == kNumberTypeFloat32) ||
+        (input_dtype == kNumberTypeFloat16 && output_dtype == kNumberTypeFloat16) ||
+        (input_dtype == kNumberTypeFloat32 && output_dtype == kNumberTypeFloat16) ||
+        (input_dtype == kNumberTypeFloat16 && output_dtype == kNumberTypeFloat32) ||
+        (input_dtype == kNumberTypeInt32 && output_dtype == kNumberTypeFloat32))) {
+    MS_LOG(ERROR) << "input dtype must be float32/float16, float32/float16, float32/float16";
     return RET_ERROR;
   }
   return RET_OK;
@@ -70,6 +70,7 @@ int CastOpenCLKernel::Prepare() {
   std::map<int, std::string> dtype_names = {
     {kNumberTypeFloat32, "fp32"},
     {kNumberTypeFloat16, "fp16"},
+    {kNumberTypeInt32, "int32"},
   };
   std::string program_name = "Cast";
   std::string kernel_name =
