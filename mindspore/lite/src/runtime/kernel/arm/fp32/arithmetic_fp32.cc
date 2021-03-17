@@ -195,7 +195,7 @@ int ArithmeticCPUKernel::CheckDataType() {
 
 int ArithmeticCPUKernel::ReSize() {
   InitParam();
-  return InitBroadCastCase();
+  return RET_OK;
 }
 
 int ArithmeticCPUKernel::BroadcastRun(void *input0, void *input1, void *output, int dim, int out_count,
@@ -422,6 +422,14 @@ void ArithmeticCPUKernel::InitParamInRunTime() {
 }
 
 int ArithmeticCPUKernel::Run() {
+  MS_ASSERT(primitive_ != nullptr);
+  auto arithmetic_lite_primitive = (lite::Arithmetic *)primitive_;
+  arithmeticParameter_->broadcasting_ = arithmetic_lite_primitive->Broadcasting();
+  auto ret = InitBroadCastCase();
+  if (ret != RET_OK) {
+    MS_LOG(ERROR) << "InitBroadCastCase failed.";
+    return RET_ERROR;
+  }
   if (CheckDataType() != RET_OK) {
     MS_LOG(ERROR) << "ArithmeticCPUKernel resize failed.";
     return RET_ERROR;
