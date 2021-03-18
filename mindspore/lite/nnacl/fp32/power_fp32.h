@@ -1,5 +1,5 @@
 /**
- * Copyright 2020 Huawei Technologies Co., Ltd
+ * Copyright 2020-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,10 +21,18 @@
 #include "nnacl/op_base.h"
 #include "nnacl/power_parameter.h"
 
+#if defined(ENABLE_ARM) || defined(ENABLE_AVX) || defined(ENABLE_SSE)
+typedef MS_FLOAT32X4 (*PowerSimdFun)(MS_FLOAT32X4 x, const void *exponent);
+#endif
+typedef void (*PowerFun)(const float *, const float *, float *, int, float, float);
+typedef float (*PowerScalarFun)(float x, const void *exponent);
+
 #ifdef __cplusplus
 extern "C" {
 #endif
-void Power(const float *input, const float *exponent, float *output, int len, float scale, float shift, bool broadcast);
+int Power(const float *input, const float *exponent, float *output, int len, float scale, float shift, bool broadcast);
+void PowerSingle(const float *input, const float *exponent, float *output, int len, float scale, float shift);
+void PowerBroadCast(const float *input, const float *exponent, float *output, int len, float scale, float shift);
 #ifdef __cplusplus
 }
 #endif
