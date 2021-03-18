@@ -46,6 +46,8 @@ class ArithmeticFP16CPUKernel : public ArithmeticCPUKernel {
   void InitRunFunction() override;
   int CheckDataType() override;
   int ConstTensorBroadCast() override;
+  bool IsBatchScalarCalc() override;
+  bool IsScalarClac() override;
   void TileConstTensor(const void *in_data, void *out_data, size_t ndim, const int *in_shape, const int *in_strides,
                        const int *out_strides, const int *multiple) override;
   int Execute(const void *input0, const void *input1, void *output, int size, bool is_opt) override;

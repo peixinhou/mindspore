@@ -95,6 +95,36 @@ void ArithmeticFP16CPUKernel::InitRunFunction() {
   }
 }
 
+bool ArithmeticFP16CPUKernel::IsScalarClac() {  // 2 32 240 240, 1 1 1 1
+  if ((param_->in_elements_num0_ == 1 || param_->in_elements_num1_ == 1) && (arithmetic_opt_func_ != nullptr)) {
+    return true;
+  } else {
+    return false;
+  }
+}
+
+bool ArithmeticFP16CPUKernel::IsBatchScalarCalc() {  // 2 32 240 240,  2 32 1 1
+  if (arithmetic_opt_func_ == nullptr) {
+    return false;
+  }
+  size_t break_axis = 0;
+  for (size_t i = 0; i < param_->ndim_; i++) {
+    if (param_->in_shape0_[i] != param_->in_shape1_[i]) {
+      break_axis = i;
+      break;
+    }
+  }
+  if (break_axis < param_->ndim_) {
+    for (size_t i = break_axis; i < param_->ndim_; i++) {
+      if (param_->in_shape1_[i] != 1) {
+        return false;
+      }
+    }
+  }
+  break_pos_ = break_axis;
+  return true;
+}
+
 int ArithmeticFP16CPUKernel::ConstTensorBroadCast() {
   int ret;
   if (in_tensors_[0]->data_c() != nullptr) {
