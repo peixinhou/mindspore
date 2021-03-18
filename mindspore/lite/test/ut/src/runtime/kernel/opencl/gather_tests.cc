@@ -29,56 +29,6 @@ OpParameter *CreateParameter(int axis) {
 }
 }  // namespace
 
-TEST_F(TestOpenCL_Gather, Axis0) {
-  int axis = 0;
-  std::vector<int> input_shape = {10};
-  std::vector<int> indices_shape = {5};
-  std::vector<int> output_shape = {5};
-  float input_data[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
-  int32_t indices[] = {1, 3, 5, 7, 9};
-  float output_data[] = {1, 3, 5, 7, 9};
-
-  for (auto fp16_enable : {false}) {
-    auto *param = CreateParameter(axis);
-    TestMain(
-      {{input_shape, input_data, VAR, kNumberTypeFloat32}, {indices_shape, indices, CONST_TENSOR, kNumberTypeInt32}},
-      {output_shape, output_data}, param, fp16_enable);
-  }
-}
-
-TEST_F(TestOpenCL_Gather, Axis0ConstTensor) {
-  int axis = 0;
-  std::vector<int> input_shape = {10};
-  std::vector<int> indices_shape = {1};
-  std::vector<int> output_shape = {1};
-  float input_data[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
-  int32_t indices[] = {1};
-  float output_data[] = {1};
-
-  for (auto fp16_enable : {false}) {
-    auto *param = CreateParameter(axis);
-    TestMain(
-      {{input_shape, input_data, VAR, kNumberTypeFloat32}, {indices_shape, indices, CONST_TENSOR, kNumberTypeInt32}},
-      {output_shape, output_data}, param, fp16_enable);
-  }
-}
-
-TEST_F(TestOpenCL_Gather, Axis0_Tensor) {
-  int axis = 0;
-  std::vector<int> input_shape = {10};
-  std::vector<int> indices_shape = {1};
-  std::vector<int> output_shape = {1};
-  float input_data[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
-  int32_t indices[] = {1};
-  float output_data[] = {1};
-
-  for (auto fp16_enable : {false}) {
-    auto *param = CreateParameter(axis);
-    TestMain({{input_shape, input_data, VAR, kNumberTypeFloat32}, {indices_shape, indices, VAR, kNumberTypeInt32}},
-             {output_shape, output_data}, param, fp16_enable, fp16_enable ? 1e-3 : 1e-9);
-  }
-}
-
 TEST_F(TestOpenCL_Gather, Axis1) {
   int axis = 1;
   std::vector<int> input_shape = {1, 5, 4, 4};
@@ -216,6 +166,42 @@ TEST_F(TestOpenCL_Gather, Axis3_intensor1) {
     auto *param = CreateParameter(axis);
     TestMain({{input_shape, input_data, VAR, kNumberTypeFloat32}, {indices_shape, indices, VAR, kNumberTypeInt32}},
              {output_shape, output_data}, param, fp16_enable);
+  }
+}
+
+// input dat is weight ,indices is tensor
+TEST_F(TestOpenCL_Gather, Axis0_intensor0) {
+  int axis = 0;
+  std::vector<int> input_shape = {10, 5};
+  std::vector<int> indices_shape = {1, 3};
+  std::vector<int> output_shape = {3, 5};
+  float input_data[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4,
+                        5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+  int32_t indices[] = {1, 2, 5};
+  float output_data[] = {5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+  for (auto fp16_enable : {false}) {
+    auto *param = CreateParameter(axis);
+    TestMain(
+      {{input_shape, input_data, CONST_TENSOR, kNumberTypeFloat32}, {indices_shape, indices, VAR, kNumberTypeInt32}},
+      {output_shape, output_data}, param, fp16_enable);
+  }
+}
+
+// input dat is weight ,indices is tensor
+TEST_F(TestOpenCL_Gather, case1) {
+  int axis = 0;
+  std::vector<int> input_shape = {2, 5};
+  std::vector<int> indices_shape = {1, 10};
+  std::vector<int> output_shape = {1, 10, 5};
+  float input_data[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+  int32_t indices[] = {0, 1, 1, 0, 1, 0, 0, 0, 1, 0};
+  float output_data[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
+                         0, 1, 2, 3, 4, 0, 1, 2, 3, 4, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4};
+  for (auto fp16_enable : {false}) {
+    auto *param = CreateParameter(axis);
+    TestMain(
+      {{input_shape, input_data, CONST_TENSOR, kNumberTypeFloat32}, {indices_shape, indices, VAR, kNumberTypeInt32}},
+      {output_shape, output_data}, param, fp16_enable);
   }
 }
 

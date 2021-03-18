@@ -41,3 +41,15 @@ __kernel void Cast_fp16_to_fp32(__read_only image2d_t input, __write_only image2
   float4 result = convert_float4(read_imageh(input, smp_none, (int2)(x, y)));
   write_imagef(output, (int2)(x, y), result);
 }
+
+__kernel void Cast_int32_to_fp32(__read_only image2d_t input, __write_only image2d_t output, int2 XY) {
+  int x = get_global_id(0);
+  int y = get_global_id(1);
+  if (x >= XY.x || y >= XY.y) {
+    return;
+  }
+  float4 f4 = read_imagef(input, smp_none, (int2)(x, y));
+  int4 i4 = *((int4 *)(&f4));
+  float4 result = (float4)((float)(i4.x), (float)(i4.y), (float)(i4.z), (float)(i4.w));
+  write_imagef(output, (int2)(x, y), result);
+}

@@ -30,20 +30,20 @@ class GatherOpenCLKernel : public OpenCLKernel {
   ~GatherOpenCLKernel() override = default;
 
   int Run() override;
-  int InitWeights() override;
+  int InitWeights(int TensorIndex);
   int Prepare() override;
 
   int CheckSpecs() override;
   void SetConstArgs() override;
   void SetGlobalLocal() override;
   int Tune() override { return lite::RET_OK; }
-  int ConvertTensorToweight();
 
  private:
   int32_t *indices_data_{nullptr};
+  void *data_{nullptr};
   int axis_ = {0};
+  bool intensor0_is_tensor{true};
   bool intensor1_is_tensor{true};
-  bool enable_fp16_{false};
 };
 }  // namespace mindspore::kernel
 #endif
