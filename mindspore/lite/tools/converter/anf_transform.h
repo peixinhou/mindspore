@@ -51,6 +51,8 @@ class AnfTransform {
 
   int AddConstFoldPass(const std::shared_ptr<opt::GraphOptimizer> &optimizer, const converter::Flags *config);
 
+  int AddConv1DAdjustPass(const std::shared_ptr<opt::GraphOptimizer> &optimizer, const converter::Flags *config);
+
   int RunAdjustPass(const FuncGraphPtr &old_graph, const converter::Flags *config);
 
   int RunMindirAdjustPass(const FuncGraphPtr &old_graph, const converter::Flags *config);

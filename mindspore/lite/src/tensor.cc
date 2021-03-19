@@ -99,7 +99,7 @@ bool Tensor::operator==(const Tensor &tensor) {
 }
 
 int32_t Tensor::Batch() const {
-  if (this->shape_.size() != 4 && this->shape_.size() != 3 && this->shape_.size() != 2) {
+  if (this->shape_.size() != 4 && this->shape_.size() != 2) {
     MS_LOG(ERROR) << "Unsupported tensor shape: " << this->shape().size();
     return RET_ERROR;
   }
@@ -112,7 +112,6 @@ int32_t Tensor::Batch() const {
     case schema::Format::Format_KHWC:
     case schema::Format::Format_NC:
     case schema::Format::Format_NC4:
-    case schema::Format::Format_NWC:
       return this->shape_[0];
     case schema::Format::Format_HWCK:
     case schema::Format::Format_CHWK:
@@ -128,7 +127,7 @@ int32_t Tensor::Batch() const {
 }
 
 int32_t Tensor::Channel() const {
-  if (this->shape_.size() != 4 && this->shape_.size() != 3 && this->shape_.size() != 2) {
+  if (this->shape_.size() != 4 && this->shape_.size() != 2) {
     MS_LOG(ERROR) << "Unsupported tensor shape: " << this->shape().size();
     return RET_ERROR;
   }
@@ -139,7 +138,6 @@ int32_t Tensor::Channel() const {
     case schema::Format::Format_NC4:
       return this->shape_[1];
     case schema::Format::Format_HWCK:
-    case schema::Format::Format_NWC:
       return this->shape_[2];
     case schema::Format::Format_HWKC:
     case schema::Format::Format_NHWC:
@@ -156,7 +154,7 @@ int32_t Tensor::Channel() const {
 }
 
 int32_t Tensor::Height() const {
-  if (this->shape_.size() != 4 && this->shape_.size() != 3 && this->shape_.size() != 2) {
+  if (this->shape_.size() != 4 && this->shape_.size() != 2) {
     MS_LOG(ERROR) << "Unsupported tensor shape: " << this->shape().size();
     return RET_ERROR;
   }
@@ -176,9 +174,6 @@ int32_t Tensor::Height() const {
     case schema::Format::Format_HW:
     case schema::Format::Format_HW4:
       return this->shape_[0];
-    case schema::Format::Format_NWC:
-      // conv1d: the height is 1 by expanding.
-      return 1;
     default:
       MS_LOG(ERROR) << "Unsupported format: " << EnumNameFormat(this->format_);
       return RET_ERROR;
@@ -186,7 +181,7 @@ int32_t Tensor::Height() const {
 }
 
 int32_t Tensor::Width() const {
-  if (this->shape_.size() != 4 && this->shape_.size() != 3 && this->shape_.size() != 2) {
+  if (this->shape_.size() != 4 && this->shape_.size() != 2) {
     MS_LOG(ERROR) << "Unsupported tensor shape: " << this->shape().size();
     return -1;
   }
@@ -205,7 +200,6 @@ int32_t Tensor::Width() const {
     case schema::Format::Format_HWKC:
     case schema::Format::Format_HW:
     case schema::Format::Format_HW4:
-    case schema::Format::Format_NWC:
       return this->shape_[1];
     default:
       return RET_ERROR;
