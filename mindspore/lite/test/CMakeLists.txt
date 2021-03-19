@@ -216,6 +216,7 @@ if(ENABLE_CONVERTER)
             ${LITE_DIR}/tools/optimizer/fusion/tflite_lstm_cell_fusion.cc
             ${LITE_DIR}/tools/optimizer/fusion/tf_lstm_cell_fusion.cc
             ${LITE_DIR}/tools/optimizer/fusion/bidirection_tf_gru_cell_fusion.cc
+            ${LITE_DIR}/tools/optimizer/fusion/matmul_add_fusion.cc
             ${LITE_DIR}/tools/optimizer/graph/weight_format_transform_pass.cc
             ${LITE_DIR}/tools/optimizer/graph/weight_format_hardcode_pass.cc
             ${LITE_DIR}/tools/optimizer/graph/conv1d_weight_expanding_pass.cc
