@@ -53,6 +53,7 @@ int ArithmeticCPUKernel::ReSize() {
       outside_ *= param_->out_shape_[i];
     }
   }
+  data_type_len_ = lite::DataTypeSize(in_tensors_.at(0)->data_type());
   int ret = RET_OK;
   if (!isScalarClac() && !isBatchScalarCalc() && !isBiasCalc()) {
     ret = ConstTensorBroadCast();
