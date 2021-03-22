@@ -68,5 +68,6 @@ STATUS TFBatchMatMulParser::Parse(const tensorflow::NodeDef &tf_op,
   return RET_OK;
 }
 TFNodeRegistrar g_tfBatchMatMulParser("BatchMatMul", new TFBatchMatMulParser());
+TFNodeRegistrar g_tfBatchMatMulV2Parser("BatchMatMulV2", new TFBatchMatMulParser());
 }  // namespace lite
 }  // namespace mindspore

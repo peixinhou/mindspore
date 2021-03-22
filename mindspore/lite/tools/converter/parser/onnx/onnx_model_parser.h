@@ -74,14 +74,6 @@ class OnnxModelParser : public ModelParser {
                     lite::PrimitiveC *primitive_c, std::string loop_name);
   STATUS BuildOpOutputs(const onnx::NodeProto &onnx_node, const FuncGraphPtr &func_graph_ptr,
                         std::unordered_map<std::string, AnfNodePtr> *anf_nodes_map, const CNodePtr &cnode);
-  STATUS ConvertSpecialOnnxNode(const onnx::NodeProto &onnx_node, const FuncGraphPtr &func_graph_ptr,
-                                std::unordered_map<std::string, AnfNodePtr> *anf_nodes_map,
-                                lite::PrimitiveC *primitive_c);
-  STATUS ConvertOnnxGemmNode(const onnx::NodeProto &onnx_node, const FuncGraphPtr &func_graph_ptr,
-                             std::unordered_map<std::string, AnfNodePtr> *anf_nodes_map, lite::PrimitiveC *primitive_c);
-  STATUS BuildCNodeForGemm(const onnx::NodeProto &onnx_node, const FuncGraphPtr &func_graph_ptr,
-                           std::unordered_map<std::string, AnfNodePtr> *anf_nodes_map, lite::PrimitiveC *primitive_c,
-                           const std::string &name);
   STATUS ConvertOpQuantParams(const onnx::NodeProto &onnx_node, lite::PrimitiveC *primitive_c);
   STATUS ParseQuantParam(const onnx::NodeProto &onnx_node);
   STATUS SetTensorQuantParam(const std::string &tensor_name, std::vector<QuantParamT> *quant_params);
