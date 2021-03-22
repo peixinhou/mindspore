@@ -30,7 +30,7 @@ class PowerFp16CPUKernel : public LiteKernel {
                      const mindspore::lite::PrimitiveC *primitive)
       : LiteKernel(param, inputs, outputs, ctx, primitive),
         thread_count_(ctx->thread_num_),
-        power_(reinterpret_cast<PowerParameter *>(op_parameter_)->power_),
+        power_(static_cast<float16_t>(reinterpret_cast<PowerParameter *>(op_parameter_)->power_)),
         scale_(reinterpret_cast<PowerParameter *>(op_parameter_)->scale_),
         shift_(reinterpret_cast<PowerParameter *>(op_parameter_)->shift_) {}
   ~PowerFp16CPUKernel() override = default;
@@ -41,10 +41,14 @@ class PowerFp16CPUKernel : public LiteKernel {
   int RunImpl(int task_id);
 
  private:
+  int GetExpData();
   int thread_count_;
   float16_t power_;
   float scale_;
   float shift_;
+  float16_t *exp_data_ = nullptr;
+  lite::Tensor *exp_tensor_ = nullptr;
+  TypeId exp_data_type_;
 };
 }  // namespace mindspore::kernel
 

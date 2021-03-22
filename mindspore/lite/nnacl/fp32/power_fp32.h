@@ -30,6 +30,21 @@ typedef float (*PowerScalarFun)(float x, const void *exponent);
 #ifdef __cplusplus
 extern "C" {
 #endif
+inline bool CheckInteger(float f) { return floorf(f) == f; }
+
+static inline float StdPowerScalar(float x, const void *exponent) { return powf(x, *(float *)exponent); }
+
+#if defined(ENABLE_ARM) || defined(ENABLE_AVX) || defined(ENABLE_SSE)
+static inline MS_FLOAT32X4 StdPowerSimd(MS_FLOAT32X4 x, const void *exponent) {
+  MS_FLOAT32X4 result;
+  result[0] = powf(x[0], *(float *)exponent);
+  result[1] = powf(x[1], *(float *)exponent);
+  result[2] = powf(x[2], *(float *)exponent);
+  result[3] = powf(x[3], *(float *)exponent);
+  return result;
+}
+#endif
+
 int Power(const float *input, const float *exponent, float *output, int len, float scale, float shift, bool broadcast);
 void PowerSingle(const float *input, const float *exponent, float *output, int len, float scale, float shift);
 void PowerBroadCast(const float *input, const float *exponent, float *output, int len, float scale, float shift);

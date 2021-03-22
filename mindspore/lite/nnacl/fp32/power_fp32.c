@@ -17,22 +17,10 @@
 #include "nnacl/fp32/power_fp32.h"
 #include "nnacl/errorcode.h"
 
-bool CheckInteger(float f) { return floorf(f) == f; }
-
-float StdPowerScalar(float x, const void *exponent) { return powf(x, *(float *)exponent); }
-#if defined(ENABLE_ARM) || defined(ENABLE_AVX) || defined(ENABLE_SSE)
-MS_FLOAT32X4 StdPowerSimd(MS_FLOAT32X4 x, const void *exponent) {
-  MS_FLOAT32X4 result;
-  for (int i = 0; i < 4; ++i) {
-    result[i] = powf(x[i], *(float *)exponent);
-  }
-  return result;
-}
-#endif
-
 #if defined(ENABLE_ARM) || defined(ENABLE_AVX) || defined(ENABLE_SSE)
 MS_FLOAT32X4 OptimizedPowerSimd(MS_FLOAT32X4 x, const void *exponent) {
-  int exp = abs((int)(*(float *)exponent));
+  float tmp = *(float *)exponent;
+  int exp = abs((int)tmp);
   MS_FLOAT32X4 result = MS_MOVQ_F32(1.0f);
   while (exp) {
     if (exp % 2) {
@@ -41,7 +29,7 @@ MS_FLOAT32X4 OptimizedPowerSimd(MS_FLOAT32X4 x, const void *exponent) {
     x *= x;
     exp = exp / 2;
   }
-  if (*(int *)exponent >= 0) {
+  if (tmp >= 0) {
     return result;
   }
   return 1 / result;
@@ -49,7 +37,8 @@ MS_FLOAT32X4 OptimizedPowerSimd(MS_FLOAT32X4 x, const void *exponent) {
 #endif
 
 float OptimizedPowerScalar(float x, const void *exponent) {
-  int exp = abs((int)(*(float *)exponent));
+  float tmp = *(float *)exponent;
+  int exp = abs((int)(tmp));
   float result = 1;
   while (exp) {
     if (exp % 2) {
@@ -58,7 +47,7 @@ float OptimizedPowerScalar(float x, const void *exponent) {
     x *= x;
     exp = exp / 2;
   }
-  return *(int *)exponent >= 0 ? result : 1 / result;
+  return tmp >= 0 ? result : 1 / result;
 }
 
 void PowerBroadCast(const float *input, const float *exponent, float *output, int len, float scale, float shift) {
