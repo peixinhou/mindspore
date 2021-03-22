@@ -18,6 +18,7 @@
 #define MINDSPORE_LITE_SRC_RUNTIME_PARALLEL_EXECUTOR_H_
 
 #include <vector>
+#include <thread>
 #include <unordered_map>
 #include "src/runtime/allocator.h"
 #include "src/lite_kernel.h"
@@ -39,6 +40,7 @@ class ParallelExecutor : public Executor {
   inline void SetResult(const int index, const int result) { results.at(index) = result; }
 
  private:
+  int max_thread_num_ = std::thread::hardware_concurrency();
   std::unordered_map<kernel::LiteKernel *, size_t> refCount;
   std::vector<kernel::LiteKernel *> readyKernels;
   std::vector<int> results;
