@@ -16,6 +16,7 @@
 
 #ifndef MINDSPORE_LITE_NNACL_INTRINSICS_MS_SIMD_INSTRUCTIONS_H_
 #define MINDSPORE_LITE_NNACL_INTRINSICS_MS_SIMD_INSTRUCTIONS_H_
+#include <math.h>
 #ifdef ENABLE_ARM
 #include <arm_neon.h>
 #endif
@@ -32,7 +33,6 @@
 #define MS_ADDQ_EPI32 vaddq_s32
 #define MS_MOVQ_F32 vmovq_n_f32
 #define MS_MOVQ_EPI32 vmovq_n_s32
-#define MS_DUPQ_F32 vdupq_n_f32  // It is recommended to replace with MS_MOVQ_F32.
 #define MS_SUBQ_F32 vsubq_f32
 #define MS_MLAQ_F32(src1, src2, src3) vmlaq_f32(src1, src2, src3)
 #define MS_STQ_F32 vst1q_f32
@@ -76,7 +76,6 @@ inline static float32x4_t vrecp(float32x4_t v) {
 #define MS_ADD256_EPI32 _mm256_add_epi32
 #define MS_MOV256_F32 _mm256_set1_ps
 #define MS_MOV256_EPI32 _mm256_set1_epi32
-#define MS_DUP256_F32 _mm256_load_ps1  // It is recommended to replace with MS_MOV256_F32.
 #define MS_MLA256_F32(src1, src2, src3) _mm256_add_ps(src1, _mm256_mul_ps(src2, src3))
 #define MS_ST256_F32 _mm256_storeu_ps
 #define MS_ST256_EPI32(src1, src2) _mm256_storeu_si256((__m256i *)(src1), src2)
@@ -109,7 +108,6 @@ inline static float32x4_t vrecp(float32x4_t v) {
 #define MS_ADDQ_EPI32 _mm_add_epi32
 #define MS_MOVQ_F32 _mm_set1_ps
 #define MS_MOVQ_EPI32 _mm_set1_epi32
-#define MS_DUPQ_F32 _mm_load_ps1  // It is recommended to replace with MS_MOVQ_F32.
 #define MS_MLAQ_F32(src1, src2, src3) _mm_add_ps(src1, _mm_mul_ps(src2, src3))
 #define MS_STQ_F32 _mm_storeu_ps
 #define MS_STQ_EPI32(src1, src2) _mm_storeu_si128((__m128i *)(src1), src2)
@@ -172,5 +170,57 @@ inline static float32x4_t vrecp(float32x4_t v) {
   MS_STQ_F32(output_ptr + 5 * num, dst##6);  \
   MS_STQ_F32(output_ptr + 6 * num, dst##7);  \
   MS_STQ_F32(output_ptr + 7 * num, dst##8);
+
+static inline MS_FLOAT32X4 MS_TANHX4_F32(MS_FLOAT32X4 src) {
+  static const float data[] = {378.0f, 17325.0f, 135135.0f, 28.0f, 3150.0f, 62370.0f};
+  static const MS_FLOAT32X4 neg = {-1.0f, -1.0f, -1.0f, -1.0f};
+  static const MS_FLOAT32X4 pos = {1.0f, 1.0f, 1.0f, 1.0f};
+  MS_FLOAT32X4 square = src * src;
+  MS_FLOAT32X4 a = (((square + data[0]) * square + data[1]) * square + data[2]) * src;
+  MS_FLOAT32X4 b = ((data[3] * square + data[4]) * square + data[5]) * square + data[2];
+  return MS_MINQ_F32(MS_MAXQ_F32(a / b, neg), pos);
+}
+
+#ifdef ENABLE_AVX
+static inline MS_FLOAT32X8 MS_TANHX8_F32(MS_FLOAT32X8 src) {
+  static const float data[] = {378.0f, 17325.0f, 135135.0f, 28.0f, 3150.0f, 62370.0f};
+  static const MS_FLOAT32X8 neg = {-1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f};
+  static const MS_FLOAT32X8 pos = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
+  MS_FLOAT32X8 square = src * src;
+  MS_FLOAT32X8 a = (((square + data[0]) * square + data[1]) * square + data[2]) * src;
+  MS_FLOAT32X8 b = ((data[3] * square + data[4]) * square + data[5]) * square + data[2];
+  return MS_MIN256_F32(MS_MAX256_F32(a / b, neg), pos);
+}
+#endif
+
+static inline MS_FLOAT32X4 MS_ERFX4_F32(MS_FLOAT32X4 src) {
+  MS_FLOAT32X4 dst;
+  dst[0] = erff(src[0]);
+  dst[1] = erff(src[1]);
+  dst[2] = erff(src[2]);
+  dst[3] = erff(src[3]);
+  return dst;
+}
+
+#ifdef ENABLE_ARM64
+static inline float16x8_t MS_TANHX8_F16(float16x8_t src) {
+  float32x4_t src_low = vcvt_f32_f16(vget_low_f16(src));
+  float32x4_t src_high = vcvt_f32_f16(vget_high_f16(src));
+  return vcombine_f16(vcvt_f16_f32(MS_TANHX4_F32(src_low)), vcvt_f16_f32(MS_TANHX4_F32(src_high)));
+}
+
+static inline float16x8_t MS_ERFX8_F16(float16x8_t src) {
+  float16x8_t dst;
+  dst[0] = erff(src[0]);
+  dst[1] = erff(src[1]);
+  dst[2] = erff(src[2]);
+  dst[3] = erff(src[3]);
+  dst[4] = erff(src[4]);
+  dst[5] = erff(src[5]);
+  dst[6] = erff(src[6]);
+  dst[7] = erff(src[7]);
+  return dst;
+}
+#endif
 
 #endif  // MINDSPORE_LITE_NNACL_INTRINSICS_MS_SIMD_INSTRUCTIONS_H_
