@@ -29,7 +29,34 @@ using mindspore::schema::QuantType_WeightQuant;
 namespace mindspore::opt {
 namespace {
 constexpr size_t kConvWeightIndex = 2;
+schema::Format GetOnnxConvFormat(const AnfNodePtr &conv_node) {
+  MS_ASSERT(conv_node != nullptr);
+  if (!utils::isa<CNode>(conv_node)) {
+    MS_LOG(ERROR) << "conv node is not cnode.";
+    return schema::Format_NUM_OF_FORMAT;
+  }
+  auto cnode = conv_node->cast<CNodePtr>();
+  auto prim_c = GetValueNode<PrimitiveCPtr>(cnode->input(0));
+  MS_ASSERT(prim_c != nullptr);
+  auto prim_t = prim_c->primitiveT();
+  MS_ASSERT(prim_t != nullptr);
+  auto type = prim_t->value.type;
+  MS_ASSERT(prim_t->value.value != nullptr);
+  if (type == schema::PrimitiveType_Conv2D) {
+    return reinterpret_cast<schema::Conv2DT *>(prim_t->value.value)->format;
+  } else if (type == schema::PrimitiveType_DeConv2D) {
+    return reinterpret_cast<schema::DeConv2DT *>(prim_t->value.value)->format;
+  } else if (type == schema::PrimitiveType_DepthwiseConv2D) {
+    return reinterpret_cast<schema::DepthwiseConv2DT *>(prim_t->value.value)->format;
+  } else if (type == schema::PrimitiveType_DeDepthwiseConv2D) {
+    return reinterpret_cast<schema::DeDepthwiseConv2DT *>(prim_t->value.value)->format;
+  } else {
+    MS_LOG(ERROR) << "node is not a conv2d.";
+    return schema::Format_NUM_OF_FORMAT;
+  }
+}
 }  // namespace
+
 void WeightFormatHardCodePass::SetQuantType(QuantType type) { this->quant_type = type; }
 void WeightFormatHardCodePass::SetFmkType(FmkType type) { this->fmk_type = type; }
 lite::STATUS WeightFormatHardCodePass::HardCodeCAFFE(const AnfNodePtr &conv_node,
@@ -80,7 +107,7 @@ lite::STATUS WeightFormatHardCodePass::HardCodeONNX(const AnfNodePtr &conv_node,
       // dedepth (C x K/group x kH x kW) group = channelIn ==> (C, multiplier, H, W)
       if (op_type == schema::PrimitiveType_Conv2D || op_type == schema::PrimitiveType_DepthwiseConv2D ||
           op_type == schema::PrimitiveType_DeConv2D || op_type == schema::PrimitiveType_DeDepthwiseConv2D) {
-        if (param_value->format() == schema::Format::Format_NHWC) {
+        if (GetOnnxConvFormat(conv_node) == schema::Format::Format_NHWC) {
           param_value->set_format(schema::Format::Format_KHWC);
         } else {
           param_value->set_format(schema::Format::Format_KCHW);

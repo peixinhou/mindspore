@@ -187,49 +187,6 @@ STATUS OnnxInputAdjustOpPass::ReplaceInt64ParameterNode(const FuncGraphPtr &func
   return lite::RET_OK;
 }
 
-STATUS OnnxInputAdjustOpPass::AdjustPower(const CNodePtr &cnode) {
-  MS_ASSERT(cnode != nullptr);
-  if (!CheckInputs(cnode)) {
-    MS_LOG(ERROR) << "input is invalid.";
-    return lite::RET_INPUT_TENSOR_ERROR;
-  }
-  if (cnode->inputs().size() != 3) {
-    MS_LOG(ERROR) << "onnx power inputs is 2, but now is " << cnode->inputs().size() - 1;
-    return lite::RET_ERROR;
-  }
-  auto pow_param = cnode->input(2)->cast<ParameterPtr>();
-  if (pow_param == nullptr || !pow_param->has_default()) {
-    MS_LOG(ERROR) << "pow is from other node, which hasn't been supported.";
-    return lite::RET_NOT_SUPPORT;
-  }
-  auto pow_default = pow_param->default_param()->cast<ParamValueLitePtr>();
-  if (pow_default == nullptr) {
-    MS_LOG(ERROR) << "pow is not a paramValueLite.";
-    return lite::RET_NULL_PTR;
-  }
-  if (std::accumulate(pow_default->tensor_shape().begin(), pow_default->tensor_shape().end(), 1,
-                      std::multiplies<int>()) != 1) {
-    MS_LOG(ERROR) << "the pow element num is bigger than 1, which don't support now.";
-    return lite::RET_NOT_SUPPORT;
-  }
-  if (pow_default->tensor_addr() == nullptr) {
-    MS_LOG(ERROR) << "power's attr pow can't be obtained.";
-    return lite::RET_INVALID_OP_ATTR;
-  }
-  auto primitive_c = GetValueNode<std::shared_ptr<lite::PrimitiveC>>(cnode->input(0));
-  if (primitive_c == nullptr || primitive_c->primitiveT() == nullptr ||
-      primitive_c->primitiveT()->value.value == nullptr) {
-    MS_LOG(ERROR) << "get primitive_c failed.";
-    return lite::RET_NULL_PTR;
-  }
-  reinterpret_cast<schema::PowerT *>(primitive_c->primitiveT()->value.value)->power =
-    *reinterpret_cast<float *>(pow_default->tensor_addr());
-  auto inputs = cnode->inputs();
-  inputs.pop_back();
-  cnode->set_inputs(inputs);
-  return lite::RET_OK;
-}
-
 STATUS OnnxInputAdjustOpPass::AdjustStridedSlice(const FuncGraphPtr &func_graph, const CNodePtr &cnode) {
   MS_ASSERT(cnode != nullptr);
   if (!CheckInputs(cnode)) {
@@ -581,9 +538,7 @@ bool OnnxInputAdjustOpPass::Run(const FuncGraphPtr &func_graph) {
       continue;
     }
     auto type = opt::GetCNodeType(node);
-    if (type == schema::PrimitiveType_Power) {
-      status = AdjustPower(cnode);
-    } else if (type == schema::PrimitiveType_StridedSlice) {
+    if (type == schema::PrimitiveType_StridedSlice) {
       status = AdjustStridedSlice(func_graph, cnode);
     } else if (type == schema::PrimitiveType_Conv2D || type == schema::PrimitiveType_DeConv2D) {
       status = AdjustConvOrDeConv(cnode);

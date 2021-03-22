@@ -52,6 +52,8 @@ static const std::vector<schema::PrimitiveType> nhwcOpAllInputList = {
   schema::PrimitiveType_PoolingGrad, schema::PrimitiveType_ActivationGrad, schema::PrimitiveType_Conv2DGradFilter,
   schema::PrimitiveType_BNGrad};
 
+static const std::vector<schema::PrimitiveType> nchwOpList = {schema::PrimitiveType_InstanceNorm};
+
 // index {} mean all inputs need insert
 static std::unordered_map<schema::PrimitiveType, std::vector<int>> extNhwcInsertIndex = {
   {schema::PrimitiveType_BNGrad, {0, 1}},
@@ -148,6 +150,8 @@ std::vector<schema::PrimitiveType> GetInsertOpList() { return needInsertOpList; 
 std::vector<schema::PrimitiveType> Getfp32FullOpList() { return fp32FullOpList; }
 
 std::vector<schema::PrimitiveType> GetNhwcOpList() { return nhwcOpList; }
+
+std::vector<schema::PrimitiveType> GetNchwOpList() { return nchwOpList; }
 
 std::unordered_map<schema::PrimitiveType, std::vector<int>> GetExtNhwcIndexes() { return extNhwcInsertIndex; }
 

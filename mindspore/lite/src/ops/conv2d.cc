@@ -413,7 +413,7 @@ int Conv2D::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> outp
   std::vector<int> out_shape{in_shape};
   out_shape.at(1) = output_h >= 0 ? output_h : 1;
   out_shape.at(2) = output_w >= 0 ? output_w : 1;
-  out_shape.at(3) = weight_tensor->shape()[0];
+  out_shape.at(3) = weight_tensor->Batch();
   if (input_tensor->shape().size() == kTripleNum) {
     // conv1d operator
     out_tensor->set_format(schema::Format_NWC);

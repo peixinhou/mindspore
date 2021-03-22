@@ -58,6 +58,9 @@ STATUS TFArithmeticSelfParser::Parse(const tensorflow::NodeDef &tf_op,
     status = CreateOperator<schema::SquareT>(primitive, schema::PrimitiveType_Square);
   } else if (tf_op.op() == "Pow") {
     status = CreateOperator<schema::PowerT>(primitive, schema::PrimitiveType_Power);
+    auto attr = static_cast<schema::PowerT *>(primitive->value.value);
+    attr->shift = 0;
+    attr->scale = 1;
   } else if (tf_op.op() == "Abs") {
     status = CreateOperator<schema::PowerT>(primitive, schema::PrimitiveType_Abs);
   } else {
@@ -74,10 +77,13 @@ STATUS TFArithmeticSelfParser::Parse(const tensorflow::NodeDef &tf_op,
   }
 
   *output_size = 1;
-  status = AddOpInput(tf_op, 0, inputs);
-  if (status != RET_OK) {
-    MS_LOG(ERROR) << "Add Op input failed.";
-    return status;
+  int idxes = tf_op.op() == "Pow" ? 2 : 1;
+  for (int i = 0; i < idxes; ++i) {
+    status = AddOpInput(tf_op, i, inputs);
+    if (status != RET_OK) {
+      MS_LOG(ERROR) << "Add Op input failed.";
+      return status;
+    }
   }
   return status;
 }

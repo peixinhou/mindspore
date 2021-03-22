@@ -137,6 +137,14 @@ ParameterPtr BuildIntVec2DParameterNode(const FuncGraphPtr &func_graph, const st
 ParameterPtr BuildFloatValueParameterNode(const FuncGraphPtr &func_graph, const float &data,
                                           const std::string &node_name);
 
+template <schema::PrimitiveType type = schema::PrimitiveType_NONE>
+inline bool IsSpecifiedNode(const BaseRef &n) {
+  if (utils::isa<CNodePtr>(n) || utils::isa<ValueNodePtr>(n)) {
+    auto cur_type = opt::GetCNodeType(n);
+    return cur_type == type;
+  }
+  return false;
+}
 }  // namespace opt
 }  // namespace mindspore
 #endif  // MINDSPORE_LITE_SRC_PASS_COMMON_GLLO_UTILS_H_
