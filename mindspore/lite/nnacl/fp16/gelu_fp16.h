@@ -1,5 +1,5 @@
 /**
- * Copyright 2020-2021 Huawei Technologies Co., Ltd
+ * Copyright 2020 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,18 +13,18 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#ifndef MINDSPORE_LITE_NNACL_FP32_GELU_H_
-#define MINDSPORE_LITE_NNACL_FP32_GELU_H_
+#ifndef MINDSPORE_LITE_NNACL_FP16_GELU_H_
+#define MINDSPORE_LITE_NNACL_FP16_GELU_H_
 
 #include "nnacl/op_base.h"
-#include "nnacl/fp32/activation_fp32.h"
+#include "nnacl/fp16/activation_fp16.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-int Gelu(const float *src, float *out, int64_t real_dst_count, bool approximate);
+int GeluFp16(const float16_t *src, float16_t *out, int64_t real_dst_count, bool approximate);
 #ifdef __cplusplus
 }
 #endif
 
-#endif  // MINDSPORE_LITE_NNACL_FP32_GELU_H_
+#endif  // MINDSPORE_LITE_NNACL_FP16_GELU_H_
