@@ -88,7 +88,7 @@ class MS_API MSTensor {
   virtual std::string tensor_name() const = 0;
 
   /// \brief Set the name of MSTensor.
-  virtual void set_tensor_name(const std::string name) = 0;
+  virtual void set_tensor_name(const std::string &name) = 0;
 
   /// \brief Set the data of MSTensor.
   virtual void set_data(void *data) = 0;
