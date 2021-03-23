@@ -32,6 +32,25 @@ extern "C" {
 #endif
 inline bool CheckInteger(float16_t f) { return floorf(f) == f; }
 
+static inline float16_t StdPowerScalarFp16(float16_t x, const void *exponent) {
+  return powf(x, *(float16_t *)exponent);
+}
+
+#if defined(ENABLE_NEON)
+static inline float16x8_t StdPowerSimdFp16(float16x8_t x, const void *exponent) {
+  float16x8_t result;
+  result[0] = powf(x[0], *(float16_t *)exponent);
+  result[1] = powf(x[1], *(float16_t *)exponent);
+  result[2] = powf(x[2], *(float16_t *)exponent);
+  result[3] = powf(x[3], *(float16_t *)exponent);
+  result[4] = powf(x[4], *(float16_t *)exponent);
+  result[5] = powf(x[5], *(float16_t *)exponent);
+  result[6] = powf(x[6], *(float16_t *)exponent);
+  result[7] = powf(x[7], *(float16_t *)exponent);
+  return result;
+}
+#endif
+
 int PowerFp16(const float16_t *input, const float16_t *exponent, float16_t *output, int len, float scale, float shift,
               bool broadcast);
 void PowerSingleFp16(const float16_t *input, const float16_t *exponent, float16_t *output, int len, float scale,

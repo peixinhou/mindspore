@@ -17,22 +17,10 @@
 #include "nnacl/fp16/power_fp16.h"
 #include "nnacl/errorcode.h"
 
-float16_t StdPowerScalarFp16(float16_t x, const void *exponent) { return powf(x, *(float16_t *)exponent); }
-
-#if defined(ENABLE_NEON)
-float16x8_t StdPowerSimdFp16(float16x8_t x, const void *exponent) {
-  float16x8_t result;
-  for (int i = 0; i < 8; ++i) {
-    result[i] = powf(x[i], *(float16_t *)exponent);
-  }
-  return result;
-}
-#endif
-
 #if defined(ENABLE_NEON)
 float16x8_t OptimizedPowerSimdFp16(float16x8_t x, const void *exponent) {
-  int tmp = (int)(*(float16_t *)exponent);
-  int exp = abs(tmp);
+  int tmp = *(float16_t *)exponent;
+  int exp = abs((int)tmp);
   float16x8_t result = vmovq_n_f16(1.0f);
   while (exp) {
     if (exp % 2) {
@@ -49,8 +37,8 @@ float16x8_t OptimizedPowerSimdFp16(float16x8_t x, const void *exponent) {
 #endif
 
 float16_t OptimizedPowerScalarFp16(float16_t x, const void *exponent) {
-  int tmp = *(float16_t *)exponent;
-  int exp = abs(tmp);
+  float16_t tmp = *(float16_t *)exponent;
+  int exp = abs((int)tmp);
   float16_t result = 1;
   while (exp) {
     if (exp % 2) {

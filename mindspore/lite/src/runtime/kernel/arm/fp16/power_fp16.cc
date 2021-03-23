@@ -22,13 +22,50 @@
 
 using mindspore::lite::KernelRegistrar;
 using mindspore::lite::RET_ERROR;
+using mindspore::lite::RET_NULL_PTR;
 using mindspore::lite::RET_OK;
 using mindspore::schema::PrimitiveType_Power;
 
 namespace mindspore::kernel {
-int PowerFp16CPUKernel::Init() { return RET_OK; }
+int PowerFp16CPUKernel::Init() {
+  if (in_tensors_.size() == 2 && in_tensors_[1]->IsConst()) {
+    exp_tensor_ = in_tensors_[1];
+    auto ret = GetExpData();
+    if (ret != RET_OK) {
+      MS_LOG(ERROR) << "GetExpData is error in Init()!";
+      return ret;
+    }
+  }
+  return RET_OK;
+}
 
 int PowerFp16CPUKernel::ReSize() { return RET_OK; }
+
+int PowerFp16CPUKernel::GetExpData() {
+  exp_data_type_ = exp_tensor_->data_type();
+  if (exp_data_type_ == kNumberTypeFloat || exp_data_type_ == kNumberTypeFloat32) {
+    exp_data_ = reinterpret_cast<float16_t *>(malloc(exp_tensor_->ElementsNum() * sizeof(float16_t)));
+    if (exp_data_ == nullptr) {
+      MS_LOG(ERROR) << "exp_data_ is nullptr";
+      return RET_NULL_PTR;
+    }
+    auto exp = reinterpret_cast<float *>(exp_tensor_->MutableData());
+    if (exp == nullptr) {
+      MS_LOG(ERROR) << "exp is nullptr!";
+      return RET_NULL_PTR;
+    }
+    for (int i = 0; i < exp_tensor_->ElementsNum(); ++i) {
+      exp_data_[i] = static_cast<float16_t>(exp[i]);
+    }
+  } else {
+    exp_data_ = reinterpret_cast<float16_t *>(exp_tensor_->MutableData());
+    if (exp_data_ == nullptr) {
+      MS_LOG(ERROR) << "exp_data_ is nullptr";
+      return RET_NULL_PTR;
+    }
+  }
+  return RET_OK;
+}
 
 int PowerImplFp16(void *cdata, int task_id) {
   auto kernel = reinterpret_cast<PowerFp16CPUKernel *>(cdata);
@@ -41,6 +78,14 @@ int PowerImplFp16(void *cdata, int task_id) {
 }
 
 int PowerFp16CPUKernel::Run() {
+  if (in_tensors_.size() == 2 && exp_data_ == nullptr) {
+    exp_tensor_ = in_tensors_[1];
+    auto ret = GetExpData();
+    if (ret != RET_OK) {
+      MS_LOG(ERROR) << "GetExpData is error in run!";
+      return ret;
+    }
+  }
   auto ret = ParallelLaunch(this->context_->thread_pool_, PowerImplFp16, this, thread_count_);
   if (ret != RET_OK) {
     MS_LOG(ERROR) << "PowerFp16CPUKernel error: " << ret;
@@ -60,18 +105,17 @@ int PowerFp16CPUKernel::RunImpl(int task_id) {
   if (len <= 0) {
     return RET_OK;
   }
-  float16_t *exp_addr = nullptr;
   bool broadcast = true;
   if (in_tensors_.size() == 2) {
-    exp_addr = reinterpret_cast<float16_t *>(in_tensors_[1]->MutableData());
-    MS_ASSERT(exp_addr);
     broadcast = in_tensors_[0]->shape() == in_tensors_[1]->shape() ? false : true;
+  } else {
+    exp_data_ = &power_;
   }
   float16_t *cur_exp = nullptr;
   if (broadcast) {
-    cur_exp = in_tensors_.size() == 2 ? exp_addr : &power_;
+    cur_exp = exp_data_;
   } else {
-    cur_exp = exp_addr + stride * task_id;
+    cur_exp = exp_data_ + stride * task_id;
   }
   PowerFp16(x_addr + stride * task_id, cur_exp, output_addr + stride * task_id, len, scale_, shift_, broadcast);
   return RET_OK;
