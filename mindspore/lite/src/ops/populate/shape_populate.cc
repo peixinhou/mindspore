@@ -18,6 +18,7 @@
 #include "src/ops/populate/populate_register.h"
 #include "src/common/log_adapter.h"
 #include "src/tensor.h"
+using mindspore::schema::PrimitiveType_Shape;
 
 namespace mindspore {
 namespace lite {
@@ -32,6 +33,6 @@ OpParameter *PopulateShapeParameter(const mindspore::lite::PrimitiveC *primitive
   return reinterpret_cast<OpParameter *>(shape_param);
 }
 
-Registry ShapeParameterRegistry(schema::PrimitiveType_Shape, PopulateShapeParameter);
+REG_POPULATE(PrimitiveType_Shape, PopulateShapeParameter)
 }  // namespace lite
 }  // namespace mindspore

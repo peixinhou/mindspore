@@ -17,6 +17,7 @@
 #include "src/common/string_util.h"
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
+using mindspore::schema::PrimitiveType_CustomNormalize;
 
 namespace mindspore {
 namespace lite {
@@ -31,7 +32,6 @@ OpParameter *PopulateCustomNormalizeParameter(const mindspore::lite::PrimitiveC 
   param->type_ = primitive->Type();
   return param;
 }
-Registry CustomNormalizeParameterRegistry(schema::PrimitiveType_CustomNormalize, PopulateCustomNormalizeParameter);
-
+REG_POPULATE(PrimitiveType_CustomNormalize, PopulateCustomNormalizeParameter)
 }  // namespace lite
 }  // namespace mindspore

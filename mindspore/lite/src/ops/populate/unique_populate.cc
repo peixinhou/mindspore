@@ -18,6 +18,7 @@
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
 #include "nnacl/fp32/unique_fp32.h"
+using mindspore::schema::PrimitiveType_Unique;
 
 namespace mindspore {
 namespace lite {
@@ -33,7 +34,6 @@ OpParameter *PopulateUniqueParameter(const mindspore::lite::PrimitiveC *primitiv
   return reinterpret_cast<OpParameter *>(unique_param);
 }
 
-Registry UniqueParameterRegistry(schema::PrimitiveType_Unique, PopulateUniqueParameter);
-
+REG_POPULATE(PrimitiveType_Unique, PopulateUniqueParameter)
 }  // namespace lite
 }  // namespace mindspore

@@ -16,6 +16,7 @@
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
 #include "mindspore/lite/nnacl/fp32/where_fp32.h"
+using mindspore::schema::PrimitiveType_Where;
 
 namespace mindspore {
 namespace lite {
@@ -30,6 +31,6 @@ OpParameter *PopulateWhereParameter(const mindspore::lite::PrimitiveC *primitive
   where_parameter->op_parameter_.type_ = primitive->Type();
   return reinterpret_cast<OpParameter *>(where_parameter);
 }
-Registry WhereParameterRegistry(schema::PrimitiveType_Where, PopulateWhereParameter);
+REG_POPULATE(PrimitiveType_Where, PopulateWhereParameter)
 }  // namespace lite
 }  // namespace mindspore

@@ -20,6 +20,7 @@
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
 #include "nnacl/slice_parameter.h"
+using mindspore::schema::PrimitiveType_Slice;
 
 namespace mindspore {
 namespace lite {
@@ -46,7 +47,6 @@ OpParameter *PopulateSliceParameter(const mindspore::lite::PrimitiveC *primitive
   }
   return reinterpret_cast<OpParameter *>(slice_param);
 }
-Registry SliceParameterRegistry(schema::PrimitiveType_Slice, PopulateSliceParameter);
-
+REG_POPULATE(PrimitiveType_Slice, PopulateSliceParameter)
 }  // namespace lite
 }  // namespace mindspore

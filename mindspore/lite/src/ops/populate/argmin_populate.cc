@@ -18,6 +18,7 @@
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
 #include "nnacl/arg_min_max_parameter.h"
+using mindspore::schema::PrimitiveType_ArgMin;
 
 namespace mindspore {
 namespace lite {
@@ -39,6 +40,6 @@ OpParameter *PopulateArgMinParameter(const mindspore::lite::PrimitiveC *primitiv
   return reinterpret_cast<OpParameter *>(arg_param);
 }
 
-Registry ArgMinParameterRegistry(schema::PrimitiveType_ArgMin, PopulateArgMinParameter);
+REG_POPULATE(PrimitiveType_ArgMin, PopulateArgMinParameter)
 }  // namespace lite
 }  // namespace mindspore

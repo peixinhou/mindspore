@@ -20,6 +20,7 @@
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
 #include "nnacl/gather_parameter.h"
+using mindspore::schema::PrimitiveType_Gather;
 
 namespace mindspore {
 namespace lite {
@@ -42,7 +43,6 @@ OpParameter *PopulateGatherParameter(const mindspore::lite::PrimitiveC *primitiv
   gather_param->batchDims_ = gather_attr->GetBatchDims();
   return reinterpret_cast<OpParameter *>(gather_param);
 }
-Registry GatherParameterRegistry(schema::PrimitiveType_Gather, PopulateGatherParameter);
-
+REG_POPULATE(PrimitiveType_Gather, PopulateGatherParameter)
 }  // namespace lite
 }  // namespace mindspore

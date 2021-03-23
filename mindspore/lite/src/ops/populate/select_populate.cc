@@ -17,6 +17,7 @@
 #include "src/ops/select.h"
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
+using mindspore::schema::PrimitiveType_Select;
 
 namespace mindspore {
 namespace lite {
@@ -31,6 +32,6 @@ OpParameter *PopulateSelectParameter(const mindspore::lite::PrimitiveC *primitiv
 
   return reinterpret_cast<OpParameter *>(select_parameter);
 }
-Registry SelectParameterRegistry(schema::PrimitiveType_Select, PopulateSelectParameter);
+REG_POPULATE(PrimitiveType_Select, PopulateSelectParameter)
 }  // namespace lite
 }  // namespace mindspore

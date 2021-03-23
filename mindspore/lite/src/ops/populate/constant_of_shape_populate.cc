@@ -20,6 +20,7 @@
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
 #include "nnacl/constant_of_shape.h"
+using mindspore::schema::PrimitiveType_ConstantOfShape;
 
 namespace mindspore::lite {
 namespace {
@@ -52,6 +53,6 @@ OpParameter *PopulateConstantOfShapeParameter(const mindspore::lite::PrimitiveC 
   }
   return reinterpret_cast<OpParameter *>(param);
 }
-Registry ConstantOfShapeParameterRegistry(schema::PrimitiveType_ConstantOfShape, PopulateConstantOfShapeParameter);
 }  // namespace
+REG_POPULATE(PrimitiveType_ConstantOfShape, PopulateConstantOfShapeParameter)
 }  // namespace mindspore::lite

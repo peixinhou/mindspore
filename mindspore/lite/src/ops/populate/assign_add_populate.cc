@@ -17,6 +17,7 @@
 #include "src/ops/assign_add.h"
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
+using mindspore::schema::PrimitiveType_AssignAdd;
 
 namespace mindspore {
 namespace lite {
@@ -31,6 +32,6 @@ OpParameter *PopulateAssignAddParameter(const mindspore::lite::PrimitiveC *primi
   return param;
 }
 
-Registry AssignAddParameterRegistry(schema::PrimitiveType_AssignAdd, PopulateAssignAddParameter);
+REG_POPULATE(PrimitiveType_AssignAdd, PopulateAssignAddParameter)
 }  // namespace lite
 }  // namespace mindspore

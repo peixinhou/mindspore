@@ -18,6 +18,7 @@
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
 #include "nnacl/upsample_parameter.h"
+using mindspore::schema::PrimitiveType_Upsample;
 
 namespace mindspore {
 namespace lite {
@@ -39,6 +40,6 @@ OpParameter *PopulateUpsampleParameter(const mindspore::lite::PrimitiveC *primit
   }
   return reinterpret_cast<OpParameter *>(upsample_parameter);
 }
-Registry UpsampleParemeterRegistry(schema::PrimitiveType_Upsample, PopulateUpsampleParameter);
+REG_POPULATE(PrimitiveType_Upsample, PopulateUpsampleParameter)
 }  // namespace lite
 }  // namespace mindspore

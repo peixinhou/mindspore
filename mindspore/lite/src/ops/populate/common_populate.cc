@@ -16,6 +16,9 @@
 
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
+using mindspore::schema::PrimitiveType_InvertPermutation;
+using mindspore::schema::PrimitiveType_Size;
+using mindspore::schema::PrimitiveType_ZerosLike;
 
 namespace mindspore {
 namespace lite {
@@ -30,9 +33,8 @@ OpParameter *PopulateCommonParameter(const mindspore::lite::PrimitiveC *primitiv
   return common_parameter;
 }
 
-Registry ZerosLikeParameterRegistry(schema::PrimitiveType_ZerosLike, PopulateCommonParameter);
-Registry SizeParameterRegistry(schema::PrimitiveType_Size, PopulateCommonParameter);
-Registry InvertPermutationParameterRegistry(schema::PrimitiveType_InvertPermutation, PopulateCommonParameter);
-
+REG_POPULATE(PrimitiveType_ZerosLike, PopulateCommonParameter)
+REG_POPULATE(PrimitiveType_Size, PopulateCommonParameter)
+REG_POPULATE(PrimitiveType_InvertPermutation, PopulateCommonParameter)
 }  // namespace lite
 }  // namespace mindspore

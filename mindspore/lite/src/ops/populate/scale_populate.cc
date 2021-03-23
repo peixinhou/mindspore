@@ -18,6 +18,7 @@
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
 #include "nnacl/scale.h"
+using mindspore::schema::PrimitiveType_Scale;
 
 namespace mindspore {
 namespace lite {
@@ -39,7 +40,6 @@ OpParameter *PopulateScaleParameter(const mindspore::lite::PrimitiveC *primitive
   scale_param->activation_type_ = param->GetActivationType();
   return reinterpret_cast<OpParameter *>(scale_param);
 }
-Registry ScaleParameterRegistry(schema::PrimitiveType_Scale, PopulateScaleParameter);
-
+REG_POPULATE(PrimitiveType_Scale, PopulateScaleParameter)
 }  // namespace lite
 }  // namespace mindspore

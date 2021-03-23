@@ -18,6 +18,7 @@
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
 #include "nnacl/matmul_parameter.h"
+using mindspore::schema::PrimitiveType_FullConnection;
 
 namespace mindspore {
 namespace lite {
@@ -46,7 +47,6 @@ OpParameter *PopulateFullconnectionParameter(const mindspore::lite::PrimitiveC *
   return reinterpret_cast<OpParameter *>(matmul_param);
 }
 
-Registry FullConnectionParameterRegistry(schema::PrimitiveType_FullConnection, PopulateFullconnectionParameter);
-
+REG_POPULATE(PrimitiveType_FullConnection, PopulateFullconnectionParameter)
 }  // namespace lite
 }  // namespace mindspore

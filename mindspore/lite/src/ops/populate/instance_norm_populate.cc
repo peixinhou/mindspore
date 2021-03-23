@@ -18,6 +18,7 @@
 #include "src/ops/populate/populate_register.h"
 #include "src/ops/instance_norm.h"
 #include "nnacl/instance_norm_parameter.h"
+using mindspore::schema::PrimitiveType_InstanceNorm;
 
 namespace mindspore {
 namespace lite {
@@ -36,6 +37,6 @@ OpParameter *PopulateInstanceNormParameter(const mindspore::lite::PrimitiveC *pr
   return reinterpret_cast<OpParameter *>(instance_norm_param);
 }
 
-Registry InstanceNormParameterRegistry(schema::PrimitiveType_InstanceNorm, PopulateInstanceNormParameter);
+REG_POPULATE(PrimitiveType_InstanceNorm, PopulateInstanceNormParameter)
 }  // namespace lite
 }  // namespace mindspore

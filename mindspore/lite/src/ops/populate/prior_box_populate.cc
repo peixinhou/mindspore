@@ -18,6 +18,7 @@
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
 #include "mindspore/lite/nnacl/prior_box_parameter.h"
+using mindspore::schema::PrimitiveType_PriorBox;
 
 namespace mindspore {
 namespace lite {
@@ -77,7 +78,6 @@ OpParameter *PopulatePriorBoxParameter(const mindspore::lite::PrimitiveC *primit
   prior_box_param->step_w = prior_box_attr->GetStepW();
   return reinterpret_cast<OpParameter *>(prior_box_param);
 }
-Registry PriorBoxParameterRegistry(schema::PrimitiveType_PriorBox, PopulatePriorBoxParameter);
-
+REG_POPULATE(PrimitiveType_PriorBox, PopulatePriorBoxParameter)
 }  // namespace lite
 }  // namespace mindspore

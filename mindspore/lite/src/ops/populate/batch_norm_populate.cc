@@ -18,6 +18,7 @@
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
 #include "nnacl/batchnorm_parameter.h"
+using mindspore::schema::PrimitiveType_BatchNorm;
 
 namespace mindspore {
 namespace lite {
@@ -36,7 +37,6 @@ OpParameter *PopulateBatchNorm(const mindspore::lite::PrimitiveC *primitive) {
   return reinterpret_cast<OpParameter *>(batch_norm_param);
 }
 
-Registry BatchNormParameterRegistry(schema::PrimitiveType_BatchNorm, PopulateBatchNorm);
-
+REG_POPULATE(PrimitiveType_BatchNorm, PopulateBatchNorm)
 }  // namespace lite
 }  // namespace mindspore

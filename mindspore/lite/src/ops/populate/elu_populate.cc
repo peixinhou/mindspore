@@ -18,6 +18,7 @@
 #include "nnacl/fp32/elu_fp32.h"
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
+using mindspore::schema::PrimitiveType_Elu;
 
 namespace mindspore {
 namespace lite {
@@ -34,6 +35,6 @@ OpParameter *PopulateEluParameter(const mindspore::lite::PrimitiveC *primitive) 
   elu_parameter->alpha_ = param->GetAlpha();
   return reinterpret_cast<OpParameter *>(elu_parameter);
 }
-Registry EluParameterRegistry(schema::PrimitiveType_Elu, PopulateEluParameter);
+REG_POPULATE(PrimitiveType_Elu, PopulateEluParameter)
 }  // namespace lite
 }  // namespace mindspore

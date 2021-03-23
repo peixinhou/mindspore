@@ -18,6 +18,7 @@
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
 #include "nnacl/matmul_parameter.h"
+using mindspore::schema::PrimitiveType_MatMul;
 
 namespace mindspore {
 namespace lite {
@@ -37,7 +38,6 @@ OpParameter *PopulateMatMulParameter(const mindspore::lite::PrimitiveC *primitiv
   matmul_param->act_type_ = ActType_No;
   return reinterpret_cast<OpParameter *>(matmul_param);
 }
-Registry MatMulParameterRegistry(schema::PrimitiveType_MatMul, PopulateMatMulParameter);
-
+REG_POPULATE(PrimitiveType_MatMul, PopulateMatMulParameter)
 }  // namespace lite
 }  // namespace mindspore

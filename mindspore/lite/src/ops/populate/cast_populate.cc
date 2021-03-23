@@ -18,6 +18,7 @@
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
 #include "nnacl/cast_parameter.h"
+using mindspore::schema::PrimitiveType_Cast;
 
 namespace mindspore {
 namespace lite {
@@ -37,6 +38,6 @@ OpParameter *PopulateCastParameter(const mindspore::lite::PrimitiveC *primitive)
   return reinterpret_cast<OpParameter *>(cast_param);
 }
 
-Registry CastParameterRegistry(schema::PrimitiveType_Cast, PopulateCastParameter);
+REG_POPULATE(PrimitiveType_Cast, PopulateCastParameter)
 }  // namespace lite
 }  // namespace mindspore

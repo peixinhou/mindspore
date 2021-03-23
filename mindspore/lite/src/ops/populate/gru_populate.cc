@@ -17,6 +17,7 @@
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
 #include "nnacl/fp32/gru_fp32.h"
+using mindspore::schema::PrimitiveType_Gru;
 
 namespace mindspore {
 namespace lite {
@@ -37,6 +38,6 @@ OpParameter *PopulateGruParameter(const mindspore::lite::PrimitiveC *primitive) 
   gru_param->bidirectional_ = param->GetBidirection();
   return reinterpret_cast<OpParameter *>(gru_param);
 }
-Registry GruParameterRegistry(schema::PrimitiveType_Gru, PopulateGruParameter);
+REG_POPULATE(PrimitiveType_Gru, PopulateGruParameter)
 }  // namespace lite
 }  // namespace mindspore

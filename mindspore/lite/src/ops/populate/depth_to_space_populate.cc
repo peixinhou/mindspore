@@ -19,6 +19,7 @@
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
 #include "nnacl/depth_to_space_parameter.h"
+using mindspore::schema::PrimitiveType_DepthToSpace;
 
 namespace mindspore {
 namespace lite {
@@ -37,8 +38,7 @@ OpParameter *PopulateDepthToSpaceParameter(const mindspore::lite::PrimitiveC *pr
   return reinterpret_cast<OpParameter *>(depth_space_param);
 }
 
-Registry DepthToSpaceParameterRegistry(schema::PrimitiveType_DepthToSpace, PopulateDepthToSpaceParameter);
-
+REG_POPULATE(PrimitiveType_DepthToSpace, PopulateDepthToSpaceParameter)
 }  // namespace lite
 
 }  // namespace mindspore

@@ -17,6 +17,7 @@
 #include "src/ops/oneslike.h"
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
+using mindspore::schema::PrimitiveType_OnesLike;
 
 namespace mindspore {
 namespace lite {
@@ -31,6 +32,6 @@ OpParameter *PopulateOnesLikeParameter(const mindspore::lite::PrimitiveC *primit
   return param;
 }
 
-Registry OnesLikeParameterRegistry(schema::PrimitiveType_OnesLike, PopulateOnesLikeParameter);
+REG_POPULATE(PrimitiveType_OnesLike, PopulateOnesLikeParameter)
 }  // namespace lite
 }  // namespace mindspore

@@ -20,6 +20,7 @@
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
 #include "nnacl/transpose.h"
+using mindspore::schema::PrimitiveType_Transpose;
 
 namespace mindspore {
 namespace lite {
@@ -42,7 +43,6 @@ OpParameter *PopulateTransposeParameter(const mindspore::lite::PrimitiveC *primi
   return reinterpret_cast<OpParameter *>(transpose_param);
 }
 
-Registry TransposeParameterRegistry(schema::PrimitiveType_Transpose, PopulateTransposeParameter);
-
+REG_POPULATE(PrimitiveType_Transpose, PopulateTransposeParameter)
 }  // namespace lite
 }  // namespace mindspore

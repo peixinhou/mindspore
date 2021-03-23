@@ -18,6 +18,7 @@
 #include "src/ops/layer_norm.h"
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
+using mindspore::schema::PrimitiveType_LayerNorm;
 
 namespace mindspore {
 namespace lite {
@@ -42,6 +43,6 @@ OpParameter *PopulateLayerNormParameter(const mindspore::lite::PrimitiveC *primi
   return reinterpret_cast<OpParameter *>(layer_norm_parameter);
 }
 
-Registry LayerNormParameterRegistry(schema::PrimitiveType_LayerNorm, PopulateLayerNormParameter);
+REG_POPULATE(PrimitiveType_LayerNorm, PopulateLayerNormParameter)
 }  // namespace lite
 }  // namespace mindspore

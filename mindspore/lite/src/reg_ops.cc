@@ -1,5 +1,5 @@
 /**
- * Copyright 2019-2020 Huawei Technologies Co., Ltd
+ * Copyright 2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,23 +14,18 @@
  * limitations under the License.
  */
 
-#include "src/ops/adam.h"
-#include "src/ops/primitive_c.h"
-#include "src/ops/populate/populate_register.h"
-using mindspore::schema::PrimitiveType_Adam;
 namespace mindspore {
 namespace lite {
-OpParameter *PopulateAdamParameter(const mindspore::lite::PrimitiveC *primitive) {
-  OpParameter *param = reinterpret_cast<OpParameter *>(malloc(sizeof(OpParameter)));
-  if (param == nullptr) {
-    MS_LOG(ERROR) << "malloc Adam Parameter failed.";
-    return nullptr;
-  }
-  memset(param, 0, sizeof(OpParameter));
-  param->type_ = primitive->Type();
-  return param;
+#ifdef MS_COMPILE_IOS
+// populate
+extern void _PrimitiveType_Mul();
+extern void _PrimitiveType_NonMaxSuppression();
+
+void RegisterOps() {
+  _PrimitiveType_Mul();
+  _PrimitiveType_NonMaxSuppression();
 }
 
-REG_POPULATE(PrimitiveType_Adam, PopulateAdamParameter)
+#endif
 }  // namespace lite
 }  // namespace mindspore

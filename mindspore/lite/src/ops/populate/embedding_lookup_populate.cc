@@ -18,6 +18,7 @@
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
 #include "nnacl/fp32/embedding_lookup_fp32.h"
+using mindspore::schema::PrimitiveType_EmbeddingLookup;
 
 namespace mindspore {
 namespace lite {
@@ -43,7 +44,6 @@ OpParameter *PopulateEmbeddingLookupParameter(const mindspore::lite::PrimitiveC 
   return reinterpret_cast<OpParameter *>(embedding_lookup_parameter);
 }
 
-Registry EmbeddingLookupParameterRegistry(schema::PrimitiveType_EmbeddingLookup, PopulateEmbeddingLookupParameter);
-
+REG_POPULATE(PrimitiveType_EmbeddingLookup, PopulateEmbeddingLookupParameter)
 }  // namespace lite
 }  // namespace mindspore

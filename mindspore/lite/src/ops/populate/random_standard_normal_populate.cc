@@ -18,6 +18,7 @@
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
 #include "nnacl/random_parameter.h"
+using mindspore::schema::PrimitiveType_RandomStandardNormal;
 
 namespace mindspore {
 namespace lite {
@@ -35,7 +36,6 @@ OpParameter *PopulateRandomStandardNormalParameter(const mindspore::lite::Primit
   random_parameter->seed2_ = param->GetSeed2();
   return reinterpret_cast<OpParameter *>(random_parameter);
 }
-Registry RandomStandardNormalParameterRegistry(schema::PrimitiveType_RandomStandardNormal,
-                                               PopulateRandomStandardNormalParameter);
+REG_POPULATE(PrimitiveType_RandomStandardNormal, PopulateRandomStandardNormalParameter)
 }  // namespace lite
 }  // namespace mindspore

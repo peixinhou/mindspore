@@ -20,6 +20,7 @@
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
 #include "nnacl/conv_parameter.h"
+using mindspore::schema::PrimitiveType_DeConv2D;
 
 namespace mindspore {
 namespace lite {
@@ -62,7 +63,6 @@ OpParameter *PopulateDeconvParameter(const mindspore::lite::PrimitiveC *primitiv
   return reinterpret_cast<OpParameter *>(conv_param);
 }
 
-Registry DeConv2DParameterRegistry(schema::PrimitiveType_DeConv2D, PopulateDeconvParameter);
-
+REG_POPULATE(PrimitiveType_DeConv2D, PopulateDeconvParameter)
 }  // namespace lite
 }  // namespace mindspore

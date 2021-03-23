@@ -18,6 +18,7 @@
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
 #include "nnacl/conv_parameter.h"
+using mindspore::schema::PrimitiveType_DepthwiseConv2D;
 
 namespace mindspore {
 namespace lite {
@@ -73,7 +74,6 @@ OpParameter *PopulateConvDwParameter(const mindspore::lite::PrimitiveC *primitiv
   return reinterpret_cast<OpParameter *>(conv_param);
 }
 
-Registry DepthwiseConv2DParameterRegistry(schema::PrimitiveType_DepthwiseConv2D, PopulateConvDwParameter);
-
+REG_POPULATE(PrimitiveType_DepthwiseConv2D, PopulateConvDwParameter)
 }  // namespace lite
 }  // namespace mindspore

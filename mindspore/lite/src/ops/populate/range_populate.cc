@@ -18,6 +18,7 @@
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
 #include "nnacl/fp32/range_fp32.h"
+using mindspore::schema::PrimitiveType_Range;
 
 namespace mindspore {
 namespace lite {
@@ -37,7 +38,6 @@ OpParameter *PopulateRangeParameter(const mindspore::lite::PrimitiveC *primitive
   range_param->dType_ = range_attr->GetDType();
   return reinterpret_cast<OpParameter *>(range_param);
 }
-Registry RangeParameterRegistry(schema::PrimitiveType_Range, PopulateRangeParameter);
-
+REG_POPULATE(PrimitiveType_Range, PopulateRangeParameter)
 }  // namespace lite
 }  // namespace mindspore

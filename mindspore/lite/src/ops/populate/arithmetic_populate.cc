@@ -20,6 +20,21 @@
 #include "src/tensor.h"
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
+using mindspore::schema::PrimitiveType_Equal;
+using mindspore::schema::PrimitiveType_FloorDiv;
+using mindspore::schema::PrimitiveType_FloorMod;
+using mindspore::schema::PrimitiveType_Greater;
+using mindspore::schema::PrimitiveType_GreaterEqual;
+using mindspore::schema::PrimitiveType_Less;
+using mindspore::schema::PrimitiveType_LessEqual;
+using mindspore::schema::PrimitiveType_LogicalAnd;
+using mindspore::schema::PrimitiveType_LogicalOr;
+using mindspore::schema::PrimitiveType_Maximum;
+using mindspore::schema::PrimitiveType_Minimum;
+using mindspore::schema::PrimitiveType_Mod;
+using mindspore::schema::PrimitiveType_NotEqual;
+using mindspore::schema::PrimitiveType_RealDiv;
+using mindspore::schema::PrimitiveType_SquaredDifference;
 
 namespace mindspore {
 namespace lite {
@@ -54,20 +69,20 @@ OpParameter *PopulateArithmetic(const mindspore::lite::PrimitiveC *primitive) {
   return reinterpret_cast<OpParameter *>(param);
 }
 
-Registry RealDivParameterRegistry(schema::PrimitiveType_RealDiv, PopulateArithmetic);
-Registry LogicalAndParameterRegistry(schema::PrimitiveType_LogicalAnd, PopulateArithmetic);
-Registry ParameterRegistry(schema::PrimitiveType_LogicalOr, PopulateArithmetic);
-Registry EqualParameterRegistry(schema::PrimitiveType_Equal, PopulateArithmetic);
-Registry NotEqualParameterRegistry(schema::PrimitiveType_NotEqual, PopulateArithmetic);
-Registry LessParameterRegistry(schema::PrimitiveType_Less, PopulateArithmetic);
-Registry LessEqualParameterRegistry(schema::PrimitiveType_LessEqual, PopulateArithmetic);
-Registry GreaterParameterRegistry(schema::PrimitiveType_Greater, PopulateArithmetic);
-Registry GreaterEqualParameterRegistry(schema::PrimitiveType_GreaterEqual, PopulateArithmetic);
-Registry MaximumParameterRegistry(schema::PrimitiveType_Maximum, PopulateArithmetic);
-Registry MinimumParameterRegistry(schema::PrimitiveType_Minimum, PopulateArithmetic);
-Registry FloorDivParameterRegistry(schema::PrimitiveType_FloorDiv, PopulateArithmetic);
-Registry FloorModParameterRegistry(schema::PrimitiveType_FloorMod, PopulateArithmetic);
-Registry ModParameterRegistry(schema::PrimitiveType_Mod, PopulateArithmetic);
-Registry SquaredDifferenceParameterRegistry(schema::PrimitiveType_SquaredDifference, PopulateArithmetic);
+REG_POPULATE(PrimitiveType_RealDiv, PopulateArithmetic)
+REG_POPULATE(PrimitiveType_LogicalAnd, PopulateArithmetic)
+REG_POPULATE(PrimitiveType_LogicalOr, PopulateArithmetic)
+REG_POPULATE(PrimitiveType_Equal, PopulateArithmetic)
+REG_POPULATE(PrimitiveType_NotEqual, PopulateArithmetic)
+REG_POPULATE(PrimitiveType_Less, PopulateArithmetic)
+REG_POPULATE(PrimitiveType_LessEqual, PopulateArithmetic)
+REG_POPULATE(PrimitiveType_Greater, PopulateArithmetic)
+REG_POPULATE(PrimitiveType_GreaterEqual, PopulateArithmetic)
+REG_POPULATE(PrimitiveType_Maximum, PopulateArithmetic)
+REG_POPULATE(PrimitiveType_Minimum, PopulateArithmetic)
+REG_POPULATE(PrimitiveType_FloorDiv, PopulateArithmetic)
+REG_POPULATE(PrimitiveType_FloorMod, PopulateArithmetic)
+REG_POPULATE(PrimitiveType_Mod, PopulateArithmetic)
+REG_POPULATE(PrimitiveType_SquaredDifference, PopulateArithmetic)
 }  // namespace lite
 }  // namespace mindspore

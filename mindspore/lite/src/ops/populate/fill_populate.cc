@@ -18,6 +18,7 @@
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
 #include "nnacl/fill_parameter.h"
+using mindspore::schema::PrimitiveType_Fill;
 
 namespace mindspore {
 namespace lite {
@@ -40,7 +41,6 @@ OpParameter *PopulateFillParameter(const mindspore::lite::PrimitiveC *primitive)
   return reinterpret_cast<OpParameter *>(fill_param);
 }
 
-Registry FillParameterRegistry(schema::PrimitiveType_Fill, PopulateFillParameter);
-
+REG_POPULATE(PrimitiveType_Fill, PopulateFillParameter)
 }  // namespace lite
 }  // namespace mindspore

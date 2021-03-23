@@ -19,6 +19,7 @@
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
 #include "nnacl/l2_norm_parameter.h"
+using mindspore::schema::PrimitiveType_L2Norm;
 
 namespace mindspore {
 namespace lite {
@@ -58,7 +59,6 @@ OpParameter *PopulateL2NormParameter(const mindspore::lite::PrimitiveC *primitiv
   }
   return reinterpret_cast<OpParameter *>(l2_norm_parameter);
 }
-Registry L2NormParameterRegistry(schema::PrimitiveType_L2Norm, PopulateL2NormParameter);
-
+REG_POPULATE(PrimitiveType_L2Norm, PopulateL2NormParameter)
 }  // namespace lite
 }  // namespace mindspore

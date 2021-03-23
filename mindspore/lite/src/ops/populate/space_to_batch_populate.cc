@@ -19,6 +19,7 @@
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
 #include "nnacl/fp32/space_to_batch_fp32.h"
+using mindspore::schema::PrimitiveType_SpaceToBatch;
 
 namespace mindspore {
 namespace lite {
@@ -49,7 +50,6 @@ OpParameter *PopulateSpaceToBatchParameter(const mindspore::lite::PrimitiveC *pr
   memcpy(space_batch_param->paddings_, (paddings.data()), paddings.size() * sizeof(int));
   return reinterpret_cast<OpParameter *>(space_batch_param);
 }
-Registry SpaceToBatchParameterRegistry(schema::PrimitiveType_SpaceToBatch, PopulateSpaceToBatchParameter);
-
+REG_POPULATE(PrimitiveType_SpaceToBatch, PopulateSpaceToBatchParameter)
 }  // namespace lite
 }  // namespace mindspore

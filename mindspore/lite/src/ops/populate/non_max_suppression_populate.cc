@@ -18,6 +18,7 @@
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
 #include "nnacl/non_max_suppression_parameter.h"
+using mindspore::schema::PrimitiveType_NonMaxSuppression;
 
 namespace mindspore {
 namespace lite {
@@ -35,8 +36,7 @@ OpParameter *PopulateNonMaxSuppressionParameter(const mindspore::lite::Primitive
   param->center_point_box_ = prim->GetCenterPointBox();
   return reinterpret_cast<OpParameter *>(param);
 }
-Registry NonMaxSuppressionParameterRegistry(schema::PrimitiveType_NonMaxSuppression,
-                                            PopulateNonMaxSuppressionParameter);
+REG_POPULATE(PrimitiveType_NonMaxSuppression, PopulateNonMaxSuppressionParameter)
 
 }  // namespace lite
 }  // namespace mindspore

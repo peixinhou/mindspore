@@ -18,6 +18,7 @@
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
 #include "nnacl/split_parameter.h"
+using mindspore::schema::PrimitiveType_Split;
 
 namespace mindspore {
 namespace lite {
@@ -55,6 +56,6 @@ OpParameter *PopulateSplitParameter(const mindspore::lite::PrimitiveC *primitive
   split_param->split_dim_ = param->GetSplitDim();
   return reinterpret_cast<OpParameter *>(split_param);
 }
-Registry SplitParameterRegistry(schema::PrimitiveType_Split, PopulateSplitParameter);
+REG_POPULATE(PrimitiveType_Split, PopulateSplitParameter)
 }  // namespace lite
 }  // namespace mindspore

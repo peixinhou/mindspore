@@ -18,6 +18,7 @@
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
 #include "nnacl/fp32/one_hot_fp32.h"
+using mindspore::schema::PrimitiveType_OneHot;
 
 namespace mindspore {
 namespace lite {
@@ -39,7 +40,6 @@ OpParameter *PopulateOneHotParameter(const mindspore::lite::PrimitiveC *primitiv
   one_hot_param->axis_ = param->GetAxis();
   return reinterpret_cast<OpParameter *>(one_hot_param);
 }
-Registry OneHotParameterRegistry(schema::PrimitiveType_OneHot, PopulateOneHotParameter);
-
+REG_POPULATE(PrimitiveType_OneHot, PopulateOneHotParameter)
 }  // namespace lite
 }  // namespace mindspore

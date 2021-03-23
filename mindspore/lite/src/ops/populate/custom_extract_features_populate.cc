@@ -17,6 +17,7 @@
 #include "src/ops/custom_extract_features.h"
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
+using mindspore::schema::PrimitiveType_CustomExtractFeatures;
 
 namespace mindspore {
 namespace lite {
@@ -31,8 +32,7 @@ OpParameter *PopulateExtractFeaturesParameter(const mindspore::lite::PrimitiveC 
   param->type_ = primitive->Type();
   return param;
 }
-Registry CustomExtractFeaturesParameterRegistry(schema::PrimitiveType_CustomExtractFeatures,
-                                                PopulateExtractFeaturesParameter);
+REG_POPULATE(PrimitiveType_CustomExtractFeatures, PopulateExtractFeaturesParameter);
 
 }  // namespace lite
 }  // namespace mindspore

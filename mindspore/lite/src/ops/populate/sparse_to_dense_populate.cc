@@ -18,6 +18,7 @@
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
 #include "nnacl/sparse_to_dense_parameter.h"
+using mindspore::schema::PrimitiveType_SparseToDense;
 
 namespace mindspore {
 namespace lite {
@@ -33,6 +34,6 @@ OpParameter *PopulateSparseToDenseParameter(const mindspore::lite::PrimitiveC *p
   return reinterpret_cast<OpParameter *>(sparse_to_dense_param);
 }
 
-Registry SparseToDenseParameterRegistry(schema::PrimitiveType_SparseToDense, PopulateSparseToDenseParameter);
+REG_POPULATE(PrimitiveType_SparseToDense, PopulateSparseToDenseParameter)
 }  // namespace lite
 }  // namespace mindspore

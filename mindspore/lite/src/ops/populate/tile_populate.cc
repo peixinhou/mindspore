@@ -18,6 +18,7 @@
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
 #include "nnacl/base/tile_base.h"
+using mindspore::schema::PrimitiveType_Tile;
 
 namespace mindspore {
 namespace lite {
@@ -52,7 +53,6 @@ OpParameter *PopulateTileParameter(const mindspore::lite::PrimitiveC *primitive)
   return reinterpret_cast<OpParameter *>(tile_param);
 }
 
-Registry TileParameterRegistry(schema::PrimitiveType_Tile, PopulateTileParameter);
-
+REG_POPULATE(PrimitiveType_Tile, PopulateTileParameter)
 }  // namespace lite
 }  // namespace mindspore

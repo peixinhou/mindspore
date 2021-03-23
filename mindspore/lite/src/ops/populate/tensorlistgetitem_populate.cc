@@ -18,6 +18,7 @@
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
 #include "nnacl/tensorlist_parameter.h"
+using mindspore::schema::PrimitiveType_TensorListGetItem;
 
 namespace mindspore {
 namespace lite {
@@ -34,8 +35,7 @@ OpParameter *PopulateTensorListGetItemParameter(const mindspore::lite::Primitive
   getItem_param->element_dtype_ = getItem->GetElementDType();
   return reinterpret_cast<OpParameter *>(getItem_param);
 }
-Registry TensorListGetItemParameterRegistry(schema::PrimitiveType_TensorListGetItem,
-                                            PopulateTensorListGetItemParameter);
+REG_POPULATE(PrimitiveType_TensorListGetItem, PopulateTensorListGetItemParameter);
 
 }  // namespace lite
 }  // namespace mindspore

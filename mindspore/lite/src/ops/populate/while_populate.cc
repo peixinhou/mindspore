@@ -17,6 +17,7 @@
 #include "src/ops/while.h"
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
+using mindspore::schema::PrimitiveType_While;
 
 namespace mindspore {
 namespace lite {
@@ -40,6 +41,6 @@ OpParameter *PopulateWhileParemeter(const mindspore::lite::PrimitiveC *primitive
   while_paremeter->cond_subgraph_index = param->GetCondSubgraphIndex();
   return reinterpret_cast<OpParameter *>(while_paremeter);
 }
-Registry WhileParemeterRegistry(schema::PrimitiveType_While, PopulateWhileParemeter);
+REG_POPULATE(PrimitiveType_While, PopulateWhileParemeter)
 }  // namespace lite
 }  // namespace mindspore

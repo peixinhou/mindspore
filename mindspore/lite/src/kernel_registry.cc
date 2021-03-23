@@ -16,8 +16,11 @@
 #include "src/kernel_registry.h"
 #include "include/errorcode.h"
 #include "src/ops/populate/populate_register.h"
+#include "src/reg_kernels.h"
 #ifdef ENABLE_ARM64
+#if defined(__ANDROID__)
 #include <asm/hwcap.h>
+#endif
 #include "common/utils.h"
 #include "src/common/log_adapter.h"
 #include "src/common/utils.h"
@@ -145,4 +148,10 @@ KernelRegistry::~KernelRegistry() {
     instance->creator_arrays_ = nullptr;
   }
 }
+#ifdef MS_COMPILE_IOS
+void KernelRegistry::RegisterAllKernels() {
+  static std::once_flag flag_kernels;
+  std::call_once(flag_kernels, [&]() { kernel::RegisterKernels(); });
+}
+#endif
 }  // namespace mindspore::lite

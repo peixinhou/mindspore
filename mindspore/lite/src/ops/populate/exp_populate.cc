@@ -18,6 +18,7 @@
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
 #include "nnacl/fp32/exp_fp32.h"
+using mindspore::schema::PrimitiveType_Exp;
 
 namespace mindspore {
 namespace lite {
@@ -41,6 +42,6 @@ OpParameter *PopulateExpParameter(const mindspore::lite::PrimitiveC *primitive) 
   return reinterpret_cast<OpParameter *>(exp_parameter);
 }
 
-Registry ExpParameterRegistry(schema::PrimitiveType_Exp, PopulateExpParameter);
+REG_POPULATE(PrimitiveType_Exp, PopulateExpParameter)
 }  // namespace lite
 }  // namespace mindspore

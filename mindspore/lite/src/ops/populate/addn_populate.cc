@@ -17,6 +17,7 @@
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
 #include "nnacl/op_base.h"
+using mindspore::schema::PrimitiveType_AddN;
 
 namespace mindspore {
 namespace lite {
@@ -30,6 +31,6 @@ OpParameter *PopulateAddNParameter(const mindspore::lite::PrimitiveC *primitive)
   addn_param->type_ = primitive->Type();
   return reinterpret_cast<OpParameter *>(addn_param);
 }
-Registry AddNParameterRegistry(schema::PrimitiveType_AddN, PopulateAddNParameter);
+REG_POPULATE(PrimitiveType_AddN, PopulateAddNParameter)
 }  // namespace lite
 }  // namespace mindspore

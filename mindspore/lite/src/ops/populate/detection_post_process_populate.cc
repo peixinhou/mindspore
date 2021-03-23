@@ -18,6 +18,7 @@
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
 #include "nnacl/detection_post_process_parameter.h"
+using mindspore::schema::PrimitiveType_DetectionPostProcess;
 
 namespace mindspore {
 namespace lite {
@@ -46,8 +47,7 @@ OpParameter *PopulateDetectionPostProcessParameter(const mindspore::lite::Primit
   detection_post_process_parameter->use_regular_nms_ = param->GetUseRegularNms();
   return reinterpret_cast<OpParameter *>(detection_post_process_parameter);
 }
-Registry DetectionPostProcessParameterRegistry(schema::PrimitiveType_DetectionPostProcess,
-                                               PopulateDetectionPostProcessParameter);
+REG_POPULATE(PrimitiveType_DetectionPostProcess, PopulateDetectionPostProcessParameter)
 
 }  // namespace lite
 }  // namespace mindspore

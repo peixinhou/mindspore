@@ -17,6 +17,7 @@
 #include "src/ops/unsorted_segment_sum.h"
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
+using mindspore::schema::PrimitiveType_UnsortedSegmentSum;
 
 namespace mindspore {
 namespace lite {
@@ -31,7 +32,6 @@ OpParameter *PopulateUnsortedSegmentSumParameter(const mindspore::lite::Primitiv
   return param;
 }
 
-Registry UnsortedSegmentSumParameterRegistry(schema::PrimitiveType_UnsortedSegmentSum,
-                                             PopulateUnsortedSegmentSumParameter);
+REG_POPULATE(PrimitiveType_UnsortedSegmentSum, PopulateUnsortedSegmentSumParameter);
 }  // namespace lite
 }  // namespace mindspore
