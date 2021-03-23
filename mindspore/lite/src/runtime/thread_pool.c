@@ -21,10 +21,14 @@
 #include <semaphore.h>
 #include <string.h>
 #include <stdlib.h>
+#include <unistd.h>
+
+#ifdef __WIN32__
+#include <windows.h>
+#endif
 
 #ifdef __ANDROID__
 #define BIND_CORE
-#include <unistd.h>
 #include <sched.h>
 #endif
 
@@ -43,7 +47,6 @@
 #define RET_TP_ERROR (-8)
 #define RET_TP_SYSTEM_ERROR (-1)
 
-#define MAX_THREAD_NUM (8)
 #define DEFAULT_SPIN_COUNT (30000)
 
 typedef struct {
@@ -84,7 +87,7 @@ typedef struct ThreadPool {
 
 Thread *GetThread(struct ThreadPool *thread_pool, int thread_id) {
   if (thread_pool == NULL) {
-    LOG_ERROR("get thread pool instane failed, thread_id: %d", thread_id);
+    LOG_ERROR("get thread pool instance failed, thread_id: %d", thread_id);
     return NULL;
   }
   ThreadList *thread_list = thread_pool->thread_list;
@@ -482,7 +485,7 @@ int SetAffinity(pthread_t thread_id, cpu_set_t *cpuSet) {
 
 int BindMasterThread(struct ThreadPool *thread_pool, bool is_bind) {
   if (thread_pool == NULL) {
-    LOG_ERROR("get thread pool instane failed");
+    LOG_ERROR("get thread pool instance failed");
     return RET_TP_ERROR;
   }
   cpu_set_t mask;
@@ -564,7 +567,7 @@ int DoBindSalverThreads(struct ThreadPool *thread_pool) {
 
 int BindSalverThreads(struct ThreadPool *thread_pool, bool is_bind) {
   if (thread_pool == NULL) {
-    LOG_ERROR("get thread pool instane failed");
+    LOG_ERROR("get thread pool instance failed");
     return RET_TP_ERROR;
   }
   int ret;
@@ -586,7 +589,7 @@ int BindThreads(struct ThreadPool *thread_pool, bool is_bind, int mode) {
     return RET_TP_OK;
   }
   if (thread_pool == NULL) {
-    LOG_ERROR("get thread pool instane failed");
+    LOG_ERROR("get thread pool instance failed");
     return RET_TP_ERROR;
   }
   thread_pool->mode = mode;
@@ -641,7 +644,7 @@ bool PopTaskFromQueue(Thread *thread, Task **task) {
 
 void WaitAllThread(struct ThreadPool *thread_pool) {
   if (thread_pool == NULL) {
-    LOG_ERROR("get thread pool instane failed");
+    LOG_ERROR("get thread pool instance failed");
     return;
   }
   bool k_success_flag = false;
@@ -663,7 +666,7 @@ void WaitAllThread(struct ThreadPool *thread_pool) {
 
 int DistributeTask(struct ThreadPool *thread_pool, Task *task, int task_num) {
   if (thread_pool == NULL) {
-    LOG_ERROR("get thread pool instane failed");
+    LOG_ERROR("get thread pool instance failed");
     return RET_TP_ERROR;
   }
   if (task_num > thread_pool->thread_num || task_num <= 1) {
@@ -705,7 +708,7 @@ int DistributeTask(struct ThreadPool *thread_pool, Task *task, int task_num) {
 
 int AddTask(struct ThreadPool *thread_pool, int func(void *, int), void *content, int task_num) {
   if (thread_pool == NULL) {
-    LOG_ERROR("get thread pool instane failed");
+    LOG_ERROR("get thread pool instance failed");
     return RET_TP_ERROR;
   }
   // if single thread, run master thread
@@ -741,7 +744,7 @@ void ThreadRun(Thread *thread) {
   thread->is_running = true;
   ThreadPool *thread_pool = (ThreadPool *)(thread->thread_pool);
   if (thread_pool == NULL) {
-    LOG_ERROR("get thread pool instane failed");
+    LOG_ERROR("get thread pool instance failed");
     thread->is_running = false;
     return;
   }
@@ -779,7 +782,7 @@ void ThreadRun(Thread *thread) {
 
 void PushThreadToList(struct ThreadPool *thread_pool, Thread *thread) {
   if (thread_pool == NULL) {
-    LOG_ERROR("get thread pool instane failed");
+    LOG_ERROR("get thread pool instance failed");
     return;
   }
   ThreadList *thread_list = thread_pool->thread_list;
@@ -826,8 +829,15 @@ int CreateNewThread(struct ThreadPool *thread_pool, int thread_id) {
 }
 
 ThreadPool *CreateThreadPool(int thread_num, int mode) {
+#ifdef __WIN32__
+  SYSTEM_INFO sys_info;
+  GetSystemInfo(&sys_info);
+  long max_thread_num = sys_info.dwNumberOfProcessors;
+#else
+  long max_thread_num = sysconf(_SC_NPROCESSORS_ONLN);
+#endif
   LOG_INFO("create thread pool, thread_num: %d, mode: %d", thread_num, mode);
-  if (thread_num <= 0 || thread_num > MAX_THREAD_NUM) {
+  if (thread_num <= 0 || thread_num > max_thread_num) {
     LOG_ERROR("invalid thread num: %d", thread_num);
     return NULL;
   }
@@ -846,7 +856,7 @@ ThreadPool *CreateThreadPool(int thread_num, int mode) {
     LOG_ERROR("Malloc ThreadPool failed");
     return NULL;
   }
-  thread_pool->thread_num = thread_num > MAX_THREAD_NUM ? MAX_THREAD_NUM : thread_num;
+  thread_pool->thread_num = thread_num > max_thread_num ? (int)max_thread_num : thread_num;
   thread_pool->is_alive = ATOMIC_VAR_INIT(true);
   thread_pool->mode = mode;
   thread_pool->thread_list = NULL;
@@ -882,7 +892,7 @@ ThreadPool *CreateThreadPool(int thread_num, int mode) {
 
 void ActivateThreadPool(struct ThreadPool *thread_pool) {
   if (thread_pool == NULL) {
-    LOG_ERROR("get thread pool instane failed");
+    LOG_ERROR("get thread pool instance failed");
     return;
   }
   ThreadList *thread_list = thread_pool->thread_list;
@@ -900,7 +910,7 @@ void ActivateThreadPool(struct ThreadPool *thread_pool) {
 
 void DeactivateThreadPool(struct ThreadPool *thread_pool) {
   if (thread_pool == NULL) {
-    LOG_ERROR("get thread pool instane failed");
+    LOG_ERROR("get thread pool instance failed");
     return;
   }
   ThreadList *thread_list = thread_pool->thread_list;
@@ -917,7 +927,7 @@ void DeactivateThreadPool(struct ThreadPool *thread_pool) {
 
 void DestroyThreadPool(struct ThreadPool *thread_pool) {
   if (thread_pool == NULL) {
-    LOG_ERROR("get thread pool instane failed");
+    LOG_ERROR("get thread pool instance failed");
     return;
   }
   if (thread_pool->thread_list == NULL) {
@@ -940,7 +950,7 @@ void DestroyThreadPool(struct ThreadPool *thread_pool) {
 
 int GetCurrentThreadNum(struct ThreadPool *thread_pool) {
   if (thread_pool == NULL) {
-    LOG_ERROR("get thread pool instane failed");
+    LOG_ERROR("get thread pool instance failed");
     return 0;
   }
   return thread_pool->thread_num;
