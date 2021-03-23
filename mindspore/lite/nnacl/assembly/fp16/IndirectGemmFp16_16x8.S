@@ -1,4 +1,5 @@
 #ifdef __aarch64__
+#include "nnacl/assembly_global.h"
 
 .text
 .align 5
@@ -12,7 +13,7 @@
 // x0: output, x1: input, x2: weight, x3: bias, x4: step, x5: ic4, x6: oc8, x7: offset, 
 // x8:mode, x9: writeC4, x10:relu, x11: relu6
 // compute 8 channel for 16 outputs
-IndirectGemmFp16_16x8:
+asm_function IndirectGemmFp16_16x8
 
     .macro INIT_BIAS
         dup v16.4s, wzr
