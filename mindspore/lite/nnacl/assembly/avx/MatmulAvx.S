@@ -1,4 +1,5 @@
 #ifdef ENABLE_AVX
+#include "nnacl/assembly_global.h"
     .text
     .align 4
     .global MatmulFloatAvxOpt
@@ -22,7 +23,7 @@
 // 24: stride
 // 32: writeNhwc/writeWino
 
-// parameters pass in win x64 platfrom: "shadow space" needs to be opened up for first four parameters ==> 32 bites
+// parameters pass in win x64 platform: "shadow space" needs to be opened up for first four parameters ==> 32 bites
 // rcx: a
 // rdx: b
 // r8: c
@@ -34,7 +35,7 @@
 // 72: stride
 // 80: writeMode
 
-MatmulFloatAvxOpt:
+asm_function MatmulFloatAvxOpt
     // rbx, rsp, rbp, r12-r15 must be saved according to x86 calling convention
     pushq %r15
     pushq %r14
