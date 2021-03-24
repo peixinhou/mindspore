@@ -17,7 +17,7 @@
 #include "src/ops/switch.h"
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
-
+using mindspore::schema::PrimitiveType_Switch;
 namespace mindspore {
 namespace lite {
 OpParameter *PopulateSwitchParameter(const mindspore::lite::PrimitiveC *primitive) {
@@ -31,6 +31,6 @@ OpParameter *PopulateSwitchParameter(const mindspore::lite::PrimitiveC *primitiv
 
   return reinterpret_cast<OpParameter *>(switch_parameter);
 }
-Registry SwitchParameterRegistry(schema::PrimitiveType_Switch, PopulateSwitchParameter);
+REG_POPULATE(PrimitiveType_Switch, PopulateSwitchParameter)
 }  // namespace lite
 }  // namespace mindspore

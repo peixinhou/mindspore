@@ -20,6 +20,8 @@
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
 #include "nnacl/batch_to_space.h"
+using mindspore::schema::PrimitiveType_BatchToSpace;
+using mindspore::schema::PrimitiveType_BatchToSpaceND;
 
 namespace mindspore {
 namespace lite {
@@ -66,7 +68,7 @@ OpParameter *PopulateBatchToSpaceParameter(const mindspore::lite::PrimitiveC *pr
   }
   return reinterpret_cast<OpParameter *>(batch_space_param);
 }
-Registry BatchToSpaceParameterRegistry(schema::PrimitiveType_BatchToSpace, PopulateBatchToSpaceParameter);
-Registry BatchToSpaceNDParameterRegistry(schema::PrimitiveType_BatchToSpaceND, PopulateBatchToSpaceParameter);
+REG_POPULATE(PrimitiveType_BatchToSpace, PopulateBatchToSpaceParameter)
+REG_POPULATE(PrimitiveType_BatchToSpaceND, PopulateBatchToSpaceParameter)
 }  // namespace lite
 }  // namespace mindspore

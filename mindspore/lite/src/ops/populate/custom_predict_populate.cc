@@ -17,6 +17,7 @@
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
 #include "nnacl/predict_parameter.h"
+using mindspore::schema::PrimitiveType_CustomPredict;
 
 namespace mindspore {
 namespace lite {
@@ -34,7 +35,6 @@ OpParameter *PopulateCustomPredictParameter(const mindspore::lite::PrimitiveC *p
   param->weight_threshold = prim->GetWeightThreshold();
   return reinterpret_cast<OpParameter *>(param);
 }
-Registry CustomPredictParameterRegistry(schema::PrimitiveType_CustomPredict, PopulateCustomPredictParameter);
-
+REG_POPULATE(PrimitiveType_CustomPredict, PopulateCustomPredictParameter)
 }  // namespace lite
 }  // namespace mindspore

@@ -18,6 +18,7 @@
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
 #include "mindspore/lite/nnacl/fp32/reverse_sequence_fp32.h"
+using mindspore::schema::PrimitiveType_ReverseSequence;
 
 namespace mindspore {
 namespace lite {
@@ -37,7 +38,6 @@ OpParameter *PopulateReverseSequenceParameter(const mindspore::lite::PrimitiveC 
   reverse_sequence_param->batch_axis_ = param->GetBatchAxis();
   return reinterpret_cast<OpParameter *>(reverse_sequence_param);
 }
-Registry ReverseSequenceParameterRegistry(schema::PrimitiveType_ReverseSequence, PopulateReverseSequenceParameter);
-
+REG_POPULATE(PrimitiveType_ReverseSequence, PopulateReverseSequenceParameter)
 }  // namespace lite
 }  // namespace mindspore

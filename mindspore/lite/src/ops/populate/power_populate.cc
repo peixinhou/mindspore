@@ -18,6 +18,7 @@
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
 #include "nnacl/power_parameter.h"
+using mindspore::schema::PrimitiveType_Power;
 
 namespace mindspore {
 namespace lite {
@@ -37,7 +38,6 @@ OpParameter *PopulatePowerParameter(const mindspore::lite::PrimitiveC *primitive
   return reinterpret_cast<OpParameter *>(power_param);
 }
 
-Registry PowerParameterRegistry(schema::PrimitiveType_Power, PopulatePowerParameter);
-
+REG_POPULATE(PrimitiveType_Power, PopulatePowerParameter)
 }  // namespace lite
 }  // namespace mindspore

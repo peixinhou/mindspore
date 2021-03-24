@@ -18,6 +18,7 @@
 #include "src/ops/populate/populate_register.h"
 #include "src/common/common.h"
 #include "nnacl/transpose.h"
+using mindspore::schema::PrimitiveType_Nhwc2Nchw;
 
 namespace mindspore {
 namespace lite {
@@ -38,7 +39,6 @@ OpParameter *PopulateNhwc2NchwParameter(const mindspore::lite::PrimitiveC *primi
   return reinterpret_cast<OpParameter *>(parameter);
 }
 
-Registry Nhwc2NchwParameterRegistry(schema::PrimitiveType_Nhwc2Nchw, PopulateNhwc2NchwParameter);
-
+REG_POPULATE(PrimitiveType_Nhwc2Nchw, PopulateNhwc2NchwParameter)
 }  // namespace lite
 }  // namespace mindspore

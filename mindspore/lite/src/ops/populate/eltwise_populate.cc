@@ -19,6 +19,8 @@
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
 #include "src/ops/populate/arithmetic_populate.h"
+using mindspore::schema::PrimitiveType_Eltwise;
+
 namespace mindspore {
 namespace lite {
 
@@ -46,7 +48,6 @@ OpParameter *PopulateEltwiseParameter(const mindspore::lite::PrimitiveC *primiti
   return reinterpret_cast<OpParameter *>(param);
 }
 
-Registry EltwiseParameterRegistry(schema::PrimitiveType_Eltwise, PopulateEltwiseParameter);
-
+REG_POPULATE(PrimitiveType_Eltwise, PopulateEltwiseParameter)
 }  // namespace lite
 }  // namespace mindspore

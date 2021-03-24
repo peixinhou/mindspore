@@ -18,6 +18,8 @@
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
 #include "src/ops/populate/arithmetic_populate.h"
+using mindspore::schema::PrimitiveType_Div;
+
 namespace mindspore {
 namespace lite {
 
@@ -31,7 +33,6 @@ OpParameter *PopulateDivParameter(const mindspore::lite::PrimitiveC *primitive) 
   return reinterpret_cast<OpParameter *>(param);
 }
 
-Registry DivParameterRegistry(schema::PrimitiveType_Div, PopulateDivParameter);
-
+REG_POPULATE(PrimitiveType_Div, PopulateDivParameter)
 }  // namespace lite
 }  // namespace mindspore

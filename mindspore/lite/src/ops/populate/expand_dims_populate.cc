@@ -16,6 +16,7 @@
 
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
+using mindspore::schema::PrimitiveType_ExpandDims;
 
 namespace mindspore {
 namespace lite {
@@ -31,7 +32,6 @@ OpParameter *PopulateExpandDimsParameter(const mindspore::lite::PrimitiveC *prim
   return reinterpret_cast<OpParameter *>(expand_dims_param);
 }
 
-Registry ExpandDimsParameterRegistry(schema::PrimitiveType_ExpandDims, PopulateExpandDimsParameter);
-
+REG_POPULATE(PrimitiveType_ExpandDims, PopulateExpandDimsParameter)
 }  // namespace lite
 }  // namespace mindspore

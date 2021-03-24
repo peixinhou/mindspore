@@ -16,6 +16,7 @@
 
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
+using mindspore::schema::PrimitiveType_Flatten;
 
 namespace mindspore {
 namespace lite {
@@ -30,7 +31,6 @@ OpParameter *PopulateFlattenParameter(const mindspore::lite::PrimitiveC *primiti
   return reinterpret_cast<OpParameter *>(flatten_param);
 }
 
-Registry FlattenParameterRegistry(schema::PrimitiveType_Flatten, PopulateFlattenParameter);
-
+REG_POPULATE(PrimitiveType_Flatten, PopulateFlattenParameter)
 }  // namespace lite
 }  // namespace mindspore

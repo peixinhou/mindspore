@@ -18,7 +18,7 @@
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
 #include "nnacl/fp32_grad/activation_grad.h"
-
+using mindspore::schema::PrimitiveType_ActivationGrad;
 namespace mindspore {
 namespace lite {
 OpParameter *PopulateActivationGradParameter(const mindspore::lite::PrimitiveC *primitive) {
@@ -36,6 +36,6 @@ OpParameter *PopulateActivationGradParameter(const mindspore::lite::PrimitiveC *
   act_param->alpha_ = activation->GetAlpha();
   return reinterpret_cast<OpParameter *>(act_param);
 }
-Registry ActivationGradParameterRegistry(schema::PrimitiveType_ActivationGrad, PopulateActivationGradParameter);
+REG_POPULATE(PrimitiveType_ActivationGrad, PopulateActivationGradParameter)
 }  // namespace lite
 }  // namespace mindspore

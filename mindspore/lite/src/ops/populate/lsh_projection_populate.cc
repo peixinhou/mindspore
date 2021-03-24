@@ -17,6 +17,7 @@
 #include "nnacl/lsh_projection_parameter.h"
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
+using mindspore::schema::PrimitiveType_LshProjection;
 
 namespace mindspore {
 namespace lite {
@@ -34,7 +35,6 @@ OpParameter *PopulateLshProjectionParameter(const mindspore::lite::PrimitiveC *p
   lsh_project_param->lsh_type_ = param->GetLshType();
   return reinterpret_cast<OpParameter *>(lsh_project_param);
 }
-Registry LshProjectionParameterRegistry(schema::PrimitiveType_LshProjection, PopulateLshProjectionParameter);
-
+REG_POPULATE(PrimitiveType_LshProjection, PopulateLshProjectionParameter)
 }  // namespace lite
 }  // namespace mindspore

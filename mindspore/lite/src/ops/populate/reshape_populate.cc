@@ -20,6 +20,7 @@
 #include "src/tensor.h"
 #include "nnacl/reshape_parameter.h"
 #include "src/ops/reshape.h"
+using mindspore::schema::PrimitiveType_Reshape;
 
 namespace mindspore {
 namespace lite {
@@ -42,7 +43,6 @@ OpParameter *PopulateReshapeParameter(const mindspore::lite::PrimitiveC *primiti
   return reinterpret_cast<OpParameter *>(reshape_param);
 }
 
-Registry ReshapeParameterRegistry(schema::PrimitiveType_Reshape, PopulateReshapeParameter);
-
+REG_POPULATE(PrimitiveType_Reshape, PopulateReshapeParameter)
 }  // namespace lite
 }  // namespace mindspore

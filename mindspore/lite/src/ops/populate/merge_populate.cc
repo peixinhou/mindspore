@@ -16,6 +16,7 @@
 
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
+using mindspore::schema::PrimitiveType_Merge;
 
 namespace mindspore {
 namespace lite {
@@ -29,6 +30,6 @@ OpParameter *PopulateMergeParameter(const mindspore::lite::PrimitiveC *primitive
   merge_parameter->type_ = primitive->Type();
   return reinterpret_cast<OpParameter *>(merge_parameter);
 }
-Registry MergeParameterRegistry(schema::PrimitiveType_Merge, PopulateMergeParameter);
+REG_POPULATE(PrimitiveType_Merge, PopulateMergeParameter)
 }  // namespace lite
 }  // namespace mindspore

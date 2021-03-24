@@ -20,7 +20,7 @@
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
 #include "nnacl/strided_slice_parameter.h"
-
+using mindspore::schema::PrimitiveType_StridedSlice;
 namespace mindspore {
 namespace lite {
 OpParameter *PopulateStridedSliceParameter(const mindspore::lite::PrimitiveC *primitive) {
@@ -66,7 +66,6 @@ OpParameter *PopulateStridedSliceParameter(const mindspore::lite::PrimitiveC *pr
   return reinterpret_cast<OpParameter *>(strided_slice_param);
 }
 
-Registry StridedSliceParameterRegistry(schema::PrimitiveType_StridedSlice, PopulateStridedSliceParameter);
-
+REG_POPULATE(PrimitiveType_StridedSlice, PopulateStridedSliceParameter)
 }  // namespace lite
 }  // namespace mindspore

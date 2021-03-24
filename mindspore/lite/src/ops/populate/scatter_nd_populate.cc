@@ -17,6 +17,7 @@
 #include "src/ops/scatter_nd.h"
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
+using mindspore::schema::PrimitiveType_ScatterND;
 
 namespace mindspore {
 namespace lite {
@@ -30,7 +31,6 @@ OpParameter *PopulateScatterNDParameter(const mindspore::lite::PrimitiveC *primi
   scatter_nd_param->type_ = primitive->Type();
   return reinterpret_cast<OpParameter *>(scatter_nd_param);
 }
-Registry ScatterNDParameterRegistry(schema::PrimitiveType_ScatterND, PopulateScatterNDParameter);
-
+REG_POPULATE(PrimitiveType_ScatterND, PopulateScatterNDParameter)
 }  // namespace lite
 }  // namespace mindspore

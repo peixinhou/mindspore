@@ -17,6 +17,7 @@
 #include "src/common/string_util.h"
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
+using mindspore::schema::PrimitiveType_HashtableLookup;
 
 namespace mindspore {
 namespace lite {
@@ -31,7 +32,6 @@ OpParameter *PopulateHashtableLookupParameter(const mindspore::lite::PrimitiveC 
   param->type_ = primitive->Type();
   return param;
 }
-Registry HashtableLookupParameterRegistry(schema::PrimitiveType_HashtableLookup, PopulateHashtableLookupParameter);
-
+REG_POPULATE(PrimitiveType_HashtableLookup, PopulateHashtableLookupParameter)
 }  // namespace lite
 }  // namespace mindspore

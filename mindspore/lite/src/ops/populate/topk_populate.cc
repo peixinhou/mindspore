@@ -18,6 +18,7 @@
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
 #include "nnacl/fp32/topk_fp32.h"
+using mindspore::schema::PrimitiveType_TopK;
 
 namespace mindspore {
 namespace lite {
@@ -35,7 +36,6 @@ OpParameter *PopulateTopKParameter(const mindspore::lite::PrimitiveC *primitive)
   topk_param->sorted_ = param->GetSorted();
   return reinterpret_cast<OpParameter *>(topk_param);
 }
-Registry TopKParameterRegistry(schema::PrimitiveType_TopK, PopulateTopKParameter);
-
+REG_POPULATE(PrimitiveType_TopK, PopulateTopKParameter)
 }  // namespace lite
 }  // namespace mindspore

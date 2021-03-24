@@ -17,6 +17,7 @@
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
 #include "nnacl/arithmetic.h"
+using mindspore::schema::PrimitiveType_BiasGrad;
 
 namespace mindspore {
 namespace lite {
@@ -31,7 +32,6 @@ OpParameter *PopulateBiasGradParameter(const mindspore::lite::PrimitiveC *primit
 
   return reinterpret_cast<OpParameter *>(arithmetic_param);
 }
-Registry PopulateBiasGradParameterParameterRegistry(schema::PrimitiveType_BiasGrad, PopulateBiasGradParameter);
-
+REG_POPULATE(PrimitiveType_BiasGrad, PopulateBiasGradParameter)
 }  // namespace lite
 }  // namespace mindspore

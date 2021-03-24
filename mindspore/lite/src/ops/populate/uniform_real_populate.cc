@@ -18,6 +18,7 @@
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
 #include "nnacl/random_parameter.h"
+using mindspore::schema::PrimitiveType_UniformReal;
 
 namespace mindspore {
 namespace lite {
@@ -34,6 +35,6 @@ OpParameter *PopulateUniformRealParameter(const mindspore::lite::PrimitiveC *pri
   random_parameter->seed2_ = param->GetSeed2();
   return reinterpret_cast<OpParameter *>(random_parameter);
 }
-Registry UniformRealParameterRegistry(schema::PrimitiveType_UniformReal, PopulateUniformRealParameter);
+REG_POPULATE(PrimitiveType_UniformReal, PopulateUniformRealParameter)
 }  // namespace lite
 }  // namespace mindspore

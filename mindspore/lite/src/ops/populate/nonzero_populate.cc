@@ -15,6 +15,7 @@
  */
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
+using mindspore::schema::PrimitiveType_NonZero;
 
 namespace mindspore {
 namespace lite {
@@ -29,6 +30,6 @@ OpParameter *PopulateNonZeroParameter(const mindspore::lite::PrimitiveC *primiti
   nonzero_parameter->type_ = primitive->Type();
   return nonzero_parameter;
 }
-Registry NonZeroParameterRegistry(schema::PrimitiveType_NonZero, PopulateNonZeroParameter);
+REG_POPULATE(PrimitiveType_NonZero, PopulateNonZeroParameter)
 }  // namespace lite
 }  // namespace mindspore

@@ -18,6 +18,7 @@
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
 #include "nnacl/fp32/activation_fp32.h"
+using mindspore::schema::PrimitiveType_Activation;
 
 namespace mindspore {
 namespace lite {
@@ -37,6 +38,6 @@ OpParameter *PopulateActivationParameter(const mindspore::lite::PrimitiveC *prim
   act_param->max_val_ = activation->GetMaxVal();
   return reinterpret_cast<OpParameter *>(act_param);
 }
-Registry ActivationParameterRegistry(schema::PrimitiveType_Activation, PopulateActivationParameter);
+REG_POPULATE(PrimitiveType_Activation, PopulateActivationParameter)
 }  // namespace lite
 }  // namespace mindspore

@@ -17,7 +17,7 @@
 #include "src/ops/partial.h"
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
-
+using mindspore::schema::PrimitiveType_Partial;
 namespace mindspore {
 namespace lite {
 typedef struct PartialParameter {
@@ -39,6 +39,6 @@ OpParameter *PopulatePartialParameter(const mindspore::lite::PrimitiveC *primiti
 
   return reinterpret_cast<OpParameter *>(partial_parameter);
 }
-Registry PartialParameterRegistry(schema::PrimitiveType_Partial, PopulatePartialParameter);
+REG_POPULATE(PrimitiveType_Partial, PopulatePartialParameter)
 }  // namespace lite
 }  // namespace mindspore

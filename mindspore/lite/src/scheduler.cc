@@ -28,6 +28,7 @@
 #include "src/kernel_registry.h"
 #include "src/sub_graph_kernel.h"
 #include "src/dequant.h"
+#include "src/ops/populate/populate_register.h"
 #if GPU_OPENCL
 #include "src/runtime/kernel/opencl/opencl_subgraph.h"
 #include "src/runtime/gpu/opencl/opencl_runtime.h"
@@ -47,6 +48,10 @@ using kernel::KERNEL_ARCH::kNPU;
 constexpr int kMainSubGraphIndex = 0;
 
 int Scheduler::Schedule(std::vector<kernel::LiteKernel *> *dst_kernels) {
+#ifdef MS_COMPILE_IOS
+  PopulateRegistry::GetInstance()->RegisterAllOps();
+  KernelRegistry::GetInstance()->RegisterAllKernels();
+#endif
   if (src_model_ == nullptr) {
     MS_LOG(ERROR) << "Input model is nullptr";
     return RET_PARAM_INVALID;

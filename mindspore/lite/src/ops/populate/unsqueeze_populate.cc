@@ -20,6 +20,7 @@
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
 #include "mindspore/lite/nnacl/unsqueeze_parameter.h"
+using mindspore::schema::PrimitiveType_Unsqueeze;
 
 namespace mindspore {
 namespace lite {
@@ -39,7 +40,6 @@ OpParameter *PopulateUnsqueezeParameter(const mindspore::lite::PrimitiveC *primi
   }
   return reinterpret_cast<OpParameter *>(unsqueeze_param);
 }
-Registry UnsqueezeParameterRegistry(schema::PrimitiveType_Unsqueeze, PopulateUnsqueezeParameter);
-
+REG_POPULATE(PrimitiveType_Unsqueeze, PopulateUnsqueezeParameter)
 }  // namespace lite
 }  // namespace mindspore

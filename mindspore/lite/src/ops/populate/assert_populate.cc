@@ -17,6 +17,7 @@
 #include "src/ops/assert_op.h"
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
+using mindspore::schema::PrimitiveType_Assert;
 
 namespace mindspore {
 namespace lite {
@@ -31,6 +32,6 @@ OpParameter *PopulateAssertParameter(const mindspore::lite::PrimitiveC *primitiv
 
   return reinterpret_cast<OpParameter *>(assert_parameter);
 }
-Registry AssertParameterRegistry(schema::PrimitiveType_Assert, PopulateAssertParameter);
+REG_POPULATE(PrimitiveType_Assert, PopulateAssertParameter)
 }  // namespace lite
 }  // namespace mindspore

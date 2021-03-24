@@ -19,6 +19,7 @@
 #include "nnacl/conv_parameter.h"
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
+using mindspore::schema::PrimitiveType_Adder;
 
 namespace mindspore {
 namespace lite {
@@ -62,6 +63,6 @@ OpParameter *PopulateAdderParameter(const mindspore::lite::PrimitiveC *primitive
   }
   return reinterpret_cast<OpParameter *>(conv_param);
 }
-Registry AdderParameterRegistry(schema::PrimitiveType_Adder, PopulateAdderParameter);
+REG_POPULATE(PrimitiveType_Adder, PopulateAdderParameter)
 }  // namespace lite
 }  // namespace mindspore

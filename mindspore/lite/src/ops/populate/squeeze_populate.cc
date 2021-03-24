@@ -16,6 +16,7 @@
 
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
+using mindspore::schema::PrimitiveType_Squeeze;
 
 namespace mindspore {
 namespace lite {
@@ -29,6 +30,6 @@ OpParameter *PopulateSqueezeParameter(const mindspore::lite::PrimitiveC *primiti
   squeeze_param->type_ = primitive->Type();
   return reinterpret_cast<OpParameter *>(squeeze_param);
 }
-Registry SqueezeParameterRegistry(schema::PrimitiveType_Squeeze, PopulateSqueezeParameter);
+REG_POPULATE(PrimitiveType_Squeeze, PopulateSqueezeParameter)
 }  // namespace lite
 }  // namespace mindspore

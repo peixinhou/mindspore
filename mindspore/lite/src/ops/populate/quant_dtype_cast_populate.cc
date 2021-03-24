@@ -18,6 +18,7 @@
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
 #include "nnacl/int8/quant_dtype_cast_int8.h"
+using mindspore::schema::PrimitiveType_QuantDTypeCast;
 
 namespace mindspore {
 namespace lite {
@@ -37,7 +38,6 @@ OpParameter *PopulateQuantDTypeCastParameter(const mindspore::lite::PrimitiveC *
   parameter->dstT = quant_dtype_cast_param->GetDstT();
   return reinterpret_cast<OpParameter *>(parameter);
 }
-Registry QuantDTypeCastParameterRegistry(schema::PrimitiveType_QuantDTypeCast, PopulateQuantDTypeCastParameter);
-
+REG_POPULATE(PrimitiveType_QuantDTypeCast, PopulateQuantDTypeCastParameter)
 }  // namespace lite
 }  // namespace mindspore

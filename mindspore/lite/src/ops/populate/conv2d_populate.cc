@@ -19,6 +19,7 @@
 #include "nnacl/conv_parameter.h"
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
+using mindspore::schema::PrimitiveType_Conv2D;
 
 namespace mindspore {
 namespace lite {
@@ -74,6 +75,6 @@ OpParameter *PopulateConvParameter(const mindspore::lite::PrimitiveC *primitive)
   }
   return reinterpret_cast<OpParameter *>(conv_param);
 }
-Registry Conv2DParameterRegistry(schema::PrimitiveType_Conv2D, PopulateConvParameter);
+REG_POPULATE(PrimitiveType_Conv2D, PopulateConvParameter)
 }  // namespace lite
 }  // namespace mindspore

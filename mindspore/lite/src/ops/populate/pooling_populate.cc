@@ -18,6 +18,7 @@
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
 #include "nnacl/pooling_parameter.h"
+using mindspore::schema::PrimitiveType_Pooling;
 
 namespace mindspore {
 namespace lite {
@@ -94,7 +95,6 @@ OpParameter *PopulatePoolingParameter(const mindspore::lite::PrimitiveC *primiti
   return reinterpret_cast<OpParameter *>(pooling_param);
 }
 
-Registry PoolingParameterRegistry(schema::PrimitiveType_Pooling, PopulatePoolingParameter);
-
+REG_POPULATE(PrimitiveType_Pooling, PopulatePoolingParameter)
 }  // namespace lite
 }  // namespace mindspore

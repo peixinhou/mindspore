@@ -20,6 +20,7 @@
 #include "src/ops/primitive_c.h"
 #include "src/ops/populate/populate_register.h"
 #include "nnacl/concat_parameter.h"
+using mindspore::schema::PrimitiveType_Concat;
 
 namespace mindspore {
 namespace lite {
@@ -36,6 +37,6 @@ OpParameter *PopulateConcatParameter(const mindspore::lite::PrimitiveC *primitiv
   return reinterpret_cast<OpParameter *>(concat_param);
 }
 
-Registry ConcatParameterRegistry(schema::PrimitiveType_Concat, PopulateConcatParameter);
+REG_POPULATE(PrimitiveType_Concat, PopulateConcatParameter)
 }  // namespace lite
 }  // namespace mindspore
