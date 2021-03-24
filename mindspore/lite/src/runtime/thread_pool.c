@@ -32,6 +32,12 @@
 #include <sched.h>
 #endif
 
+#ifdef MS_COMPILE_IOS
+#include <sys/types.h>
+#include <sys/sysctl.h>
+#include <mach/machine.h>
+#endif  // MS_COMPILE_IOS
+
 #ifdef THREAD_POOL_DEBUG
 #include <stdio.h>
 #define LOG_INFO(content, args...) \
