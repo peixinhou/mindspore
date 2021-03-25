@@ -27,7 +27,8 @@
 
 namespace mindspore {
 MSTensor::Impl::Impl(const std::string &name, enum DataType type, const std::vector<int64_t> &shape, const void *data,
-                     size_t data_len) {
+                     size_t data_len)
+    : tensor_name_(name) {
   std::vector<int32_t> truncated_shape = TruncateShape(shape, static_cast<enum TypeId>(type), data_len, true);
   if (truncated_shape.empty() && !(shape.empty())) {
     lite_tensor_ = nullptr;
