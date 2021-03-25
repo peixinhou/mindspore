@@ -23,6 +23,10 @@ using mindspore::schema::PrimitiveType_Conv2D;
 namespace mindspore::kernel {
 int ConvolutionNPUKernel::IsSupport(const std::vector<lite::Tensor *> &inputs,
                                     const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter) {
+  if (conv_param_->stride_h_ > inputs[0]->Height() || conv_param_->stride_w_ > inputs[0]->Width()) {
+    MS_LOG(ERROR) << "Npu convolution does not support stride greater than input size.";
+    return RET_ERROR;
+  }
   return RET_OK;
 }
 
