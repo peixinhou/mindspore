@@ -42,6 +42,10 @@ int MatMulNPUKernel::SetNPUInputs(const std::vector<lite::Tensor *> &inputs, con
   if (npu_inputs.size() == 3) {
     matmul_parameter_->has_bias_ = true;
     add_op_ = new (std::nothrow) hiai::op::Add(name_ + "_add");
+    if (add_op_ == nullptr) {
+      MS_LOG(ERROR) << "new add op failed.";
+      return RET_ERROR;
+    }
     add_op_->set_input_x1(*op_);
     auto bias_shape = inputs[2]->shape();
     auto bias_tensor = std::make_shared<ge::Tensor>();

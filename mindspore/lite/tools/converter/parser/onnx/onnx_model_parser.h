@@ -79,7 +79,6 @@ class OnnxModelParser : public ModelParser {
   STATUS SetTensorQuantParam(const std::string &tensor_name, std::vector<QuantParamT> *quant_params);
   STATUS SetTensorQuantParamFromNode(const std::string &tensor_name, std::vector<QuantParamT> *quant_params);
   STATUS CopyTensorQuantParam(const std::string &tensor_name, QuantParamT *quant_param, bool scale_or_not);
-  bool IsSpecialOnnxNode(const onnx::NodeProto &onnx_node);
   STATUS ConvertLoopOnnxNode(const onnx::NodeProto &onnx_node,
                              std::unordered_map<std::string, AnfNodePtr> *anf_nodes_map,
                              const std::string &root_node_name);

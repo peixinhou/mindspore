@@ -43,8 +43,8 @@ constexpr uint32_t kDoubleNum = 2;
 constexpr uint32_t kTripleNum = 3;
 constexpr uint32_t kQuadrupleNum = 4;
 
-const std::set<int> kSupportDataType = {kNumberTypeBool,  kNumberTypeUInt8,   kNumberTypeInt8,
-                                        kNumberTypeInt32, kNumberTypeFloat32, kNumberTypeFloat16};
+const std::set<int> kSupportDataType = {kNumberTypeBool,  kNumberTypeUInt8,   kNumberTypeInt8,   kNumberTypeInt32,
+                                        kNumberTypeInt64, kNumberTypeFloat32, kNumberTypeFloat16};
 
 #ifdef PRIMITIVE_WRITEABLE
 using TensorPtr = std::shared_ptr<mindspore::tensor::Tensor>;

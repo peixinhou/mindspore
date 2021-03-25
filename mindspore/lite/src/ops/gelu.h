@@ -32,6 +32,8 @@ class GeLU : public PrimitiveC {
   MS_DECLARE_PARENT(GeLU, PrimitiveC);
   explicit GeLU(schema::PrimitiveT *primitive) : PrimitiveC(primitive) {}
   int UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &inputs) override;
+#else
+  int UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::FlatBufferBuilder *fbb) override;
 #endif
 };
 }  // namespace lite

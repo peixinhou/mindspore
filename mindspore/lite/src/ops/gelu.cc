@@ -48,6 +48,24 @@ int GeLU::UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &input
   }
   return RET_OK;
 }
+#else
+int GeLU::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::FlatBufferBuilder *fbb) {
+  MS_ASSERT(nullptr != primitive);
+  MS_ASSERT(nullptr != fbb);
+  auto attr = primitive->value_as_GeLU();
+  if (attr == nullptr) {
+    MS_LOG(ERROR) << "value_as_Gather return nullptr";
+    return RET_ERROR;
+  }
+
+  auto val_offset = schema::CreateGeLU(*fbb);
+  auto prim_offset = schema::CreatePrimitive(*fbb, schema::PrimitiveType_GeLU, val_offset.o);
+  fbb->Finish(prim_offset);
+  return RET_OK;
+}
+
+PrimitiveC *GeLUCreator(const schema::Primitive *primitive) { return PrimitiveC::NewPrimitiveC<GeLU>(primitive); }
+Registry GeLURegistry(schema::PrimitiveType_GeLU, GeLUCreator);
 #endif
 }  // namespace lite
 }  // namespace mindspore

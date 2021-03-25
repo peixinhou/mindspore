@@ -35,7 +35,6 @@ class OnnxInputAdjustOpPass : public Pass {
                                   const ParamValueLitePtr &param_value);
   STATUS StridedSliceAttrToInput(const FuncGraphPtr &func_graph, const CNodePtr &cnode, const std::string &attr_name);
   STATUS ReplaceInt64ParameterNode(const FuncGraphPtr &func_graph, const ParameterPtr &param_node);
-  STATUS AdjustPower(const CNodePtr &cnode);
   STATUS AdjustStridedSlice(const FuncGraphPtr &func_graph, const CNodePtr &cnode);
   STATUS AdjustConvOrDeConv(const CNodePtr &cnode);
   STATUS AdjustTile(const CNodePtr &cnode);

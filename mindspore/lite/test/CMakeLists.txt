@@ -208,7 +208,7 @@ if(ENABLE_CONVERTER)
             ${LITE_DIR}/tools/optimizer/fusion/conv_bn_fusion.cc
             ${LITE_DIR}/tools/optimizer/fusion/constant_folding_fusion.cc
             ${LITE_DIR}/tools/optimizer/fusion/quant_dtype_cast_fusion.cc
-            ${LITE_DIR}/tools/optimizer/fusion/layer_norm_fusion.cc
+            ${LITE_DIR}/tools/optimizer/fusion/norm_fusion.cc
             ${LITE_DIR}/tools/optimizer/fusion/batchmatmul_fusion.cc
             ${LITE_DIR}/tools/optimizer/fusion/sigmoid_mul_fusion.cc
             ${LITE_DIR}/tools/optimizer/fusion/conv_conv_fusion.cc
@@ -217,6 +217,9 @@ if(ENABLE_CONVERTER)
             ${LITE_DIR}/tools/optimizer/fusion/tf_lstm_cell_fusion.cc
             ${LITE_DIR}/tools/optimizer/fusion/bidirection_tf_gru_cell_fusion.cc
             ${LITE_DIR}/tools/optimizer/fusion/matmul_add_fusion.cc
+            ${LITE_DIR}/tools/optimizer/fusion/gelu_fusion.cc
+            ${LITE_DIR}/tools/optimizer/fusion/tf_gelu_fusion.cc
+            ${LITE_DIR}/tools/optimizer/fusion/onnx_gelu_fusion.cc
             ${LITE_DIR}/tools/optimizer/graph/weight_format_transform_pass.cc
             ${LITE_DIR}/tools/optimizer/graph/weight_format_hardcode_pass.cc
             ${LITE_DIR}/tools/optimizer/graph/conv1d_weight_expanding_pass.cc

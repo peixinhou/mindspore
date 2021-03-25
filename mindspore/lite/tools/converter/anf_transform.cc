@@ -25,7 +25,7 @@
 #include "tools/optimizer/fusion/conv_bn_fusion.h"
 #include "tools/optimizer/fusion/conv_tuplegetitem_fusion.h"
 #include "tools/optimizer/fusion/constant_folding_fusion.h"
-#include "tools/optimizer/fusion/layer_norm_fusion.h"
+#include "tools/optimizer/fusion/norm_fusion.h"
 #include "tools/optimizer/fusion/batchmatmul_fusion.h"
 #include "tools/optimizer/fusion/sigmoid_mul_fusion.h"
 #include "tools/optimizer/fusion/conv_conv_fusion.h"
@@ -33,6 +33,8 @@
 #include "tools/optimizer/fusion/tf_lstm_cell_fusion.h"
 #include "tools/optimizer/fusion/bidirection_tf_gru_cell_fusion.h"
 #include "tools/optimizer/fusion/matmul_add_fusion.h"
+#include "tools/optimizer/fusion/tf_gelu_fusion.h"
+#include "tools/optimizer/fusion/onnx_gelu_fusion.h"
 #include "tools/optimizer/graph/mindir_adjust_pass.h"
 #include "tools/optimizer/graph/mindir_inputs_adjust_pass.h"
 #include "tools/optimizer/graph/redundant_op_remove_pass.h"
@@ -76,7 +78,8 @@ int AnfTransform::AddFusionPass(const std::shared_ptr<opt::GraphOptimizer> &opti
     auto conv_scale_pass = std::make_shared<opt::ConvScaleFusion>();
     conv_scale_pass->SetFmkType(config->fmk);
     fusion_pm->AddPass(conv_scale_pass);
-    fusion_pm->AddPass(std::make_shared<opt::LayerNormFusion>());
+    fusion_pm->AddPass(std::make_shared<opt::TfNormFusion>());
+    fusion_pm->AddPass(std::make_shared<opt::OnnxLayerNormFusion>());
     fusion_pm->AddPass(std::make_shared<opt::BatchMatMulFusion>());
     fusion_pm->AddPass(std::make_shared<opt::SigmoidMulFusion>());
     fusion_pm->AddPass(std::make_shared<opt::ConvActivationFusion>());
@@ -85,6 +88,8 @@ int AnfTransform::AddFusionPass(const std::shared_ptr<opt::GraphOptimizer> &opti
     fusion_pm->AddPass(std::make_shared<opt::TfliteLstmCellFusion>());
     fusion_pm->AddPass(std::make_shared<opt::TfLstmCellFusion>());
     fusion_pm->AddPass(std::make_shared<opt::BiDirectionTfGruCellFusion>());
+    fusion_pm->AddPass(std::make_shared<opt::TfGeLUFusion>());
+    fusion_pm->AddPass(std::make_shared<opt::OnnxGeLUFusion>());
   }
   if (config->fmk == lite::converter::FmkType_MS) {
     auto remove_unused_cast_pass = std::make_shared<opt::RemoveUnusedCastOpPass>();
@@ -170,6 +175,10 @@ int AnfTransform::AddConstFoldPass(const std::shared_ptr<opt::GraphOptimizer> &o
   auto update_conv2d_param_pass = std::make_shared<opt::UpdateConv2DParamPass>();
   update_conv2d_param_pass->SetFmkType(config->fmk);
   const_fold_pm->AddPass(update_conv2d_param_pass);
+  auto weight_format_hardcode_pass = std::make_shared<opt::WeightFormatHardCodePass>();
+  weight_format_hardcode_pass->SetFmkType(config->fmk);
+  weight_format_hardcode_pass->SetQuantType(config->quantType);
+  const_fold_pm->AddPass(weight_format_hardcode_pass);
   auto infershape_pass = std::make_shared<opt::InferShapePass>();
   infershape_pass->SetFmkType(config->fmk);
   const_fold_pm->AddPass(infershape_pass);
