@@ -96,6 +96,7 @@ bool GroupDepthwiseOpConvertPass::Run(const FuncGraphPtr &graph) {
 
       depthwise_primitivec->primitiveT()->value.type = schema::PrimitiveType_Conv2D;
       depthwise_primitivec->primitiveT()->value.value = conv_attr.release();
+      delete attr;
 
       MS_ASSERT(depthwise_cnode->inputs().size() > kConvWeightIndex);
       auto weight_node = depthwise_cnode->input(kConvWeightIndex);
