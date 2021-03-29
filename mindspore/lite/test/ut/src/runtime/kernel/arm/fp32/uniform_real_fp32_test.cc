@@ -36,7 +36,7 @@ TEST_F(TestUniformRealFp32, UniformReal) {
   parameter.op_parameter_.type_ = schema::PrimitiveType_UniformReal;
   parameter.seed_ = 42;
   parameter.seed2_ = 959;
-  kernel::KernelKey desc = {kernel::KERNEL_ARCH::kCPU, kNumberTypeFloat32, schema::PrimitiveType_UniformReal};
+  kernel::KernelKey desc = {kernel::KERNEL_ARCH::kCPU, kNumberTypeInt32, schema::PrimitiveType_UniformReal};
 
   auto creator = lite::KernelRegistry::GetInstance()->GetCreator(desc);
   EXPECT_NE(creator, nullptr);
@@ -48,6 +48,17 @@ TEST_F(TestUniformRealFp32, UniformReal) {
 
   auto ret = kernel->Run();
   EXPECT_EQ(0, ret);
+  EXPECT_NEAR(0.138693, output_data0[0], 0.000001);
+  EXPECT_NEAR(0.511552, output_data0[1], 0.000001);
+  EXPECT_NEAR(0.27194, output_data0[2], 0.000001);
+  EXPECT_NEAR(0.336527, output_data0[3], 0.000001);
+  EXPECT_NEAR(0.896684, output_data0[4], 0.000001);
+  EXPECT_NEAR(0.476402, output_data0[5], 0.000001);
+  EXPECT_NEAR(0.155924, output_data0[6], 0.000001);
+  EXPECT_NEAR(0.817732, output_data0[7], 0.000001);
+  EXPECT_NEAR(0.619868, output_data0[8], 0.000001);
+  EXPECT_NEAR(0.274392, output_data0[9], 0.000001);
+
   for (int i = 0; i < 10; ++i) {
     std::cout << output_data0[i] << " ";
   }
