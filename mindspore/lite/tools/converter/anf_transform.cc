@@ -35,6 +35,8 @@
 #include "tools/optimizer/fusion/matmul_add_fusion.h"
 #include "tools/optimizer/fusion/tf_gelu_fusion.h"
 #include "tools/optimizer/fusion/onnx_gelu_fusion.h"
+#include "tools/optimizer/fusion/squeeze_fusion.h"
+#include "tools/optimizer/graph/conv1d_inout_adjust_pass.h"
 #include "tools/optimizer/graph/mindir_adjust_pass.h"
 #include "tools/optimizer/graph/mindir_inputs_adjust_pass.h"
 #include "tools/optimizer/graph/redundant_op_remove_pass.h"
@@ -199,6 +201,15 @@ int AnfTransform::RunAdjustPass(const FuncGraphPtr &old_graph, const converter::
   }
 }
 
+int AnfTransform::AddConv1DAdjustPass(const std::shared_ptr<opt::GraphOptimizer> &optimizer,
+                                      const converter::Flags *config) {
+  auto conv1d_pm = std::make_shared<opt::PassManager>("conv1d adjust pass manager", true);
+  conv1d_pm->AddPass(std::make_shared<opt::Conv1DInOutAdjustPass>());
+  conv1d_pm->AddPass(std::make_shared<opt::SqueezeFusion>());
+  optimizer->AddPassManager(conv1d_pm);
+  return RET_OK;
+}
+
 int AnfTransform::RunMindirAdjustPass(const FuncGraphPtr &old_graph, const converter::Flags *config) {
   auto mindir_adjust_pass = std::make_shared<opt::MindirAdjustPass>();
   mindir_adjust_pass->SetFmkType(config->fmk);
@@ -321,6 +332,12 @@ FuncGraphPtr AnfTransform::TransformSingleFuncGraph(const FuncGraphPtr &old_grap
   status = AddGraphPass(optimizer, config);
   if (status != RET_OK) {
     MS_LOG(ERROR) << "Add graph pass failed.";
+    return nullptr;
+  }
+
+  status = AddConv1DAdjustPass(optimizer, config);
+  if (status != RET_OK) {
+    MS_LOG(ERROR) << "Add conv1d adjust pass failed.";
     return nullptr;
   }
 

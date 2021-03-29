@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#ifndef MINDSPORE_LITE_TOOLS_OPTIMIZER_GRAPH_ONNX_PAD_ADJUST_PASS_H_
-#define MINDSPORE_LITE_TOOLS_OPTIMIZER_GRAPH_ONNX_PAD_ADJUST_PASS_H_
+#ifndef MINDSPORE_LITE_TOOLS_OPTIMIZER_GRAPH_CONV1D_INOUT_ADJUST_PASS_H_
+#define MINDSPORE_LITE_TOOLS_OPTIMIZER_GRAPH_CONV1D_INOUT_ADJUST_PASS_H_
 #include <string>
 #include <vector>
 #include "backend/optimizer/common/pass.h"
@@ -23,19 +23,19 @@
 #include "tools/converter/converter_flags.h"
 
 namespace mindspore::opt {
-class OnnxPadAdjustPass : public Pass {
+class Conv1DInOutAdjustPass : public Pass {
  public:
-  OnnxPadAdjustPass() : Pass("onnx_pad_adjust_pass") {}
-  ~OnnxPadAdjustPass() override = default;
+  Conv1DInOutAdjustPass() : Pass("conv1d_inout_adjust_pass") {}
+  ~Conv1DInOutAdjustPass() override = default;
 
   bool Run(const FuncGraphPtr &func_graph) override;
 
  private:
   ValueNodePtr CreateNewValueNode(void *attr, const schema::PrimitiveType &op_type);
-  ParameterPtr CreateNewParameter(const FuncGraphPtr &func_graph, const std::vector<int> &data);
-  CNodePtr NewReshapeOpNode(const FuncGraphPtr &func_graph, const AnfNodePtr input_node, const std::vector<int> &shape);
-  CNodePtr NewTransposeOpNode(const FuncGraphPtr &func_graph, const AnfNodePtr input_node, std::vector<int> perm);
+  CNodePtr NewUnsqueezeOpNode(const FuncGraphPtr &func_graph, const AnfNodePtr input_node,
+                              const schema::Conv2DT *conv2d_attr);
+  CNodePtr NewSqueezeOpNode(const FuncGraphPtr &func_graph, const AnfNodePtr input_node, schema::Conv2DT *conv2d_attr);
   bool Process(const FuncGraphPtr &func_graph);
 };
 }  // namespace mindspore::opt
-#endif  // MINDSPORE_LITE_TOOLS_OPTIMIZER_GRAPH_ONNX_PAD_ADJUST_PASS_H_
+#endif  // MINDSPORE_LITE_TOOLS_OPTIMIZER_GRAPH_CONV1D_INOUT_ADJUST_PASS_H_

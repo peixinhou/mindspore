@@ -536,6 +536,14 @@ bool IsQuantNode(const BaseRef &n) {
   return false;
 }
 
+bool IsSqueezeNode(const BaseRef &n) {
+  if (utils::isa<CNodePtr>(n) || utils::isa<ValueNodePtr>(n)) {
+    auto type = opt::GetCNodeType(n);
+    return type == schema::PrimitiveType_Squeeze || type == schema::PrimitiveType_Unsqueeze;
+  }
+  return false;
+}
+
 bool CheckIsAllInputsParam(const AnfNodePtr &node) {
   if (node == nullptr) {
     lite::ReturnCode::GetSingleReturnCode()->UpdateReturnCode(lite::RET_NULL_PTR);

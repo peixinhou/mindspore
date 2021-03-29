@@ -23,7 +23,7 @@
 #include "src/param_value_lite.h"
 
 namespace mindspore::opt {
-ValueNodePtr CreateNewValueNode(void *attr, const schema::PrimitiveType &op_type) {
+ValueNodePtr OnnxPadAdjustPass::CreateNewValueNode(void *attr, const schema::PrimitiveType &op_type) {
   if (attr == nullptr) {
     MS_LOG(ERROR) << "attr is nullptr";
     return nullptr;
@@ -38,7 +38,7 @@ ValueNodePtr CreateNewValueNode(void *attr, const schema::PrimitiveType &op_type
   }
   return NewValueNode(std::shared_ptr<lite::PrimitiveC>(primitive_c));
 }
-ParameterPtr CreateNewParameter(const FuncGraphPtr &func_graph, const std::vector<int> &data) {
+ParameterPtr OnnxPadAdjustPass::CreateNewParameter(const FuncGraphPtr &func_graph, const std::vector<int> &data) {
   MS_ASSERT(func_graph != nullptr);
   MS_ASSERT(data != nullptr);
   auto parameter = func_graph->add_parameter();
@@ -74,7 +74,8 @@ ParameterPtr CreateNewParameter(const FuncGraphPtr &func_graph, const std::vecto
   return parameter;
 }
 
-CNodePtr NewReshapeOpNode(const FuncGraphPtr &func_graph, const AnfNodePtr input_node, const std::vector<int> &shape) {
+CNodePtr OnnxPadAdjustPass::NewReshapeOpNode(const FuncGraphPtr &func_graph, const AnfNodePtr input_node,
+                                             const std::vector<int> &shape) {
   auto attr = std::make_unique<schema::ReshapeT>();
   attr->format = schema::Format_NCHW;
   for (auto ele : shape) {
@@ -90,7 +91,8 @@ CNodePtr NewReshapeOpNode(const FuncGraphPtr &func_graph, const AnfNodePtr input
   return reshape;
 }
 
-CNodePtr NewTransposeOpNode(const FuncGraphPtr &func_graph, const AnfNodePtr input_node, std::vector<int> perm) {
+CNodePtr OnnxPadAdjustPass::NewTransposeOpNode(const FuncGraphPtr &func_graph, const AnfNodePtr input_node,
+                                               std::vector<int> perm) {
   auto attr = std::make_unique<schema::TransposeT>();
   for (auto ele : perm) {
     attr->perm.push_back(ele);
@@ -103,7 +105,7 @@ CNodePtr NewTransposeOpNode(const FuncGraphPtr &func_graph, const AnfNodePtr inp
   return reshape;
 }
 
-bool Process(const FuncGraphPtr &func_graph) {
+bool OnnxPadAdjustPass::Process(const FuncGraphPtr &func_graph) {
   MS_ASSERT(func_graph != nullptr);
   auto manager = func_graph->manager();
   MS_ASSERT(manager != nullptr);
