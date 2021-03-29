@@ -19,6 +19,29 @@
 #include <asm/hwcap.h>
 #endif
 #include "src/common/utils.h"
+#ifdef MS_COMPILE_IOS
+#include <mach/mach.h>
+#include <mach/machine.h>
+#include <mach/thread_act.h>
+#include <sys/sysctl.h>
+#include <sys/types.h>
+#include "TargetConditionals.h"
+#ifndef CPUFAMILY_ARM_HURRICANE
+#define CPUFAMILY_ARM_HURRICANE 0x67ceee93
+#endif
+#ifndef CPUFAMILY_ARM_MONSOON_MISTRAL
+#define CPUFAMILY_ARM_MONSOON_MISTRAL 0xe81e7ef6
+#endif
+#ifndef CPUFAMILY_ARM_VORTEX_TEMPEST
+#define CPUFAMILY_ARM_VORTEX_TEMPEST 0x07d34b9f
+#endif
+#ifndef CPUFAMILY_ARM_LIGHTNING_THUNDER
+#define CPUFAMILY_ARM_LIGHTNING_THUNDER 0x462504d2
+#endif
+#ifndef CPUFAMILY_ARM_FIRESTORM_ICESTORM
+#define CPUFAMILY_ARM_FIRESTORM_ICESTORM 0x1b588bb3
+#endif
+#endif
 
 namespace mindspore {
 namespace lite {
@@ -165,6 +188,16 @@ bool IsSupportFloat16() {
   } else {
     MS_LOG(DEBUG) << "Hw cap NOT support FP16, hwcap: 0x" << hwcap;
     status = false;
+  }
+#endif
+
+#ifdef MS_COMPILE_IOS
+  unsigned int value = 0;
+  size_t len = sizeof(value);
+  sysctlbyname("hw.cpufamily", &value, &len, NULL, 0);
+  if (value == CPUFAMILY_ARM_MONSOON_MISTRAL || value == CPUFAMILY_ARM_VORTEX_TEMPEST ||
+      value == CPUFAMILY_ARM_LIGHTNING_THUNDER || value == CPUFAMILY_ARM_FIRESTORM_ICESTORM) {
+    return true;
   }
 #endif
 #endif
