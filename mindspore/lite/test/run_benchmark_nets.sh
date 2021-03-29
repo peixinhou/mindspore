@@ -2047,6 +2047,10 @@ function Run_npu() {
 
     # Run npu converted models:
     while read line; do
+        model_line_info=${line}
+        if [[ $model_line_info == \#* ]]; then
+          continue
+        fi
         model_name=`echo ${line}|awk -F ' ' '{print $1}'`
         accuracy_limit=`echo ${line}|awk -F ' ' '{print $2}'`
         input_num=`echo ${line}|awk -F ' ' '{print $3}'`
