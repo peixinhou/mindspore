@@ -27,7 +27,6 @@ using mindspore::kernel::LiteKernel;
 using mindspore::lite::RET_ERROR;
 using mindspore::lite::RET_OK;
 namespace mindspore::kernel {
-#define NPU_MEMORY_MAX 200 * 1024 * 1024
 class NPUKernel : public LiteKernel {
  public:
   NPUKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
@@ -65,12 +64,6 @@ kernel::LiteKernel *NPUKernelCreator(const std::vector<lite::Tensor *> &inputs,
     free(opParameter);
     return nullptr;
   }
-  if (inputs[0]->Size() > NPU_MEMORY_MAX) {
-    MS_LOG(ERROR) << "Npu does not support input tensor size greater than 200MB";
-    free(opParameter);
-    return nullptr;
-  }
-
   auto *kernel = new (std::nothrow) T(opParameter, inputs, outputs, ctx, primitive);
   if (kernel == nullptr) {
     MS_LOG(ERROR) << "kernel " << opParameter->name_ << "is nullptr.";
