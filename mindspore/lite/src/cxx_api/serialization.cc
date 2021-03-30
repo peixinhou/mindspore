@@ -27,7 +27,6 @@
 #include "src/common/log_adapter.h"
 
 namespace mindspore {
-
 Graph Serialization::LoadModel(const void *model_data, size_t data_size, ModelType model_type) {
   if (model_type != kMindIR) {
     MS_LOG(ERROR) << "Unsupported IR.";

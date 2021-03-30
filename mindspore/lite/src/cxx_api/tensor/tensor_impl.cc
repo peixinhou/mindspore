@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 #include "src/cxx_api/tensor/tensor_impl.h"
 #include <numeric>
 #include <memory>
@@ -36,5 +37,4 @@ MSTensor::Impl::Impl(const std::string &name, enum DataType type, const std::vec
     lite_tensor_ = new (std::nothrow) lite::Tensor(name, static_cast<enum TypeId>(type), truncated_shape, data);
   }
 }
-
 }  // namespace mindspore

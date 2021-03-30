@@ -127,6 +127,9 @@ Status ModelImpl::Predict(const std::vector<MSTensor> &inputs, std::vector<MSTen
                       << ".";
     }
     if (user_input.MutableData() == nullptr) {
+      for (size_t j = 0; j < old_data.size(); j++) {
+        input_tensors.at(j)->set_data(old_data.at(j));
+      }
       MS_LOG(ERROR) << "Failed to get the data of input tensor.";
       return kLiteInputTensorError;
     }
@@ -286,5 +289,4 @@ Status ModelImpl::Resize(const std::vector<MSTensor> &inputs, const std::vector<
   auto ret = session_->Resize(inner_input, truncated_shape);
   return static_cast<StatusCode>(ret);
 }
-
 }  // namespace mindspore
