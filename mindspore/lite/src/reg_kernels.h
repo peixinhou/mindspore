@@ -49,7 +49,6 @@ extern void _kCPUkNumberTypeFloat32PrimitiveType_ConstantOfShape();
 extern void _kCPUkNumberTypeInt32PrimitiveType_ConstantOfShape();
 extern void _kCPUkNumberTypeInt64PrimitiveType_ConstantOfShape();
 extern void _kCPUkNumberTypeInt32PrimitiveType_Slice();
-extern void _kCPUkNumberTypeFloat16PrimitiveType_Slice();
 extern void _kCPUkNumberTypeFloat32PrimitiveType_Slice();
 extern void _kCPUkNumberTypeInt32PrimitiveType_Reshape();
 extern void _kCPUkNumberTypeFloat32PrimitiveType_Reshape();
@@ -82,6 +81,7 @@ extern void _kCPUkNumberTypeInt32PrimitiveType_Merge();
 
 // fp16
 #ifdef ENABLE_FP16
+extern void _kCPUkNumberTypeFloat16PrimitiveType_Slice();
 extern void _kCPUkNumberTypeFloat16PrimitiveType_Concat();
 extern void _kCPUkNumberTypeFloat16PrimitiveType_BiasAdd();
 extern void _kCPUkNumberTypeFloat16PrimitiveType_Crop();
@@ -277,7 +277,6 @@ extern void _kCPUkNumberTypeUInt8PrimitiveType_Cast();
 extern void _kCPUkNumberTypeInt8PrimitiveType_Cast();
 extern void _kCPUkNumberTypeInt32PrimitiveType_Cast();
 extern void _kCPUkNumberTypeBoolPrimitiveType_Cast();
-extern void _kCPUkNumberTypeFloat16PrimitiveType_Cast();
 extern void _kCPUkNumberTypeFloat32PrimitiveType_LshProjection();
 extern void _kCPUkNumberTypeInt32PrimitiveType_Fill();
 extern void _kCPUkNumberTypeFloat32PrimitiveType_Fill();
@@ -397,7 +396,6 @@ void RegisterKernels() {
   _kCPUkNumberTypeInt32PrimitiveType_ConstantOfShape();
   _kCPUkNumberTypeInt64PrimitiveType_ConstantOfShape();
   _kCPUkNumberTypeInt32PrimitiveType_Slice();
-  _kCPUkNumberTypeFloat16PrimitiveType_Slice();
   _kCPUkNumberTypeFloat32PrimitiveType_Slice();
   _kCPUkNumberTypeInt32PrimitiveType_Reshape();
   _kCPUkNumberTypeFloat32PrimitiveType_Reshape();
@@ -430,6 +428,7 @@ void RegisterKernels() {
 
 // fp16
 #ifdef ENABLE_FP16
+  _kCPUkNumberTypeFloat16PrimitiveType_Slice();
   _kCPUkNumberTypeFloat16PrimitiveType_Concat();
   _kCPUkNumberTypeFloat16PrimitiveType_BiasAdd();
   _kCPUkNumberTypeFloat16PrimitiveType_Crop();
@@ -625,7 +624,6 @@ void RegisterKernels() {
   _kCPUkNumberTypeInt8PrimitiveType_Cast();
   _kCPUkNumberTypeInt32PrimitiveType_Cast();
   _kCPUkNumberTypeBoolPrimitiveType_Cast();
-  _kCPUkNumberTypeFloat16PrimitiveType_Cast();
   _kCPUkNumberTypeFloat32PrimitiveType_LshProjection();
   _kCPUkNumberTypeInt32PrimitiveType_Fill();
   _kCPUkNumberTypeFloat32PrimitiveType_Fill();

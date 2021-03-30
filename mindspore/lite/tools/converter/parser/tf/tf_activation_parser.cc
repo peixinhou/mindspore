@@ -62,17 +62,16 @@ STATUS TFActivationParser::Parse(const tensorflow::NodeDef &tf_op,
   }
 
   primitive->value.type = schema::PrimitiveType_Activation;
-  primitive->value.value = attr.release();
   if (tf_op.op() == "LeakyRelu") {
-    auto attr_leaky_relu = std::make_unique<schema::LeakyReLUT>();
     tensorflow::AttrValue attr_value;
     if (!TensorFlowUtils::FindAttrValue(tf_op, "alpha", &attr_value)) {
       MS_LOG(ERROR) << "The attribute alpha should be specified.";
       return RET_ERROR;
     }
-    attr_leaky_relu->negativeSlope = attr_value.f();
-    primitive->value.type = schema::PrimitiveType_LeakyReLU;
-    primitive->value.value = attr_leaky_relu.release();
+    attr->alpha = attr_value.f();
+    primitive->value.value = attr.release();
+  } else {
+    primitive->value.value = attr.release();
   }
   *primitiveC = PrimitiveC::Create(primitive.release());
   if (*primitiveC == nullptr) {
