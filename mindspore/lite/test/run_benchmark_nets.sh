@@ -2309,16 +2309,6 @@ if [[ ${backend} == "all" || ${backend} == "npu" ]]; then
 fi
 
 # Check benchmark result and return value
-if [[ ${backend} == "all" || ${backend} == "x86" ]]; then
-      wait ${Run_x86_PID}
-      Run_x86_status=$?
-
-      if [[ ${Run_x86_status} != 0 ]];then
-          echo "Run_x86 failed"
-          cat ${run_x86_log_file}
-          isFailed=1
-      fi
-fi
 if [[ ${backend} == "all" || ${backend} == "x86-sse" ]]; then
       wait ${Run_x86_sse_PID}
       Run_x86_sse_status=$?
@@ -2336,6 +2326,16 @@ if [[ ${backend} == "all" || ${backend} == "x86-avx" ]]; then
       if [[ ${Run_x86_avx_status} != 0 ]];then
           echo "Run_x86 avx failed"
           cat ${run_x86_avx_log_file}
+          isFailed=1
+      fi
+fi
+if [[ ${backend} == "all" || ${backend} == "x86" ]]; then
+      wait ${Run_x86_PID}
+      Run_x86_status=$?
+
+      if [[ ${Run_x86_status} != 0 ]];then
+          echo "Run_x86 failed"
+          cat ${run_x86_log_file}
           isFailed=1
       fi
 fi
