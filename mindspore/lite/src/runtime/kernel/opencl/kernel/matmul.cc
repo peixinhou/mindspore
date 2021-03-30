@@ -227,7 +227,7 @@ kernel::LiteKernel *OpenCLMatMulKernelCreator(const std::vector<lite::Tensor *> 
                                               const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter,
                                               const lite::InnerContext *ctx, const kernel::KernelKey &desc,
                                               const mindspore::lite::PrimitiveC *primitive) {
-  kernel::OpenCLKernel *kernel;
+  kernel::OpenCLKernel *kernel = nullptr;
   bool infer_shape_done;
   if (primitive != nullptr) {
     infer_shape_done = primitive->infer_flag();

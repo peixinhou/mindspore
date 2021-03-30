@@ -480,7 +480,7 @@ kernel::LiteKernel *OpenCLConvolutionKernelCreator(const std::vector<lite::Tenso
                                                    const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter,
                                                    const lite::InnerContext *ctx, const kernel::KernelKey &desc,
                                                    const mindspore::lite::PrimitiveC *primitive) {
-  kernel::OpenCLKernel *kernel;
+  kernel::OpenCLKernel *kernel = nullptr;
   auto *conv_param = reinterpret_cast<ConvParameter *>(opParameter);
   bool infer_shape_done;
   if (primitive != nullptr) {
