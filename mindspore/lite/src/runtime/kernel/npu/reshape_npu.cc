@@ -1,5 +1,5 @@
 /**
- * Copyright 2020 Huawei Technologies Co., Ltd
+ * Copyright 2020-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,8 +24,18 @@ using mindspore::schema::PrimitiveType_Reshape;
 namespace mindspore::kernel {
 int ReshapeNPUKernel::IsSupport(const std::vector<lite::Tensor *> &inputs, const std::vector<lite::Tensor *> &outputs,
                                 OpParameter *opParameter) {
-  if (reshape_param_->shape_dim_ == 0) {
-    MS_LOG(ERROR) << "Npu reshape op only supports const shape.";
+  if (inputs.size() == 1 && reshape_param_->shape_dim_ == 0) {
+    MS_LOG(WARNING) << "Npu reshape op only supports const shape.";
+    return RET_ERROR;
+  }
+  if (inputs.size() == 2) {
+    auto shape_tensor = inputs.at(1);
+    if (!shape_tensor->IsConst()) {
+      MS_LOG(WARNING) << "Npu reshape op only supports const shape.";
+      return RET_ERROR;
+    }
+  } else {
+    MS_LOG(ERROR) << "npu reshape input size should be 1 or 2, got " << inputs.size();
     return RET_ERROR;
   }
   return RET_OK;
@@ -40,17 +50,21 @@ int ReshapeNPUKernel::SetNPUInputs(const std::vector<lite::Tensor *> &inputs,
     return RET_ERROR;
   }
   op_->set_input_x(*npu_inputs[0]);
-
-  shape_op_ = new (std::nothrow) hiai::op::Const(name_ + "_shape");
-  std::vector<int> shape;
-  for (int i = 0; i < reshape_param_->shape_dim_; i++) {
-    shape.push_back(reshape_param_->shape_[i]);
+  if (inputs.size() == 1) {
+    shape_op_ = new (std::nothrow) hiai::op::Const(name_ + "_shape");
+    std::vector<int> shape;
+    for (int i = 0; i < reshape_param_->shape_dim_; i++) {
+      shape.push_back(reshape_param_->shape_[i]);
+    }
+    ge::TensorDesc shape_tensor_desc(ge::Shape({reshape_param_->shape_dim_}), ge::FORMAT_NCHW, ge::DT_INT32);
+    ge::TensorPtr ai_shape_tensor = std::make_shared<hiai::Tensor>(shape_tensor_desc);
+    ai_shape_tensor->SetData(reinterpret_cast<uint8_t *>(shape.data()), reshape_param_->shape_dim_ * sizeof(int32_t));
+    shape_op_->set_attr_value(ai_shape_tensor);
+    op_->set_input_shape(*shape_op_);
+  } else {
+    op_->set_input_shape(*npu_inputs[1]);
   }
-  ge::TensorDesc shape_tensor_desc(ge::Shape({reshape_param_->shape_dim_}), ge::FORMAT_NCHW, ge::DT_INT32);
-  ge::TensorPtr ai_shape_tensor = std::make_shared<hiai::Tensor>(shape_tensor_desc);
-  ai_shape_tensor->SetData(reinterpret_cast<uint8_t *>(shape.data()), reshape_param_->shape_dim_ * sizeof(int32_t));
-  shape_op_->set_attr_value(ai_shape_tensor);
-  op_->set_input_shape(*shape_op_);
+
   return RET_OK;
 }
 
