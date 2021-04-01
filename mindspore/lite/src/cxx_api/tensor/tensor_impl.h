@@ -13,6 +13,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
+#ifndef MINDSPORE_LITE_SRC_CXX_API_TENSOR_TENSOR_IMPL_H
+#define MINDSPORE_LITE_SRC_CXX_API_TENSOR_TENSOR_IMPL_H
+
 #include <cstddef>
 #include <numeric>
 #include <memory>
@@ -142,5 +146,6 @@ class MSTensor::Impl {
   bool need_copy_ = true;
   bool from_session_ = false;
 };
-
 }  // namespace mindspore
+
+#endif  // MINDSPORE_LITE_SRC_CXX_API_TENSOR_TENSOR_IMPL_H

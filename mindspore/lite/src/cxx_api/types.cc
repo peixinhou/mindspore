@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 #include "include/api/types.h"
 #include <string.h>
 #include <limits.h>
@@ -23,7 +24,6 @@
 #include "src/common/log_adapter.h"
 
 namespace mindspore {
-
 class Buffer::Impl {
  public:
   Impl() : data_() { MS_LOG(ERROR) << "Unsupported feature."; }

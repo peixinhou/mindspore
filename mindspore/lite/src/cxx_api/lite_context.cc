@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 #include "include/api/lite_context.h"
 #include <string>
 #include <memory>
@@ -21,7 +22,6 @@
 #include "src/common/log_adapter.h"
 
 namespace mindspore {
-
 constexpr char kVendorName[] = "vendor_name";
 constexpr char kThreadNum[] = "thread_name";
 constexpr char kAllocator[] = "allocator";
@@ -299,5 +299,4 @@ int Context::GetNPUFrequency(const std::shared_ptr<Context> &context) {
   }
   return 3;
 }
-
 }  // namespace mindspore

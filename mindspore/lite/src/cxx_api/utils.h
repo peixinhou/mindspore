@@ -13,6 +13,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
+#ifndef MINDSPORE_LITE_SRC_CXX_API_UTILS_H
+#define MINDSPORE_LITE_SRC_CXX_API_UTILS_H
+
 #include <limits.h>
 #include <vector>
 #include "src/tensor.h"
@@ -45,5 +49,6 @@ static std::vector<int32_t> TruncateShape(const std::vector<int64_t> &shape, enu
   }
   return truncated_shape;
 }
-
 }  // namespace mindspore
+
+#endif  // MINDSPORE_LITE_SRC_CXX_API_UTILS_H

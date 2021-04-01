@@ -13,12 +13,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 #include "include/api/cell.h"
 #include "include/api/lite_context.h"
 #include "src/common/log_adapter.h"
 
 namespace mindspore {
-
 class GraphImpl {};
 
 std::vector<Output> CellBase::operator()(const std::vector<Input> &inputs) const {
@@ -92,5 +92,4 @@ InputAndOutput::InputAndOutput(const std::shared_ptr<CellBase> &cell, const std:
     : index_(-1) {
   MS_LOG(ERROR) << "Unsupported feature.";
 }
-
 }  // namespace mindspore
