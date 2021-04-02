@@ -1,5 +1,5 @@
 /**
- * Copyright 2020-2021 Huawei Technologies Co., Ltd
+ * Copyright 2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,22 +14,25 @@
  * limitations under the License.
  */
 
-#ifndef MINDSPORE_LITE_SRC_RUNTIME_KERNEL_NPU_RESHAPE_NPU_H_
-#define MINDSPORE_LITE_SRC_RUNTIME_KERNEL_NPU_RESHAPE_NPU_H_
+#ifndef MINDSPORE_LITE_SRC_RUNTIME_KERNEL_NPU_ARGMAX_NPU_H_
+#define MINDSPORE_LITE_SRC_RUNTIME_KERNEL_NPU_ARGMAX_NPU_H_
+
 #include <vector>
 #include "include/graph/op/all_ops.h"
-#include "nnacl/reshape_parameter.h"
+#include "include/graph/compatible/all_ops.h"
 #include "src/runtime/kernel/npu/npu_kernel.h"
+#include "nnacl/arg_min_max_parameter.h"
+
 namespace mindspore::kernel {
-class ReshapeNPUKernel : public NPUKernel {
+class ArgmaxNPUKernel : public NPUKernel {
  public:
-  ReshapeNPUKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
-                   const std::vector<lite::Tensor *> &outputs, const lite::InnerContext *ctx,
-                   const mindspore::lite::PrimitiveC *primitive)
+  ArgmaxNPUKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
+                  const std::vector<lite::Tensor *> &outputs, const lite::InnerContext *ctx,
+                  const mindspore::lite::PrimitiveC *primitive)
       : NPUKernel(parameter, inputs, outputs, ctx, primitive) {
-    reshape_param_ = reinterpret_cast<ReshapeParameter *>(parameter);
+    param_ = reinterpret_cast<ArgMinMaxParameter *>(parameter);
   }
-  ~ReshapeNPUKernel() override;
+  ~ArgmaxNPUKernel() override;
 
   int IsSupport(const std::vector<lite::Tensor *> &inputs, const std::vector<lite::Tensor *> &outputs,
                 OpParameter *opParameter) override;
@@ -38,9 +41,9 @@ class ReshapeNPUKernel : public NPUKernel {
   ge::Operator *GetNPUOp() override;
 
  private:
-  hiai::op::Reshape *op_ = nullptr;
-  hiai::op::Const *shape_op_ = nullptr;
-  ReshapeParameter *reshape_param_;
+  hiai::op::ArgMaxExt2 *op_ = nullptr;
+  hiai::op::Const *axis_const_ = nullptr;
+  ArgMinMaxParameter *param_;
 };
 }  // namespace mindspore::kernel
-#endif  // MINDSPORE_LITE_SRC_RUNTIME_KERNEL_NPU_RESHAPE_NPU_H_
+#endif  // MINDSPORE_LITE_SRC_RUNTIME_KERNEL_NPU_ARGMAX_NPU_H_
