@@ -29,6 +29,7 @@ class PadNPUKernel : public NPUKernel {
                const mindspore::lite::PrimitiveC *primitive)
       : NPUKernel(parameter, inputs, outputs, ctx, primitive) {
     pad_ = reinterpret_cast<const mindspore::lite::Pad *>(primitive);
+    param_ = reinterpret_cast<PadParameter *>(op_parameter_);
   }
   ~PadNPUKernel() override;
 
@@ -40,6 +41,8 @@ class PadNPUKernel : public NPUKernel {
 
  private:
   hiai::op::PadV2 *op_ = nullptr;
+  hiai::op::MirrorPad *mirror_op_ = nullptr;
+  PadParameter *param_;
   hiai::op::Const *paddings_ = nullptr;
   hiai::op::Const *constant_ = nullptr;
   const mindspore::lite::Pad *pad_;
