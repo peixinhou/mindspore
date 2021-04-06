@@ -25,8 +25,30 @@ using mindspore::schema::PrimitiveType_Pad;
 namespace mindspore::kernel {
 int PadNPUKernel::IsSupport(const std::vector<lite::Tensor *> &inputs, const std::vector<lite::Tensor *> &outputs,
                             OpParameter *opParameter) {
-  if (pad_->GetPaddingMode() != schema::PaddingMode_CONSTANT) {
-    MS_LOG(WARNING) << "NPU only support CONSTANT padding mode";
+  if (inputs.size() == 2) {
+    if (inputs[1]->data_c() == nullptr && inputs[1]->ElementsNum() != 8) {
+      MS_LOG(ERROR) << "pad input 2 nullptr or paddings size " << inputs[1]->ElementsNum() << " unsupported";
+      return RET_ERROR;
+    }
+    for (int i = 0; i < inputs[1]->ElementsNum(); i++) {
+      param_->paddings_[i] = static_cast<int *>(inputs[1]->data_c())[i];
+    }
+  } else if (inputs.size() == 1) {
+    if (pad_->GetPaddings().size() != 8) {
+      MS_LOG(WARNING) << "NPU only support paddings size 8";
+      return RET_ERROR;
+    }
+    for (int i = 0; i < pad_->GetPaddings().size(); i++) {
+      param_->paddings_[i] = pad_->GetPaddings()[i];
+    }
+  } else {
+    MS_LOG(ERROR) << "pad input size " << inputs.size() << " not supported";
+    return RET_ERROR;
+  }
+  if (pad_->GetPaddingMode() != schema::PaddingMode_CONSTANT &&
+      pad_->GetPaddingMode() != schema::PaddingMode_SYMMETRIC &&
+      pad_->GetPaddingMode() != schema::PaddingMode_REFLECT) {
+    MS_LOG(ERROR) << "pad npu not support mode " << pad_->GetPaddingMode();
     return RET_ERROR;
   }
   return RET_OK;
@@ -34,38 +56,61 @@ int PadNPUKernel::IsSupport(const std::vector<lite::Tensor *> &inputs, const std
 
 int PadNPUKernel::SetNPUInputs(const std::vector<lite::Tensor *> &inputs, const std::vector<lite::Tensor *> &outputs,
                                const std::vector<ge::Operator *> &npu_inputs) {
-  op_ = new (std::nothrow) hiai::op::PadV2(name_);
-  if (op_ == nullptr) {
-    MS_LOG(ERROR) << name_ << " op is nullptr";
-    return RET_ERROR;
-  }
-  int size = static_cast<int>(pad_->GetPaddings().size() / 2);
-  ge::TensorDesc padding_tensor_desc(ge::Shape({size, 2}), ge::FORMAT_NCHW, ge::DT_INT32);
+  ge::TensorDesc padding_tensor_desc(ge::Shape({4, 2}), ge::FORMAT_NCHW, ge::DT_INT32);
   ge::TensorPtr padding_tensor = std::make_shared<hiai::Tensor>(padding_tensor_desc);
-  padding_tensor->SetData(reinterpret_cast<uint8_t *>(pad_->GetPaddings().data()), 2 * size * sizeof(int));
+  padding_tensor->SetData(reinterpret_cast<uint8_t *>(param_->paddings_), 8 * sizeof(int));
   paddings_ = new hiai::op::Const(name_ + "paddings");
   paddings_->set_attr_value(padding_tensor);
+  if (pad_->GetPaddingMode() == schema::PaddingMode_CONSTANT) {
+    op_ = new (std::nothrow) hiai::op::PadV2(name_);
+    if (op_ == nullptr) {
+      MS_LOG(ERROR) << name_ << " op is nullptr";
+      return RET_ERROR;
+    }
 
-  ge::TensorDesc constant_values_tensor_desc(ge::Shape({1}), ge::FORMAT_NCHW, ge::DT_FLOAT);
-  ge::TensorPtr constant_values_tensor = std::make_shared<hiai::Tensor>(constant_values_tensor_desc);
-  vector<float> constant_values_data_value = {pad_->GetConstantValue()};
-  constant_values_tensor->SetData(reinterpret_cast<uint8_t *>(constant_values_data_value.data()), 1 * sizeof(float));
-  constant_ = new hiai::op::Const(name_ + "constant");
-  constant_->set_attr_value(constant_values_tensor);
+    ge::TensorDesc constant_values_tensor_desc(ge::Shape({1}), ge::FORMAT_NCHW, ge::DT_FLOAT);
+    ge::TensorPtr constant_values_tensor = std::make_shared<hiai::Tensor>(constant_values_tensor_desc);
+    vector<float> constant_values_data_value = {pad_->GetConstantValue()};
+    constant_values_tensor->SetData(reinterpret_cast<uint8_t *>(constant_values_data_value.data()), 1 * sizeof(float));
+    constant_ = new hiai::op::Const(name_ + "constant");
+    constant_->set_attr_value(constant_values_tensor);
 
-  op_->set_input_x(*npu_inputs[0]);
-  op_->set_input_constant_values(*constant_);
-  op_->set_input_paddings(*paddings_);
+    op_->set_input_x(*npu_inputs[0]);
+    op_->set_input_constant_values(*constant_);
+    op_->set_input_paddings(*paddings_);
+  } else {
+    mirror_op_ = new (std::nothrow) hiai::op::MirrorPad(name_);
+    if (mirror_op_ == nullptr) {
+      MS_LOG(ERROR) << name_ << " op is nullptr";
+      return RET_ERROR;
+    }
+    mirror_op_->set_input_x(*npu_inputs[0]);
+    mirror_op_->set_input_paddings(*paddings_);
+    if (pad_->GetPaddingMode() == schema::PaddingMode_SYMMETRIC) {
+      mirror_op_->set_attr_mode("SYMMETRIC");
+    } else {
+      mirror_op_->set_attr_mode("REFLECT");
+    }
+  }
 
   return RET_OK;
 }
 
-ge::Operator *mindspore::kernel::PadNPUKernel::GetNPUOp() { return this->op_; }
+ge::Operator *mindspore::kernel::PadNPUKernel::GetNPUOp() {
+  if (pad_->GetPaddingMode() == schema::PaddingMode_CONSTANT) {
+    return op_;
+  }
+  return mirror_op_;
+}
 
 PadNPUKernel::~PadNPUKernel() {
   if (op_ != nullptr) {
     delete op_;
     op_ = nullptr;
+  }
+  if (mirror_op_ != nullptr) {
+    delete mirror_op_;
+    mirror_op_ = nullptr;
   }
   if (paddings_ != nullptr) {
     delete paddings_;
